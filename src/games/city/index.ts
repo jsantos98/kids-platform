@@ -12,6 +12,7 @@ import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
 import { Particles } from './particles.js';
+import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 
 // ---- params ----
@@ -126,6 +127,7 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions);
 const hud = makeHUD();
 
 // ---- camera modes ----
@@ -235,6 +237,7 @@ const tick = (): void => {
   particles.updateDrift(dt, mode === 'drive', st.v, input.steer, player.car);
   particles.update(dt);
   chunks.updateLights(elapsed);
+  minimap.update(st.x, st.z, st.heading, elapsed);
 
   // hose / ladder aiming: wheel axis, A/D / arrows, or mouse cursor position
   let aimIn = 0;

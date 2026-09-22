@@ -170,12 +170,17 @@ const tick = (): void => {
   const input = readDriveInput();
   const st = player.state;
 
-  // physics + collision
-  const boxes = chunks.boxesNear(st.x, st.z);
-  const step = physicsStep(player, input, dt, boxes);
-  if (step.crashed) {
-    audio.thud();
-    toast = '';
+  // physics + collision (frozen during the mini-scenes: the truck stays put
+  // until the fire is out / the cat is down)
+  if (mode === 'drive' || player.crashT > 0) {
+    const boxes = chunks.boxesNear(st.x, st.z);
+    const step = physicsStep(player, input, dt, boxes);
+    if (step.crashed) {
+      audio.thud();
+      toast = '';
+    }
+  } else {
+    st.v = 0;
   }
 
   player.car.position.set(st.x, 0, st.z);

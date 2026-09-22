@@ -152,8 +152,19 @@ const totals = loadTotals();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
 
+// ?livertest=1: teleport next to the first cat -> ladder scene
+if (q.get('livertest') === '1') {
+  const cp = missions.objectives.find(o => o.type === 'cat');
+  if (cp) {
+    player.state.x = cp.pos.x + 6;
+    player.state.z = cp.pos.z + 4;
+    ladderSession = ladderMod.beginLadder(scene, cp, player.car);
+    mode = 'ladder';
+  }
+}
+
 // ---- main loop ----
-renderer.setAnimationLoop(() => {
+const tick = (): void => {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
   const input = readDriveInput();
@@ -181,6 +192,16 @@ renderer.setAnimationLoop(() => {
     const camT = player.car.position.clone().addScaledVector(fwd, -8.5).add(new THREE.Vector3(0, 11, 0));
     camera.position.lerp(camT, Math.min(1, dt * 3));
     camera.lookAt(fp.x, 0.8, fp.z);
+  } else if (mode === 'ladder' && ladderSession) {
+    // dedicated ladder view: broadside from the road side of the cat tree —
+    // the cat on its branch, the sliding ladder and the truck all in profile
+    const fp = ladderSession.obj.pos;
+    const toCross = new THREE.Vector3(ladderSession.obj.gx - fp.x, 0, ladderSession.obj.gz - fp.z).normalize();
+    const camT = fp.clone().addScaledVector(toCross, 7).add(new THREE.Vector3(0, 3.4, 0));
+    camT.lerp(player.car.position, 0.25);
+    camT.y = Math.max(camT.y, 3.2);
+    camera.position.lerp(camT, Math.min(1, dt * 3));
+    camera.lookAt(fp.x, 2.1, fp.z);
   } else if (camMode === 'cab') {
     camera.position.set(st.x + fwd.x * V.cabF, V.cabY, st.z + fwd.z * V.cabF);
     camera.lookAt(st.x + fwd.x * 25, 1.4, st.z + fwd.z * 25);
@@ -327,7 +348,20 @@ renderer.setAnimationLoop(() => {
     document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
   }
-});
+};
+renderer.setAnimationLoop(tick);
+if (q.get('still') === '1') {
+  // background tabs suspend rAF — drive frames off a timer so ?still captures
+  // show the settled state even when the pane isn't visible
+  let frames = 0;
+  const iv = setInterval(() => {
+    tick();
+    if (++frames >= 180) {
+      renderer.setAnimationLoop(null);
+      clearInterval(iv);
+    }
+  }, 16);
+}
 
 // dev capture (?still=1 / ?capture=name.png)
 setupDevCapture(renderer, scene, camera);

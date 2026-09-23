@@ -132,6 +132,7 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       railVertical ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
   } else if (armCount >= 3) {
     bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+    if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
   } else if (armCount === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) {
     // straight-through node
     const alongX = !!(a[0] && a[1]);
@@ -217,6 +218,20 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       }
       boxes.push({ x1: tx - 0.55, x2: tx + 0.55, z1: tz - 0.55, z2: tz + 0.55, small: 1 });
     }
+  }
+
+  /** traffic circle: lighter circular carriageway with a painted ring,
+   * kerbed grass island with a tree, pole collision */
+  function bakeRoundabout(x: number, z: number): void {
+    B.cyl(4.6, 4.6, 0.06, 20, 0x9aa1ab, x, 0.14, z);       // circular carriageway
+    B.cyl(4.34, 4.34, 0.065, 20, 0xe8e4d8, x, 0.1425, z);  // painted ring
+    B.cyl(4.1, 4.1, 0.07, 20, 0x9aa1ab, x, 0.145, z);
+    B.cyl(1.4, 1.6, 0.22, 14, 0x8f97a3, x, 0.21, z);       // kerb
+    B.cyl(1.3, 1.3, 0.24, 14, 0xa4cf85, x, 0.29, z);       // grass island
+    if (TPL.trees.length) {
+      bakeModel(B, pick(r, TPL.trees), x, 0.41, z, r() * Math.PI * 2, 2.8 + r() * 0.8);
+    }
+    boxes.push({ x1: x - 1.4, x2: x + 1.4, z1: z - 1.4, z2: z + 1.4, small: 1 });
   }
 
   function bakeParkedCar(x: number, z: number, ry: number): void {

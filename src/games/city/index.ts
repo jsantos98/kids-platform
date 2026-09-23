@@ -10,6 +10,7 @@ import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
 import { createSea } from './sea.js';
+import { createBridge, BRIDGE_BOXES } from './bridge.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import type { BakedTemplate } from '../../engine/assets.js';
@@ -146,6 +147,8 @@ for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
 
 // ---- the sea: waving water, surf, pier and Kenney watercraft sailing around ----
 const sea = await createSea(scene);
+// ---- the bridge: causeway to the picnic island off the south shore ----
+createBridge(scene);
 
 // ---- water jet + steam (spray mini-scene visuals) ----
 const jet = new THREE.Mesh(
@@ -332,7 +335,7 @@ const tick = (): void => {
   // physics + collision (frozen during the mini-scenes: the truck stays put
   // until the fire is out / the cat is down)
   if (mode === 'drive' || player.crashT > 0) {
-    const boxes = chunks.boxesNear(st.x, st.z);
+    const boxes = chunks.boxesNear(st.x, st.z).concat(BRIDGE_BOXES);
     const step = physicsStep(player, input, dt, boxes);
     if (step.crashed) {
       audio.thud();

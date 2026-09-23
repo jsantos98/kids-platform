@@ -20,12 +20,17 @@ function waveAt(x: number, z: number, t: number): number {
        + 0.018 * Math.sin(0.05 * (x + z) + t * 0.5);
 }
 
-// offshore lane: rounded rectangle 52 m beyond the island edge, ~3 m spacing
+// offshore lane: rounded rectangle 52 m beyond the island edge, ~3 m spacing.
+// The south run detours around the bridge + picnic island (bridge.ts).
 const LO = -26, HI = ISLAND + 26, CUT = 26;
 const CORNERS: Array<{ x: number; z: number }> = [
   { x: LO + CUT, z: LO }, { x: HI - CUT, z: LO },
   { x: HI, z: LO + CUT }, { x: HI, z: HI - CUT },
-  { x: HI - CUT, z: HI }, { x: LO + CUT, z: HI },
+  { x: HI - CUT, z: HI },
+  // swing wide around the bridge island before rejoining the south run
+  { x: 292, z: HI }, { x: 262, z: HI + 38 }, { x: 248, z: HI + 58 },
+  { x: 120, z: HI + 58 }, { x: 106, z: HI + 38 }, { x: 76, z: HI },
+  { x: LO + CUT, z: HI },
   { x: LO, z: HI - CUT }, { x: LO, z: LO + CUT },
 ];
 function buildLoop(): Array<{ x: number; z: number }> {

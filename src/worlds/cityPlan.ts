@@ -48,6 +48,8 @@ export interface CityPlan {
   arms(i: number, j: number): boolean[];
   /** ≥3 arms → traffic lights */
   signalized(i: number, j: number): boolean;
+  /** junction is a traffic circle (no lights, central island) */
+  roundabout(i: number, j: number): boolean;
   district(cx: number, cz: number): District;
   /** lots whose centre falls inside chunk (cx, cz) */
   lots(cx: number, cz: number): Lot[];
@@ -122,7 +124,23 @@ function buildPlan(seed: number): CityPlan {
   const armDirs = (i: number, j: number) => ({
     w: segH(j, i - 1), e: segH(j, i), n: segV(i, j - 1), s: segV(i, j),
   });
-  const signalized = (i: number, j: number) => arms(i, j).length >= 3;
+
+  // ---- 3b. roundabouts: a seeded couple of junctions become traffic
+  // circles instead of signalized crossings (no lights there) ----
+  const roundaboutSet = new Set<string>();
+  {
+    const cands: Array<[number, number]> = [];
+    for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
+      if (arms(i, j).length >= 3 && !rail.nodeOnRoute(i, j)) cands.push([i, j]);
+    }
+    for (let k = cands.length - 1; k > 0; k--) {
+      const m = (r() * (k + 1)) | 0;
+      [cands[k], cands[m]] = [cands[m], cands[k]];
+    }
+    for (const [i, j] of cands.slice(0, 1 + ((r() * 2) | 0))) roundaboutSet.add(key(i, j));
+  }
+  const roundabout = (i: number, j: number): boolean => roundaboutSet.has(key(i, j));
+  const signalized = (i: number, j: number) => arms(i, j).length >= 3 && !roundabout(i, j);
 
   // ---- 4. districts ----
   const grid: District[][] = Array.from({ length: 6 }, () => Array<District>(6).fill('urban'));
@@ -254,7 +272,7 @@ function buildPlan(seed: number): CityPlan {
 
   const plan: CityPlan = {
     seed,
-    lineH, lineV, segH, segV, arms, signalized, district,
+    lineH, lineV, segH, segV, arms, signalized, roundabout, district,
     lots: (cx, cz) => lotsByChunk.get(key(cx, cz)) ?? [],
   };
   return plan;

@@ -12,7 +12,7 @@ import type { Missions } from './missions.js';
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
 
 const SIZE = 256;        // canvas backing-store pixels
-const VIEW = 440;        // world metres across (whole island + sea margin)
+const VIEW = 540;        // world metres across (island + sea + bridge island)
 const CENTER = 192;      // island centre (6×6 chunks of 64 m)
 
 export class Minimap {
@@ -70,6 +70,14 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
 
+    // the bridge + picnic island off the south shore
+    ctx.fillStyle = '#c8b98e';
+    ctx.fillRect(tx(164), ty(421), 40 * scale, 40 * scale);
+    ctx.fillStyle = '#a9c88b';
+    ctx.fillRect(tx(166), ty(423), 36 * scale, 36 * scale);
+    ctx.fillStyle = '#8f97a3';
+    ctx.fillRect(tx(179), ty(381), 11 * scale, 42 * scale);
+
     // race circuit outline (world-fixed)
     ctx.strokeStyle = '#5a6474';
     ctx.lineWidth = 2.5;
@@ -81,9 +89,19 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
 
-    // traffic lights: one dot per real intersection
+    // traffic lights: one dot per real intersection (roundabouts get a ring)
     for (let i = 1; i <= 5; i++) {
       for (let j = 1; j <= 5; j++) {
+        if (plan.roundabout(i, j)) {
+          ctx.fillStyle = '#a4cf85';
+          ctx.beginPath();
+          ctx.arc(tx(i * this.CH), ty(j * this.CH), 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fffdf8';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          continue;
+        }
         if (!this.grid.cross(i, j)) continue;
         const st = lightState(i, j, elapsed);
         ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';

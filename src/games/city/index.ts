@@ -10,6 +10,7 @@ import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
 import { PatrolHeli } from './patrol.js';
+import { Pedestrians } from './pedestrians.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
@@ -135,6 +136,9 @@ const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/fir
 // circles the neighbourhood while the kid plays the fire truck ----
 const trains = new Trains(scene, 64);
 const patrol = V.fly ? null : new PatrolHeli(scene);
+const pedestrians = new Pedestrians(scene, roadGrid, 64, 14);
+// dev probe: current pedestrian spots (via console/window)
+(window as unknown as { __peds: () => unknown }).__peds = () => pedestrians.list();
 
 // ---- particles ----
 const particles = new Particles(scene);
@@ -279,6 +283,7 @@ const tick = (): void => {
   // ambient life: the trains and the patrol helicopter
   trains.update(elapsed, st.x, st.z);
   patrol?.update(dt, elapsed, st.x, st.z);
+  pedestrians.update(dt, st.x, st.z, st.x, st.z);
 
   // ambient life
   traffic.update(dt, elapsed, player.car.position);

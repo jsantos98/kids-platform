@@ -97,3 +97,30 @@ export class Baked {
     return m;
   }
 }
+
+/** Merge an object tree into a single vertex-colored mesh (one draw call). */
+export function bakeObjectToMesh(g: THREE.Object3D): THREE.Mesh {
+  const b = new Baked();
+  g.updateMatrixWorld(true);
+  g.traverse(node => {
+    if (!(node instanceof THREE.Mesh) || !node.geometry) return;
+    let geo = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();
+    for (const name of Object.keys(geo.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') geo.deleteAttribute(name);
+    }
+    const mesh = node as THREE.Mesh;
+    const std = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshLambertMaterial;
+    const col = std && std.color ? std.color : new THREE.Color(0x888888);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      colors[i * 3] = col.r;
+      colors[i * 3 + 1] = col.g;
+      colors[i * 3 + 2] = col.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.applyMatrix4(node.matrixWorld);
+    b.raw(geo);
+  });
+  return b.build();
+}

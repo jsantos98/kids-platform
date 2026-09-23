@@ -341,6 +341,14 @@ function buildPlan(bx: number, by: number): CityPlan {
   const armsCount = (i: number, j: number) => arms(i, j).length;
 
   const crossings: Crossing[] = [];
+  // arc position of every rail sample — the deformed polyline is NOT evenly
+  // spaced (crossing pins cram samples together), so a linear index-to-arc
+  // map would misplace crossings and mistime the barriers
+  const railCum: number[] = [0];
+  for (let k = 1; k <= rail.pts.length; k++) {
+    const a2 = rail.pts[k - 1], b2 = rail.pts[k % rail.pts.length];
+    railCum.push(railCum[k - 1] + Math.hypot(b2.x - a2.x, b2.z - a2.z));
+  }
   const collectCrossings = (horiz: boolean, line: number, a: number, b: number): void => {
     // true crossings only: sample spans that actually cross the street line
     // (a rail running alongside within a few metres is not a crossing)
@@ -355,7 +363,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       const x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t;
       const along = horiz ? x : z;
       if (along < a + 11 || along > b - 11) continue;
-      hits.push({ x, z, d: ((k + t) / pts.length) * rail.total });
+      hits.push({ x, z, d: railCum[k] + t * (railCum[k + 1] - railCum[k]) });
     }
     hits.sort((u, v) => (horiz ? u.x - v.x : u.z - v.z));
     let cluster: typeof hits = [];

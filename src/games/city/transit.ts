@@ -184,8 +184,8 @@ export class Transit {
     const spots: Array<[number, number, number]> = alongX
       ? [[c.x - 9.4, c.z - 7.6, 0], [c.x - 9.4, c.z + 7.6, Math.PI],
          [c.x + 9.4, c.z - 7.6, 0], [c.x + 9.4, c.z + 7.6, Math.PI]]
-      : [[c.x - 7.6, c.z - 9.4, Math.PI / 2], [c.x + 7.6, c.z - 9.4, Math.PI / 2],
-         [c.x - 7.6, c.z + 9.4, -Math.PI / 2], [c.x + 7.6, c.z + 9.4, -Math.PI / 2]];
+      : [[c.x - 7.6, c.z - 9.4, Math.PI / 2], [c.x + 7.6, c.z - 9.4, -Math.PI / 2],
+         [c.x - 7.6, c.z + 9.4, Math.PI / 2], [c.x + 7.6, c.z + 9.4, -Math.PI / 2]];
     const lamps: THREE.Mesh[][] = [[], [], [], []];
     const arms: THREE.Group[] = [];
     for (let i = 0; i < spots.length; i++) {

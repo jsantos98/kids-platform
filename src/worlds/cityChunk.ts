@@ -8,6 +8,8 @@ import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { raceZoneChunk, raceTiles, tileCenter, RACE_TILE } from './racetrack.js';
+import { RoadGrid } from './roadGrid.js';
+import { railRouteFor } from './railRoute.js';
 
 export const WORLD_CHUNKS = 6; // island is 6×6 chunks = 384 × 384 m
 
@@ -111,28 +113,42 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
 
   // roads along this chunk's south (z=Z0) and west (x=X0) grid lines.
   // tile: road surface at model y=0, raised sidewalk strips to y=0.02 — at 10 m
-  // scale the curbs stand 0.2 proud; sit the surface just above the slab top
+  // scale the curbs stand 0.2 proud; sit the surface just above the slab top.
+  // The seeded railway replaces the road on its corridors; where a rail passes
+  // a road node, a level-crossing tile joins the two.
   const TS = 10, TY = 0.11;
+  const grid = new RoadGrid();
+  const route = railRouteFor(seed);
+  const roadS = !route.edgeH(cz, cx);
+  const roadW = !route.edgeV(cx, cz);
   for (let k = 0; k < 6; k++) {
     const c = TS / 2 + k * TS;
-    bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
-    bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
+    if (roadS) bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
+    if (roadW) bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
   }
-  bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+  if (route.nodeOnRoute(cx, cz) && grid.cross(cx, cz)) {
+    // road node on the railway: a level-crossing tile (road across the rails).
+    // Rails running north–south → the crossing's road runs east–west.
+    const railVertical = route.edgeV(cx, cz) || route.edgeV(cx, cz - 1);
+    bakeModel(B, TPL.roadCrossing, X0, TY, Z0,
+      railVertical ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
+  } else {
+    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+  }
   // traffic-light corners: the working lights are dynamic objects added by the
   // game (traffic.ts); chunks only keep their collision boxes
   for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
     boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
   }
-  // street lamps (city streets only)
+  // street lamps (city streets only, and only where the road remains)
   if (biome === 'city') {
     for (let d = 10; d < CH; d += 18) {
       if (TPL.lightCurved) {
-        bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
-        bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
+        if (roadS) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
+        if (roadW) bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
       }
-      boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
-      boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
+      if (roadS) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
+      if (roadW) boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
     }
   }
 

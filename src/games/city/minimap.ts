@@ -5,6 +5,7 @@ import { lightState } from './lights.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { racePath } from '../../worlds/racetrack.js';
+import { railRouteFor } from '../../worlds/railRoute.js';
 import type { Missions } from './missions.js';
 
 const SIZE = 256;        // canvas backing-store pixels
@@ -48,6 +49,17 @@ export class Minimap {
       ctx.moveTo(m, ty(0)); ctx.lineTo(m, ty(384));
       ctx.moveTo(tx(0), ty(c)); ctx.lineTo(tx(384), ty(c));
     }
+    ctx.stroke();
+
+    // the railway: the seeded procedural loop
+    ctx.strokeStyle = '#7a6248';
+    ctx.lineWidth = 3.4 * scale;
+    ctx.beginPath();
+    routePts(this.seed).forEach((p, k) => {
+      const x = tx(p.x), y = ty(p.z);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
     ctx.stroke();
 
     // race circuit outline (world-fixed)
@@ -115,6 +127,11 @@ export class Minimap {
 }
 
 // per-chunk ground colour for the minimap (slab colour per island biome)
+function routePts(seed: number): Array<{ x: number; z: number }> {
+  const pts = railRouteFor(seed).pts;
+  return pts.filter((_, k) => k % 3 === 0);
+}
+
 function chunkGroundColorHex(cx: number, cz: number, seed: number): string {
   void seed;
   if (cx >= 4 && cz >= 4) return '#c9ccd6';   // race zone (2×2 apron)

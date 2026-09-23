@@ -16,6 +16,7 @@ import type { BakedTemplate } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
+import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
@@ -71,6 +72,7 @@ addEventListener('pointerdown', () => audio.unlock());
 // world falls back to the procedural pastel generator.
 const KIT = '/assets/kenney/city';
 const RACEKIT = '/assets/kenney/racing';
+const TRAINKIT = '/assets/kenney/train';
 const ROADTINT = { tint: [0.55, 0.57, 0.63] as [number, number, number] };
 const KITDEFS: Record<string, Parameters<typeof prepBakedModels>[0][string]> = {};
 for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`];
@@ -100,6 +102,7 @@ Object.assign(KITDEFS, {
   'race-corner': [`${RACEKIT}/track-corner.glb`, `${RACEKIT}/Textures/colormap.png`],
   'race-finish': [`${RACEKIT}/track-finish.glb`, `${RACEKIT}/Textures/colormap.png`],
   'race-bump': [`${RACEKIT}/track-bump.glb`, `${RACEKIT}/Textures/colormap.png`],
+  'rail-straight': [`${TRAINKIT}/railroad-straight.glb`, `${TRAINKIT}/Textures/colormap.png`],
 });
 await prepBakedModels(KITDEFS).catch(() => {});
 // dev probe: ?debugbake=1 exposes which templates registered
@@ -118,19 +121,6 @@ for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
 
 // ---- the sea: waving water, surf, pier and Kenney watercraft sailing around ----
 const sea = await createSea(scene);
-if (q.get('debugsea') === '1') {
-  const v = new THREE.Vector3();
-  (window as unknown as { __dbg: unknown }).__dbg = {
-    sea,
-    scene,
-    camera,
-    renderer,
-    probe: (x: number, y: number, z: number) => {
-      const out = v.set(x, y, z).project(camera);
-      return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
-    },
-  };
-}
 
 // ---- water jet + steam (spray mini-scene visuals) ----
 const jet = new THREE.Mesh(
@@ -161,11 +151,28 @@ if (q.get('spraytest') === '1') {
 
 // ---- traffic ----
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : []);
+const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : [], P.seed);
 
 // ---- ambient life: several trains on the rail corridors; a patrol heli
 // circles the neighbourhood while the kid plays the fire truck ----
-const trains = new Trains(scene, 64);
+const trains = new Trains(scene, P.seed);
+
+// dev probe: ?debugsea=1 exposes scene handles for verification
+if (q.get('debugsea') === '1') {
+  const v = new THREE.Vector3();
+  (window as unknown as { __dbg: unknown }).__dbg = {
+    sea,
+    scene,
+    camera,
+    renderer,
+    trains,
+    route: railRouteFor(P.seed),
+    probe: (x: number, y: number, z: number) => {
+      const out = v.set(x, y, z).project(camera);
+      return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
+    },
+  };
+}
 const patrol = V.fly ? null : new PatrolHeli(scene);
 // ---- pets: cube pets from the Kenney kit wander the sidewalks too ----
 const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];

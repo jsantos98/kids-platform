@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { makeCar } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { railRouteFor } from '../../worlds/railRoute.js';
 import { lightState, STOP_LINE } from './lights.js';
 
 const MODELS = [
@@ -27,7 +28,8 @@ const j0 = (r: () => number, amp: number) => (r() - 0.5) * 2 * amp;
 export class Traffic {
   private cars: TrafficCar[] = [];
 
-  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8, extraModels: string[] = []) {
+  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8, extraModels: string[] = [],
+              private seed = 0) {
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
@@ -56,6 +58,17 @@ export class Traffic {
     } else {
       c.position.set(g - 2.3 * c.userData.sign, 0, player.z + j0(Math.random, 70));
       c.rotation.y = c.userData.sign > 0 ? 0 : Math.PI;
+    }
+    // keep cars off the rail corridors (a nudge along the line is enough)
+    if (this.seed) {
+      const route = railRouteFor(this.seed);
+      if (axis0) {
+        if (route.edgeH(Math.round(c.position.z / this.CH), Math.floor(c.position.x / this.CH))) {
+          c.position.x += this.CH / 2;
+        }
+      } else if (route.edgeV(Math.round(c.position.x / this.CH), Math.floor(c.position.z / this.CH))) {
+        c.position.z += this.CH / 2;
+      }
     }
   }
 

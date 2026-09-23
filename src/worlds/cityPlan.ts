@@ -332,8 +332,8 @@ function buildPlan(bx: number, by: number): CityPlan {
         if ((pa - c) * (qa - c) >= 0) continue;
         const t = (c - pa) / (qa - pa);
         const along = horiz ? p.x + (q.x - p.x) * t : p.z + (q.z - p.z) * t;
-        if (along < a + 18 || along > b - 18) continue;
-        return true;
+        if (along >= a + 18 && along <= b - 18) continue; // mid-block: fine
+        return true; // node-adjacent: the barriers would stand in a junction
       }
       return false;
     };
@@ -345,6 +345,9 @@ function buildPlan(bx: number, by: number): CityPlan {
       const [i, j] = k.split(',').map(Number);
       if (nodeClash(false, i, j * CH, (j + 1) * CH)) segVSet.delete(k);
     }
+    // deletions can strand a closed cycle away from the web — prune again
+    // so every island keeps ONE connected street network
+    pruneDisconnected(segHSet, segVSet);
   }
 
   // ---- 5. no dead ends: a road may only stop where it meets a cross street.
@@ -436,10 +439,16 @@ function buildPlan(bx: number, by: number): CityPlan {
     const a2 = rail.pts[k - 1], b2 = rail.pts[k % rail.pts.length];
     railCum.push(railCum[k - 1] + Math.hypot(b2.x - a2.x, b2.z - a2.z));
   }
+  const exitLines = new Set([exN, exS, exW, exE]);
   const collectCrossings = (horiz: boolean, line: number, a: number, b: number): void => {
     // true crossings only: sample spans that actually cross the street line
-    // (a rail running alongside within a few metres is not a crossing)
+    // (a rail running alongside within a few metres is not a crossing).
+    // Exit corridors are never dropped by the node-clash veto, so a crossing
+    // squeezed against one of their nodes is still recorded — barriers beat
+    // a bare crossing even if the post grazes the junction square.
     const c0 = line * CH;
+    const isExit = exitLines.has(line);
+    const mNode = isExit ? 0 : 18;
     const pts = rail.pts;
     const hits: Array<{ x: number; z: number; d: number }> = [];
     for (let k = 0; k < pts.length; k++) {
@@ -449,7 +458,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       const t = (c0 - pa) / (qa - pa);
       const x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t;
       const along = horiz ? x : z;
-      if (along < a + 18 || along > b - 18) continue;
+      if (along < a + mNode || along > b - mNode) continue;
       hits.push({ x, z, d: railCum[k] + t * (railCum[k + 1] - railCum[k]) });
     }
     hits.sort((u, v) => (horiz ? u.x - v.x : u.z - v.z));

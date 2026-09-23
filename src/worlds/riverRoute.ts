@@ -1,11 +1,17 @@
-// The river: a seeded, meandering ribbon of water flowing from the north shore
-// to the south shore of the island. Everything about it is decided here so the
+// The river: a seeded ribbon of water flowing from the north shore to the
+// south shore of the island. Everything about it is decided here so the
 // city plan (streets, lots, districts), the chunk baker and the transit layer
 // can all ask the same questions:
 //
 //   - where is the water?            near / inWater / distTo
 //   - where do roads cross it?       (bridges — the plan carves those)
 //   - what does the minimap draw?    pts
+//
+// Shape rules (R26): the river lives INSIDE one north-south corridor between
+// two lattice lanes, so it never crosses a north-south street and never runs
+// underneath one; it reaches the ocean on both ends; and at every east-west
+// street it is straightened to flow due south, so bridges always meet it at
+// a right angle — never 45 degrees.
 //
 // The river is drivable — it's a shallow ford. Trucks slow down and splash;
 // proper bridges carry the streets across.
@@ -14,6 +20,7 @@ import { makePath, type WorldPath } from './spline.js';
 import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X } from './world.js';
 
 const SPAWN = { x: CENTER, z: CENTER };
+const LANE = 64; // lattice spacing
 
 export interface RiverRoute {
   /** centreline path, north (z<0) to south (z>ISLAND) */
@@ -47,12 +54,16 @@ export function riverFor(seed: number): RiverRoute {
 }
 
 function buildRiver(seed: number): RiverRoute {
-  // rejection-sampled sine meander: x(z) = X0 + drift*z + waves, single-valued
+  // rejection-sampled wobble inside the chosen corridor
+  const lane = pickCorridor(seed);
   let samples: Array<{ x: number; z: number; w: number }> | null = null;
   for (let attempt = 0; attempt < 48 && !samples; attempt++) {
-    samples = tryRiver(rng(chunkSeed(seed, 0x71f3, attempt)));
+    samples = tryRiver(rng(chunkSeed(seed, 0x71f3, attempt)), lane);
   }
-  samples ??= fallbackRiver(seed);
+  samples ??= fallbackRiver(lane);
+  // two passes: the second flattens the residual slope the first one's
+  // blend windows leave a few metres off the line
+  samples = straightenAtStreets(straightenAtStreets(samples));
   const path = makePath(samples.map(p => ({ x: p.x, z: p.z })), false);
   const pts = path.pts.map(p => {
     // width swells gently along the run
@@ -74,33 +85,76 @@ function buildRiver(seed: number): RiverRoute {
   return route;
 }
 
-/** One candidate meander; null when it violates a hard constraint. */
-function tryRiver(r: () => number): Array<{ x: number; z: number; w: number }> | null {
-  const x0 = CENTER * 0.45 + r() * CENTER * 0.5; // north mouth, west of the bridge
-  const drift = -(0.10 + r() * 0.08);            // swings west as it flows south
-  const a1 = 30 + r() * 34, w1 = 0.006 + r() * 0.005, p1 = r() * Math.PI * 2;
-  const a2 = 12 + r() * 14, w2 = 0.013 + r() * 0.008, p2 = r() * Math.PI * 2;
+/** the north-south lane the river lives in: an interior corridor between two
+ * lattice columns, kept clear of the picnic causeway and the fire-station
+ * spawn. Inside it the river can never cross — or run beneath — a
+ * north-south street. */
+function pickCorridor(seed: number): number {
+  const r = rng(chunkSeed(seed, 0x71f5, 1));
+  const lanes: number[] = [];
+  for (let k = 1; k < WORLD_CHUNKS - 1; k++) {
+    const cx = k * LANE + LANE / 2;
+    if (Math.abs(cx - BRIDGE_X) < 100) continue;
+    if (Math.abs(cx - SPAWN.x) < 60) continue;
+    lanes.push(k);
+  }
+  return lanes.length ? lanes[(r() * lanes.length) | 0] : 3;
+}
+
+/** One candidate wobble; null when it escapes the corridor or fouls a guard.
+ * The wobble budget (±18 m around the lane centre) keeps water + banks at
+ * least ~13 m clear of both bounding lattice lines. */
+function tryRiver(r: () => number, lane: number): Array<{ x: number; z: number; w: number }> | null {
+  const cx0 = lane * LANE + LANE / 2;
+  const a1 = 5 + r() * 12, w1 = 0.006 + r() * 0.006, p1 = r() * Math.PI * 2;
+  const a2 = 2 + r() * 6, w2 = 0.015 + r() * 0.012, p2 = r() * Math.PI * 2;
+  if (a1 + a2 > 18) return null;
   const out: Array<{ x: number; z: number; w: number }> = [];
   for (let z = -30; z <= ISLAND + 30; z += 12) {
-    const x = x0 + drift * z + a1 * Math.sin(z * w1 + p1) + a2 * Math.sin(z * w2 + p2);
+    const x = cx0 + a1 * Math.sin(z * w1 + p1) + a2 * Math.sin(z * w2 + p2);
     out.push({ x, z, w: 0 });
   }
   for (const s of out) {
-    if (s.x < 34 || s.x > ISLAND - 34) return null;
+    if (s.x < lane * LANE + 13 || s.x > (lane + 1) * LANE - 13) return null;
     // keep clear of the fire-station spawn
     if (Math.hypot(s.x - SPAWN.x, s.z - SPAWN.z) < 44) return null;
-    // the bridge + picnic causeway hang off the south shore around BRIDGE_X
-    if (s.z > ISLAND - 70 && Math.abs(s.x - BRIDGE_X) < 46) return null;
   }
   return out;
 }
 
-function fallbackRiver(seed: number): Array<{ x: number; z: number; w: number }> {
-  const r = rng(chunkSeed(seed, 0x71f4, 7));
-  const p1 = r() * Math.PI * 2;
+/** at every east-west lattice line, straighten the flow to due south so a
+ * bridge there meets the water at a right angle. The blend window (±26 m)
+ * fades the straightening out; windows are 64 m apart so they never stack. */
+function straightenAtStreets(
+  samples: Array<{ x: number; z: number; w: number }>,
+): Array<{ x: number; z: number; w: number }> {
+  let cur = samples.map(p => ({ ...p }));
+  for (let j = 1; j < WORLD_CHUNKS; j++) {
+    const zj = j * LANE;
+    // the river's own x at this line (samples are 12 m apart in z)
+    let xc = cur[cur.length - 1].x;
+    for (let k = 0; k + 1 < cur.length; k++) {
+      if ((cur[k].z - zj) * (cur[k + 1].z - zj) <= 0) {
+        const f = (zj - cur[k].z) / ((cur[k + 1].z - cur[k].z) || 1);
+        xc = cur[k].x + (cur[k + 1].x - cur[k].x) * f;
+        break;
+      }
+    }
+    cur = cur.map(p => {
+      const t = Math.abs(p.z - zj) / 26;
+      if (t >= 1) return p;
+      const w = t * t * (3 - 2 * t); // smoothstep: tangent exactly vertical at zj
+      return { x: xc + (p.x - xc) * w, z: p.z, w: p.w };
+    });
+  }
+  return cur;
+}
+
+function fallbackRiver(lane: number): Array<{ x: number; z: number; w: number }> {
+  const cx0 = lane * LANE + LANE / 2;
   const out: Array<{ x: number; z: number; w: number }> = [];
   for (let z = -30; z <= ISLAND + 30; z += 12) {
-    out.push({ x: CENTER * 0.42 + 16 * Math.sin(z * 0.008 + p1), z, w: 0 });
+    out.push({ x: cx0 + 6 * Math.sin(z * 0.01 + 1.3), z, w: 0 });
   }
   return out;
 }

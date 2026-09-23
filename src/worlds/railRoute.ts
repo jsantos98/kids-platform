@@ -55,7 +55,7 @@ interface Attempt { control: Array<{ x: number; z: number }>; score: number; pat
 
 /** how clean a deformed route came out — mirrors the audit's own checks,
  * so a route is only ever shipped when the deformation provably worked */
-interface Quality { ride: number; skew: number; folds: number; bridge: number }
+interface Quality { ride: number; skew: number; folds: number; bridge: number; riverSkew: number }
 
 /**
  * Where the river passes within 8 m of a lattice street line, a road bridge
@@ -182,6 +182,7 @@ function shapeQuality(
   // scorer still prefers 24 m; this is the hard gate.) The water test uses
   // the bed's outer edge (halfAt + 2 m), matching the grid's rail stamp.
   let bridge = 0;
+  let riverSkew = 0;
   if (river) {
     let inRun = false;
     for (const pt of dense) {
@@ -194,15 +195,25 @@ function shapeQuality(
       if (dmin >= 9) { inRun = false; continue; }
       if (!inRun) { bridge++; inRun = true; }
     }
+    // R27: the trestle must meet the water at a right angle
+    for (const pt of dense) {
+      if (!river.inWater(pt.x, pt.z)) continue;
+      const near = river.path.nearest(pt.x, pt.z);
+      const nx = river.pts[near.i].h + Math.PI / 2;
+      let d = Math.abs(pt.h - nx) % Math.PI;
+      if (d > Math.PI / 2) d = Math.PI - d;
+      riverSkew = Math.max(riverSkew, d);
+    }
   }
-  return { ride, skew, folds, bridge };
+  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI };
 }
 
 const qualityBetter = (a: Quality, b: Quality): boolean =>
   a.folds !== b.folds ? a.folds < b.folds
     : a.bridge !== b.bridge ? a.bridge < b.bridge
       : a.ride !== b.ride ? a.ride < b.ride
-        : a.skew < b.skew;
+        : a.skew !== b.skew ? a.skew < b.skew
+          : a.riverSkew < b.riverSkew;
 
 function buildRoute(bx: number, by: number): RailRoute {
   const seed = citySeed(bx, by);
@@ -232,7 +243,7 @@ function buildRoute(bx: number, by: number): RailRoute {
       ranked.splice(i, 0, a);
       if (ranked.length > 16) ranked.pop();
     };
-    for (let attempt = 0; attempt < 80; attempt++) {
+    for (let attempt = 0; attempt < 120; attempt++) {
       const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt + round * 1000));
       const a = tryRoute(r, H, V, river, zones, mul);
       if (!a) continue;
@@ -243,7 +254,7 @@ function buildRoute(bx: number, by: number): RailRoute {
     for (const a of ranked) {
       const route = finalize(bx, by, a.control, a.path);
       const q = shapeQuality(route.path, H, V, river, zones);
-      if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
+      if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
     }
   }
@@ -252,7 +263,7 @@ function buildRoute(bx: number, by: number): RailRoute {
     const a = forcedRoute(seed);
     const route = finalize(bx, by, a.control, a.path);
     const q = shapeQuality(route.path, H, V, river, zones);
-    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
+    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
     if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
   }
   return fallback!.route;
@@ -341,6 +352,13 @@ function tryRoute(
       if (dmin < 24 * 24) {
         if (!inBridgeRun) { score += 120; inBridgeRun = true; }
       } else inBridgeRun = false;
+      // a trestle that would meet the water at a skew costs rank too — the
+      // perpendicular pin can only straighten so much after a bad approach
+      const near = river.path.nearest(p.x, p.z);
+      const nx = river.pts[near.i].h + Math.PI / 2;
+      let rd = Math.abs(p.h - nx) % Math.PI;
+      if (rd > Math.PI / 2) rd = Math.PI - rd;
+      if (rd > (30 * Math.PI) / 180) score += 8;
     } else inBridgeRun = false;
   }
   // a shallow line crossing means the rail rides the road corridor for tens
@@ -443,9 +461,11 @@ function deform(
   // BEFORE anything else — this early, the crossing pins re-square every
   // street approach the slide drags, so no skew survives
   const swung = riverSwing(pts, river, zones);
-  const lifted = clearancePush(swung, H, V);
+  const lifted = clearancePush(riverPerp(swung, river), H, V);
   const pushed = clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V);
-  const ironed = ironSpikes(clearancePush(roundCorners(pushed), H, V));
+  // the river pin gets the LAST word: street swings and pins upstream can
+  // drag a trestle off the perpendicular, and nothing downstream may undo it
+  const ironed = ironSpikes(clearancePush(roundCorners(riverPerp(pushed, river)), H, V));
   const cleaned = deSpikes(ironed);
   if (cleaned.length === ironed.length) return cleaned;
   // a fold was spliced out: its chord can cut a street approach askew or
@@ -459,13 +479,14 @@ function deform(
   return deSpikes(ironSpikes(clearancePush(roundCorners(clearancePush(repinned, H, V)), H, V)));
 }
 
-/** round off sharp turns: any corner turning more than ~38 degrees gets its
- * apex replaced by two points part-way along each leg (classic corner
- * cutting), iterated twice. Crossing walls keep their square run through
- * the asphalt — both corners of a wall cut alike and the stretch between
- * them is untouched — while pin kinks and splice remnants read as smooth
- * track instead of jagged zigzag. A clearance push afterwards guarantees a
- * cut can't dip the rail back onto asphalt. */
+/** round off sharp turns into real curves: any corner turning more than
+ * ~38 degrees has its apex replaced by a quadratic Bézier (entry, apex
+ * tangent point, exit) sampled every ~1.5 m — a 90-degree crossing wall
+ * gets a proper curve lead instead of a hard right angle, and pin kinks
+ * or splice remnants read as smooth track. Crossing walls keep their
+ * square run through the asphalt: both corners of a wall bow alike and
+ * the stretch between them is untouched. A clearance push afterwards
+ * guarantees a curve can't dip the rail back onto asphalt. */
 function roundCorners(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
   let cur = pts.map(p => ({ x: p.x, z: p.z }));
   for (let pass = 0; pass < 2; pass++) {
@@ -482,11 +503,20 @@ function roundCorners(pts: Array<{ x: number; z: number }>): Array<{ x: number; 
         turn = Math.abs(t2 - t1);
         if (turn > Math.PI) turn = Math.PI * 2 - turn;
       }
-      if (turn < MIN_TURN || l1 < 1 || l2 < 1) { out.push(b); continue; }
-      // cut ~32% along each leg, capped at 1.8 m so gentle bends barely move
-      const f = Math.min(0.32, 1.8 / l1, 1.8 / l2);
-      out.push({ x: b.x + (a.x - b.x) * f, z: b.z + (a.z - b.z) * f });
-      out.push({ x: b.x + (c.x - b.x) * f, z: b.z + (c.z - b.z) * f });
+      if (turn < MIN_TURN || l1 < 2 || l2 < 2) { out.push(b); continue; }
+      // tangent length along each leg: ~40% of the leg, capped at 7 m, so
+      // the curve radius scales with the corner it rounds
+      const d1 = Math.min(0.4 * l1, 7), d2 = Math.min(0.4 * l2, 7);
+      const p1 = { x: b.x + (a.x - b.x) * (d1 / l1), z: b.z + (a.z - b.z) * (d1 / l1) };
+      const p2 = { x: b.x + (c.x - b.x) * (d2 / l2), z: b.z + (c.z - b.z) * (d2 / l2) };
+      const n = Math.max(2, Math.ceil((d1 + d2) / 1.5));
+      for (let q = 0; q < n; q++) {
+        const t = q / n, u = 1 - t;
+        out.push({
+          x: u * u * p1.x + 2 * u * t * b.x + t * t * p2.x,
+          z: u * u * p1.z + 2 * u * t * b.z + t * t * p2.z,
+        });
+      }
       changed = true;
     }
     cur = out;
@@ -577,8 +607,62 @@ function ironSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z:
   return cur;
 }
 
+/** the rail must cross the river at a right angle — a trestle meeting the
+ * water at 45 degrees reads broken, and one day bridges will span it.
+ * Every in-water stretch is pinned ONTO ONE LINE: the river's normal
+ * through the stretch midpoint's centreline point (weight 1 — the whole
+ * trestle ends up dead straight across the water, however riverSwing
+ * sheared it), with a cosine fade over 8 samples beyond the water so the
+ * approach merges smoothly into the rest of the loop. */
+function riverPerp(
+  pts: Array<{ x: number; z: number }>,
+  river: RiverRoute,
+): Array<{ x: number; z: number }> {
+  const N = pts.length;
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let pass = 0; pass < 3; pass++) {
+    const inW = cur.map(p => river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4));
+    let start = inW.findIndex(v => !v);
+    if (start === -1) return cur; // (impossible) fully in water
+    const stretches: number[][] = [];
+    let run: number[] = [];
+    for (let q = 0; q <= N; q++) {
+      const k = (start + q) % N;
+      if (q < N && inW[k]) run.push(k);
+      else if (run.length) { stretches.push(run); run = []; }
+    }
+    let changed = false;
+    for (const st of stretches) {
+      const m = st[(st.length / 2) | 0];
+      const mid = cur[m];
+      const rp = river.path.nearest(mid.x, mid.z).p;
+      const hr = river.pts[river.path.nearest(mid.x, mid.z).i].h;
+      const nx = Math.cos(hr), nz = -Math.sin(hr); // river normal (heading + 90 deg)
+      const half = st.length / 2, FADE = 8;
+      for (let q = 0; q < N; q++) {
+        let d = Math.abs(q - m);
+        d = Math.min(d, N - d);
+        let wgt = 0;
+        if (d <= half) wgt = 1;
+        else if (d <= half + FADE) wgt = 0.5 * (1 + Math.cos((Math.PI * (d - half)) / FADE));
+        else continue;
+        const p = cur[q];
+        const s = (p.x - rp.x) * nx + (p.z - rp.z) * nz;
+        const tx = rp.x + nx * s, tz = rp.z + nz * s;
+        const ox = (tx - p.x) * wgt, oz = (tz - p.z) * wgt;
+        if (ox * ox + oz * oz > 1e-6) changed = true;
+        cur[q] = { x: p.x + ox, z: p.z + oz };
+      }
+    }
+    if (!changed) break;
+  }
+  return cur;
+}
+
 /**
- * R22's active half: any sample sitting in the water (bed edge touching)
+ * R22's active half
+
+: any sample sitting in the water (bed edge touching)
  * within 24 m of a bridge zone slides ALONG the river (in z) until the
  * crossing clears the zone — the river is a north-south band, so sliding
  * z moves the trestle to free water instead of piling it onto a bridge.

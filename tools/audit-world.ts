@@ -6,7 +6,7 @@ import { setCityBase, citySeed, streetLinesFor } from '../src/worlds/cityGrid.js
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA } from '../src/worlds/grid.js';
-import { clearRiverCache } from '../src/worlds/riverRoute.js';
+import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 
 const clearAllWorldCaches = (): void => {
   clearCityPlanCache();
@@ -16,6 +16,7 @@ const clearAllWorldCaches = (): void => {
 };
 
 const W = 14;
+const ISLAND = 14 * 64; // city side length in metres
 const baseSeed = Number(process.argv[2] ?? 4242) | 0;
 setCityBase(baseSeed);
 
@@ -42,6 +43,10 @@ let worstRide = 0;
 let railRiverRoadTotal = 0;
 let lotClashTotal = 0;
 let foldTotal = 0;
+let strayNodes = 0;
+let bareCrossings = 0;
+let riverFails = 0;
+let worstTrestleSkew = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
@@ -151,6 +156,93 @@ for (const [bx, by] of cells) {
     if (Math.abs(dh) > (120 * Math.PI) / 180) foldTotal++;
   }
 
+  // R1b: ONE connected street web — the R22/R22b vetoes used to strand
+  // little "private" roads away from the network
+  {
+    const adj = new Map<string, Set<string>>();
+    const link = (i: number, j: number, ni: number, nj: number): void => {
+      const k = `${i},${j}`;
+      if (!adj.has(k)) adj.set(k, new Set());
+      adj.get(k)!.add(`${ni},${nj}`);
+    };
+    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) { link(i, j, i + 1, j); link(i + 1, j, i, j); }
+    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) { link(i, j, i, j + 1); link(i, j + 1, i, j); }
+    const seen = new Set<string>();
+    const comps: number[] = [];
+    for (const n0 of adj.keys()) {
+      if (seen.has(n0)) continue;
+      let size = 0;
+      const q = [n0];
+      seen.add(n0);
+      while (q.length) {
+        const cur = q.pop()!; size++;
+        for (const nx of adj.get(cur) ?? []) if (!seen.has(nx)) { seen.add(nx); q.push(nx); }
+      }
+      comps.push(size);
+    }
+    comps.sort((a, b) => b - a);
+    for (let k = 1; k < comps.length; k++) strayNodes += comps[k];
+  }
+
+  // R10b: every rail x open-street crossing carries a recorded crossing —
+  // no barrierless bumps where the track meets asphalt
+  {
+    const pts = route.pts;
+    for (let k = 0; k < pts.length; k++) {
+      const p = pts[k], q = pts[(k + 1) % pts.length];
+      for (let j = 0; j <= W; j++) {
+        const c = j * 64;
+        if ((p.z - c) * (q.z - c) < 0) {
+          const t = (c - p.z) / (q.z - p.z);
+          const x = p.x + (q.x - p.x) * t, i = Math.floor(x / 64);
+          if (plan.segH(j, i) && !plan.crossings.some(cc =>
+            cc.axis === 'h' && Math.abs(cc.x - x) < 4 && Math.abs(cc.z - c) < 4)) bareCrossings++;
+        }
+      }
+      for (let i = 0; i <= W; i++) {
+        const c = i * 64;
+        if ((p.x - c) * (q.x - c) < 0) {
+          const t = (c - p.x) / (q.x - p.x);
+          const z = p.z + (q.z - p.z) * t, j = Math.floor(z / 64);
+          if (plan.segV(i, j) && !plan.crossings.some(cc =>
+            cc.axis === 'v' && Math.abs(cc.z - z) < 4 && Math.abs(cc.x - c) < 4)) bareCrossings++;
+        }
+      }
+    }
+  }
+
+  // R26: the river spans shore to shore, lives inside one N-S lane (never
+  // crossing or riding beneath a N-S street), and flows due south across
+  // every E-W street line so bridges meet it at a right angle
+  {
+    const river = riverFor(citySeed(bx, by));
+    let zmin = Infinity, zmax = -Infinity, laneMin = Infinity, hDev = 0;
+    for (const p of river.pts) {
+      zmin = Math.min(zmin, p.z); zmax = Math.max(zmax, p.z);
+      laneMin = Math.min(laneMin, Math.abs(p.x - Math.round(p.x / 64) * 64));
+      const jn = Math.round(p.z / 64);
+      if (jn >= 1 && jn <= 13 && Math.abs(p.z - jn * 64) < 8) {
+        hDev = Math.max(hDev, Math.abs(p.h) > Math.PI / 2 ? Math.PI - Math.abs(p.h) : Math.abs(p.h));
+      }
+    }
+    if (zmin > 0 || zmax < ISLAND || laneMin < 12 || (hDev * 180) / Math.PI > 12) {
+      riverFails++;
+      console.log(`  R26 detail: city ${bx},${by} z ${zmin.toFixed(0)}..${zmax.toFixed(0)}, lane margin ${laneMin.toFixed(1)} m, street-crossing flow dev ${(hDev * 180 / Math.PI).toFixed(1)} deg`);
+    }
+    // R27: trestles meet the water at a right angle too
+    let skew = 0;
+    for (const p of route.pts) {
+      if (!river.inWater(p.x, p.z)) continue;
+      const near = river.path.nearest(p.x, p.z);
+      const nx = river.pts[near.i].h + Math.PI / 2;
+      let d = Math.abs(p.h - nx) % Math.PI;
+      if (d > Math.PI / 2) d = Math.PI - d;
+      skew = Math.max(skew, (d * 180) / Math.PI);
+    }
+    if (skew > 30) console.log(`  R27 detail: city ${bx},${by} trestle skew ${skew.toFixed(1)} deg near (${route.pts.find(p => river.inWater(p.x, p.z))?.x.toFixed(0)},${route.pts.find(p => river.inWater(p.x, p.z))?.z.toFixed(0)})`);
+    worstTrestleSkew = Math.max(worstTrestleSkew, skew);
+  }
+
   // R22/R23: occupancy-grid combination invariants. The grid paints every
   // generator's output into one 1 m bitmask map — the audit proves the
   // forbidden combinations never occur anywhere in the city:
@@ -175,6 +267,10 @@ if (worstLot < 15.5) fail('R9', `lot centre only ${worstLot.toFixed(1)} m from t
 if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road cells — a trestle shares the water with a road bridge`);
 if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
 if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
+if (strayNodes > 0) fail('R1', `${strayNodes} nodes on disconnected "private" roads — the island web must be one piece`);
+if (bareCrossings > 0) fail('R10', `${bareCrossings} rail x road crossings have no barriers recorded`);
+if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
+if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.
 // The hash tail used to leave adjacent integers partially correlated, and
@@ -228,7 +324,7 @@ for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] 
 console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} crossings, ` +
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
-  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}`);
+  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

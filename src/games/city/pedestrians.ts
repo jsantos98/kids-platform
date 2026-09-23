@@ -20,16 +20,28 @@ interface Ped {
   pet: boolean;
 }
 
+/** kit characters are ~0.7 units tall; scale them to villager height (~1.6 m) */
+const PED_SCALE = 2.2;
+
 export class Pedestrians {
   private peds: Ped[] = [];
 
   constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number,
-              count = 14, petTpls: BakedTemplate[] = []) {
-    // a few distinct merged villager bodies, shared across the pedestrians
+              count = 14, petTpls: BakedTemplate[] = [], peopleTpls: BakedTemplate[] = []) {
+    // distinct bodies shared across the pedestrians: Kenney mini-characters
+    // when available, procedural villagers otherwise
     const variants: Array<{ geo: THREE.BufferGeometry; mat: THREE.Material }> = [];
-    for (let i = 0; i < 4; i++) {
-      const m = bakeObjectToMesh(makeVillager());
-      variants.push({ geo: m.geometry, mat: m.material as THREE.Material });
+    if (peopleTpls.length) {
+      for (const tpl of peopleTpls) {
+        const m = templateToMesh(tpl);
+        m.geometry.scale(PED_SCALE, PED_SCALE, PED_SCALE);
+        variants.push({ geo: m.geometry, mat: m.material as THREE.Material });
+      }
+    } else {
+      for (let i = 0; i < 4; i++) {
+        const m = bakeObjectToMesh(makeVillager());
+        variants.push({ geo: m.geometry, mat: m.material as THREE.Material });
+      }
     }
     for (let i = 0; i < count; i++) {
       const v = variants[i % variants.length];

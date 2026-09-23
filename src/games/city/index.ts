@@ -104,6 +104,17 @@ Object.assign(KITDEFS, {
   'race-bump': [`${RACEKIT}/track-bump.glb`, `${RACEKIT}/Textures/colormap.png`],
   'rail-straight': [`${TRAINKIT}/railroad-straight.glb`, `${TRAINKIT}/Textures/colormap.png`],
 });
+const PETKIT = '/assets/kenney/pets';
+const PEDKIT = '/assets/kenney/mini-chars';
+for (const [n, f] of [
+  ['pet-dog', 'animal-dog'], ['pet-cat', 'animal-cat'], ['pet-bunny', 'animal-bunny'],
+  ['pet-chick', 'animal-chick'], ['pet-pig', 'animal-pig'], ['pet-fox', 'animal-fox'],
+  ['pet-panda', 'animal-panda'], ['pet-penguin', 'animal-penguin'],
+] as const) KITDEFS[n] = [`${PETKIT}/${f}.glb`, `${PETKIT}/Textures/colormap.png`];
+for (const s of 'abcdef') {
+  KITDEFS[`ped-m${s}`] = [`${PEDKIT}/character-male-${s}.glb`, `${PEDKIT}/Textures/colormap.png`];
+  KITDEFS[`ped-f${s}`] = [`${PEDKIT}/character-female-${s}.glb`, `${PEDKIT}/Textures/colormap.png`];
+}
 await prepBakedModels(KITDEFS).catch(() => {});
 // dev probe: ?debugbake=1 exposes which templates registered
 if (q.get('debugbake') === '1') {
@@ -174,10 +185,18 @@ if (q.get('debugsea') === '1') {
   };
 }
 const patrol = V.fly ? null : new PatrolHeli(scene);
-// ---- pets: cube pets from the Kenney kit wander the sidewalks too ----
+// ---- pets + pedestrians: cube pets and Kenney mini-characters share the
+// sidewalks; everyone strolls until the fire truck scares them ----
 const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];
+const PED_NAMES = [...'abcdef'].flatMap(s => [`ped-m${s}`, `ped-f${s}`]);
+const pickTpl = (n: string) => {
+  const t = bakedModel(n);
+  if (!t) console.warn('missing baked template:', n);
+  return t;
+};
 const pedestrians = new Pedestrians(scene, roadGrid, 64, 14,
-  PET_NAMES.map(n => bakedModel(n)).filter((t): t is BakedTemplate => !!t));
+  PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
+  PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t));
 // dev probe: current pedestrian spots (via console/window)
 (window as unknown as { __peds: () => unknown }).__peds = () => pedestrians.list();
 

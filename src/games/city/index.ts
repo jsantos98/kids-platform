@@ -1,7 +1,7 @@
 // The Endless City fire-truck game: boot, frame loop and mode orchestration.
 import * as THREE from 'three';
 import { createStage, makeHUD } from '../../engine/stage.js';
-import { prepBakedModels, bakedModel, spawnVehicle } from '../../engine/assets.js';
+import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
@@ -20,7 +20,6 @@ import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { CENTER } from '../../worlds/world.js';
 import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
-import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
@@ -34,7 +33,6 @@ import { loadTotals, saveTotals } from './state.js';
 
 // ---- params ----
 const q = new URLSearchParams(location.search);
-const raceMode = q.get('race') === '1';
 // every new game generates a fresh island; the rolled seed is written back
 // into the URL so a refresh (or a share) replays the exact same world
 const seedParam = q.get('seed');
@@ -42,7 +40,7 @@ const P = {
   seed: seedParam !== null && Number.isFinite(Number(seedParam)) && seedParam !== ''
     ? Number(seedParam)
     : 1 + ((Math.random() * 999999999) | 0),
-  vehicle: raceMode ? 'kart' : (q.get('vehicle') ?? 'heli'),
+  vehicle: q.get('vehicle') ?? 'heli',
 };
 if (seedParam === null) {
   const u = new URL(location.href);
@@ -104,10 +102,8 @@ groundFollower.receiveShadow = true;
 scene.add(groundFollower);
 
 // ---- player vehicle ----
-const V = raceMode ? VEHICLES.kart : (VEHICLES[P.vehicle] ?? VEHICLES.truck);
-let spawn = raceMode
-  ? { x: RACE_START.x, z: RACE_START.z, heading: RACE_START.heading }
-  : pickSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
+const V = VEHICLES[P.vehicle] ?? VEHICLES.truck;
+let spawn = pickSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -143,7 +139,6 @@ sirenBtn.addEventListener('click', () => setSiren(!sirenOn));
 // road tiles, lamps, parked cars). Any failure leaves the registry empty and the
 // world falls back to the procedural pastel generator.
 const KIT = '/assets/kenney/city';
-const RACEKIT = '/assets/kenney/racing';
 const TRAINKIT = '/assets/kenney/train';
 const ROADTINT = { tint: [0.55, 0.57, 0.63] as [number, number, number] };
 const KITDEFS: Record<string, Parameters<typeof prepBakedModels>[0][string]> = {};
@@ -170,12 +165,7 @@ Object.assign(KITDEFS, {
   'car-suv': [`${KIT}/car-suv.glb`, `${KIT}/cmap-cars.png`],
   'car-taxi': [`${KIT}/car-taxi.glb`, `${KIT}/cmap-cars.png`],
   'car-hatch': [`${KIT}/car-hatchback-sports.glb`, `${KIT}/cmap-cars.png`],
-  'race-straight': [`${RACEKIT}/track-straight.glb`, `${RACEKIT}/Textures/colormap.png`],
-  'race-corner': [`${RACEKIT}/track-corner.glb`, `${RACEKIT}/Textures/colormap.png`],
-  'race-finish': [`${RACEKIT}/track-finish.glb`, `${RACEKIT}/Textures/colormap.png`],
-  'race-bump': [`${RACEKIT}/track-bump.glb`, `${RACEKIT}/Textures/colormap.png`],
   'rail-straight': [`${TRAINKIT}/railroad-straight.glb`, `${TRAINKIT}/Textures/colormap.png`],
-  'tram-car': [`${TRAINKIT}/train-carriage-box.glb`, `${TRAINKIT}/Textures/colormap.png`],
 });
 const PETKIT = '/assets/kenney/pets';
 const PEDKIT = '/assets/kenney/mini-chars';
@@ -256,7 +246,7 @@ if (q.get('spraytest') === '1') {
 }
 
 // ---- ambient life: trains on the smooth main line (with station stops),
-// the tram circling downtown, level crossings that hold the cars, a patrol
+// the level crossings that hold the cars, a patrol
 // heli circling the neighbourhood while the kid plays the fire truck ----
 const trains = new Trains(scene, 0, 0);
 const transit = new Transit(scene);
@@ -273,10 +263,9 @@ if (q.get('debugsea') === '1') {
     renderer,
     trains,
     traffic,
-    transit,
     chunks,
     player,
-    tram: () => transit.list(),
+    transit: () => transit.list(),
     river: () => river,
     route: () => railRouteFor(curCity.bx, curCity.by),
     probe: (x: number, y: number, z: number) => {
@@ -318,7 +307,7 @@ const camLabel = document.getElementById('camLabel')!;
 const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => sea.boatDots());
 
 // ---- the city grid: drive across a strait and the next city wakes up.
-// Every system (plan, trains, tram, traffic, pedestrians, shore scenery,
+// Every system (plan, trains, traffic, pedestrians, shore scenery,
 // minimap) repoints itself at the new island; the seed is derived from the
 // city's coordinates, so city (3, -2) is always the same city. ----
 let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
@@ -335,7 +324,7 @@ function applyCity(c: CityRef): void {
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
   missions.setCity(c.ox, c.oz);
   const s = pickSpawn(c.bx, c.by);
-  if (!raceMode) spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
+  spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
 }
 applyCity(curCity);
 const hud = makeHUD();
@@ -368,51 +357,6 @@ const totals = loadTotals();
 updateMissionPanel();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
-
-// ---- race mode state ----
-const raceGatePts = raceGates();
-let gateIdx = 0, lap = 1, lapStart = 0;
-let bestLap = Infinity;
-try {
-  const saved = Number(localStorage.getItem('kidsgames-race-best'));
-  if (saved > 0) bestLap = saved;
-} catch { /* ignore */ }
-function fmtTime(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = t - m * 60;
-  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
-}
-
-// AI race trucks cruising the circuit
-const raceAI: Array<{ mesh: THREE.Object3D; t: number; speed: number }> = [];
-let raceAILen = 0;
-if (raceMode) {
-  for (let i = 0; i < racePathPts.length; i++) {
-    const a = racePathPts[i], b = racePathPts[(i + 1) % racePathPts.length];
-    raceAILen += Math.hypot(b.x - a.x, b.z - a.z);
-  }
-  const models = ['/assets/kenney/racing/vehicle-truck-yellow.glb', '/assets/kenney/racing/vehicle-truck-purple.glb'];
-  const speeds = [9.5, 8.5];
-  models.forEach((m, i) => {
-    spawnVehicle(m, { len: 3.2 }).then(g => {
-      g.traverse(o => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
-      scene.add(g);
-      raceAI.push({ mesh: g, t: (i + 1) / 3, speed: speeds[i] });
-    }).catch(() => {});
-  });
-}
-
-function updateRaceAI(dt: number): void {
-  for (const r of raceAI) {
-    r.t = (r.t + (r.speed * dt) / raceAILen) % 1;
-    const f = r.t * racePathPts.length;
-    const i0 = Math.floor(f) % racePathPts.length;
-    const a = racePathPts[i0], b = racePathPts[(i0 + 1) % racePathPts.length];
-    const fr = f - i0;
-    r.mesh.position.set(a.x + (b.x - a.x) * fr, 0.15, a.z + (b.z - a.z) * fr);
-    r.mesh.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
-  }
-}
 
 // ?livertest=1: teleport next to the first cat -> ladder scene
 if (q.get('livertest') === '1') {
@@ -513,7 +457,7 @@ const tick = (): void => {
   // the archipelago is endless; stray into the sea and R brings you back
   chunks.ensure(2, st.x, st.z);
 
-  // ambient life: the trains, the tram, the sea with its boats and the patrol
+  // ambient life: the trains, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly
   trains.update(dt);
   trains.setOrigin(curCity.ox, curCity.oz);
@@ -546,9 +490,9 @@ const tick = (): void => {
   if (mode === 'spray') hoseAim += (Math.max(-1, Math.min(1, aimIn)) - hoseAim) * Math.min(1, dt * 4);
   if (mode === 'ladder') ladderAim += (Math.max(-1, Math.min(1, aimIn)) - ladderAim) * Math.min(1, dt * 5);
 
-  // missions: keep several calls alive (suppressed in race mode)
+  // missions: keep several rescue calls alive
   missions.cooldown -= dt;
-  while (!raceMode && missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
+  while (missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
     missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
     missions.cooldown = 0.5;
   }
@@ -562,35 +506,7 @@ const tick = (): void => {
     o.marker.rotation.y += dt * 1.2;
   }
 
-  if (raceMode) {
-    // ---- race mode: lap timing HUD ----
-    updateRaceAI(dt);
-    const g = raceGatePts[gateIdx];
-    if (Math.hypot(st.x - g.x, st.z - g.z) < 10) {
-      gateIdx++;
-      if (gateIdx >= raceGatePts.length) {
-        gateIdx = 0;
-        const lapTime = elapsed - lapStart;
-        lapStart = elapsed;
-        lap++;
-        toast = `LAP ${fmtTime(lapTime)}!`;
-        if (lapTime < bestLap) {
-          bestLap = lapTime;
-          try { localStorage.setItem('kidsgames-race-best', String(lapTime)); } catch { /* ignore */ }
-        }
-      }
-    }
-    promptEl.style.display = 'block';
-    promptText.textContent = `LAP ${lap} — ${fmtTime(elapsed - lapStart)}`;
-    promptFill.style.width = '0%';
-    missionEl.innerHTML = `best lap: ${bestLap === Infinity ? '—' : fmtTime(bestLap)}`;
-    guideEl.style.opacity = '1';
-    guideIcon.textContent = '🏁';
-    guideArrow.style.transform = '';
-    guideArrow.style.display = 'none';
-    guideDist.textContent = '';
-    guideWait.textContent = '';
-  } else if (mode === 'spray' && spraySession) {
+  if (mode === 'spray' && spraySession) {
     guideEl.style.opacity = '0';
     promptEl.style.display = 'block';
     promptText.textContent = 'SPRAY LEFT / RIGHT!';

@@ -1,6 +1,6 @@
 // Shared arc-length path helper: turns a handful of world-space control
 // points into a smooth Catmull-Rom path with uniform-distance sampling.
-// Used by the railway loop and the tram loop (closed) and the river (open).
+// Used by the railway loop and the river (both closed paths).
 import * as THREE from 'three';
 
 export interface PathPt { x: number; z: number; h: number }

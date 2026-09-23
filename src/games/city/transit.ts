@@ -1,19 +1,15 @@
 // Street-level transit furniture, built per city: gated level crossings where
 // the railway meets a road (twin flashing red signals — the car AI stops for
-// them), the station platforms where trains dwell, the river trestles under
-// the rails, and each city's downtown tram: inset tracks down the middle of
-// the boulevard, sheltered stops, and two trams ambling around the loop.
-// A city builds its set the first time the player arrives; the four most
-// recent stay alive so nothing pops when crossing a strait and coming back.
+// them), the station platforms where trains dwell, and the river trestles
+// under the rails. A city builds its set the first time the player arrives;
+// the four most recent stay alive so nothing pops when crossing a strait.
 import * as THREE from 'three';
-import { Baked, templateToMesh } from '../../engine/baked.js';
-import { bakedModel } from '../../engine/assets.js';
+import { Baked } from '../../engine/baked.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { RAIL_Y, railRouteFor, type RailRoute } from '../../worlds/railRoute.js';
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
-import { cityPlanFor, type Crossing, type Station, type TramPlan } from '../../worlds/cityPlan.js';
+import { cityPlanFor, type Crossing, type Station } from '../../worlds/cityPlan.js';
 import { citySeed } from '../../worlds/cityGrid.js';
-import { makePath, type WorldPath } from '../../worlds/spline.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 import type { Trains } from './train.js';
 
@@ -39,24 +35,13 @@ interface Signal {
   c: Crossing;
 }
 
-interface Tram {
-  obj: THREE.Object3D | null;
-  s: number;                  // arc distance along the tram loop
-  v: number;
-  next: number;               // stop index
-  hold: number;
-}
-
 interface CityInst {
   ox: number;
   oz: number;
   mesh: THREE.Mesh;
-  /** dynamic per-city props (signal lamps + trams) */
+  /** dynamic per-city props (signal lamps) */
   dyn: THREE.Group;
   signals: Signal[];
-  trams: Tram[];
-  tramPath: WorldPath | null;
-  stopD: number[];
   boxes: CollisionBox[];
 }
 
@@ -100,13 +85,12 @@ export class Transit {
     const B = new Baked();
     const inst: CityInst = {
       ox, oz, mesh: null as unknown as THREE.Mesh, dyn: new THREE.Group(),
-      signals: [], trams: [], tramPath: null, stopD: [], boxes: [],
+      signals: [], boxes: [],
     };
     let baked = 0;
     for (const st of plan.stations) { this.bakeStation(B, st, r, ox, oz, inst); baked++; }
     baked += this.bakeTrestles(B, route, river, ox, oz);
     for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; }
-    if (plan.tram) { this.buildTram(B, plan.tram, ox, oz, inst); baked++; }
     if (baked > 0) {
       inst.mesh = B.build();
       inst.mesh.receiveShadow = true;
@@ -226,74 +210,6 @@ export class Transit {
     inst.signals.push({ a: lamps.map(l => l[0]), b: lamps.map(l => l[1]), arms, c });
   }
 
-  // ---- the tram: inset track down the boulevard centre + stops + vehicles ----
-  private buildTram(B: Baked, tram: TramPlan, ox: number, oz: number, inst: CityInst): void {
-    const path = makePath(tram.pts, true);
-    inst.tramPath = path;
-    for (let k = 0; k < path.pts.length; k++) {
-      const p = path.pts[k], q = path.pts[(k + 1) % path.pts.length];
-      const len = Math.hypot(q.x - p.x, q.z - p.z) + 0.7;
-      const ry = Math.atan2(q.x - p.x, q.z - p.z);
-      const rx = Math.cos(ry), rz = -Math.sin(ry);
-      B.box(3.4, 0.045, len, 0xdfd8c8, ox + p.x, 0.126, oz + p.z, 0, ry, 0);   // inset paving
-      for (const s of [-0.78, 0.78]) {
-        B.box(0.13, 0.05, len, 0x8d939e, ox + p.x + rx * s, 0.16, oz + p.z + rz * s, 0, ry, 0);
-      }
-    }
-    // sheltered stops
-    for (const st of tram.stops) {
-      const sx = ox + st.x, sz = oz + st.z;
-      for (const s of [-1.6, 1.6]) {
-        const px2 = sx + Math.cos(st.ry) * s, pz2 = sz - Math.sin(st.ry) * s;
-        B.cyl(0.08, 0.1, 2.7, 8, STEEL, px2, 1.35, pz2);
-      }
-      B.box(4.4, 0.16, 2.0, CREAM, sx, 2.75, sz, 0, st.ry, 0);
-      B.box(3.2, 0.09, 0.45, 0xa9805a, sx, 0.62, sz, 0, st.ry, 0);
-      // amber stop sign between the shelter and the track
-      const n0 = path.nearest(st.x, st.z);
-      const sdx = n0.p.x - st.x, sdz = n0.p.z - st.z;
-      const sdl = Math.hypot(sdx, sdz) || 1;
-      B.cyl(0.05, 0.07, 2.4, 8, STEEL, sx + sdx / sdl * 2.4, 1.2, sz + sdz / sdl * 2.4);
-      B.cyl(0.42, 0.42, 0.07, 12, 0xf6c952, sx + sdx / sdl * 2.4, 2.35, sz + sdz / sdl * 2.4, Math.PI / 2, 0, 0);
-      inst.boxes.push({ x1: sx - 1.1, x2: sx + 1.1, z1: sz - 1.1, z2: sz + 1.1, small: 1 });
-    }
-    // arc distance of each stop along the loop
-    inst.stopD = tram.stops.map(st => {
-      const n = path.nearest(st.x, st.z);
-      return (n.i / path.pts.length) * path.total;
-    }).sort((a, b) => a - b);
-    // two trams, opposite sides of the loop
-    const tpl = bakedModel('tram-car');
-    const tints: Array<[number, number, number]> = [[1, 0.96, 0.86], [1, 0.84, 0.84]];
-    for (let i = 0; i < 2; i++) {
-      const tram0: Tram = { obj: null, s: (i * path.total) / 2, v: 0, next: 0, hold: 0 };
-      if (tpl) {
-        const m = templateToMesh(tpl);
-        const matr = (m.material as THREE.MeshLambertMaterial).clone();
-        matr.color.setRGB(...tints[i]);
-        m.material = matr;
-        m.geometry.scale(0.78, 0.78, 0.78);
-        m.castShadow = true;
-        m.position.y = 0.17;
-        inst.dyn.add(m);
-        tram0.obj = m;
-      }
-      tram0.next = this.nextStop(inst, tram0.s);
-      inst.trams.push(tram0);
-    }
-  }
-
-  private nextStop(inst: CityInst, s: number): number {
-    const path = inst.tramPath;
-    if (!path || !inst.stopD.length) return 0;
-    let best = 0, bestGap = Infinity;
-    for (let i = 0; i < inst.stopD.length; i++) {
-      const g = ((inst.stopD[i] - s) % path.total + path.total) % path.total;
-      if (g < bestGap) { bestGap = g; best = i; }
-    }
-    return best;
-  }
-
   /** true while a train is near enough that the barriers close and the
    * lamps warn (the car AI holds at the same distance) */
   blocked(c: Crossing, trains: Trains): boolean {
@@ -315,36 +231,10 @@ export class Transit {
           pivot.rotation.x += Math.max(-rate, Math.min(rate, target - pivot.rotation.x));
         }
       }
-      // trams: amble around the loop, dwelling at each shelter
-      const path = inst.tramPath;
-      if (!path) continue;
-      for (const t of inst.trams) {
-        if (!t.obj) continue;
-        if (inst.stopD.length) {
-          const gap = ((inst.stopD[t.next] - t.s) % path.total + path.total) % path.total;
-          if (gap < 1.4) {
-            t.v = 0;
-            t.hold += dt;
-            if (t.hold >= 2.6) {
-              t.hold = 0;
-              t.next = (t.next + 1) % inst.stopD.length;
-            }
-          } else {
-            const target = gap < 18 ? Math.max(0.4, gap * 0.45) : 6.5;
-            t.v += Math.max(-5 * dt, Math.min(2.5 * dt, target - t.v));
-          }
-        } else {
-          t.v = 6.5;
-        }
-        t.s += t.v * dt;
-        const p = path.sample(t.s);
-        t.obj.position.set(inst.ox + p.x, 0.17, inst.oz + p.z);
-        t.obj.rotation.y = p.h;
-      }
     }
   }
 
-  /** static collision from every built city (signal poles, tram shelters) */
+  /** static collision from every built city (signal + crossing posts) */
   boxesNear(): CollisionBox[] {
     const out: CollisionBox[] = [];
     for (const inst of this.cities.values()) out.push(...inst.boxes);
@@ -356,7 +246,6 @@ export class Transit {
     return [...this.cities.entries()].map(([key, inst]) => ({
       key,
       crossings: inst.signals.map(s => ({ x: +s.c.x.toFixed(1), z: +s.c.z.toFixed(1), axis: s.c.axis })),
-      trams: inst.trams.filter(t => t.obj).map(t => ({ x: +t.obj!.position.x.toFixed(1), z: +t.obj!.position.z.toFixed(1) })),
     }));
   }
 }

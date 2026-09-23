@@ -85,13 +85,10 @@ function tryRiver(r: () => number): Array<{ x: number; z: number; w: number }> |
     const x = x0 + drift * z + a1 * Math.sin(z * w1 + p1) + a2 * Math.sin(z * w2 + p2);
     out.push({ x, z, w: 0 });
   }
-  const raceEdge = (WORLD_CHUNKS - 2) * 64 - 8;
   for (const s of out) {
     if (s.x < 34 || s.x > ISLAND - 34) return null;
     // keep clear of the fire-station spawn
     if (Math.hypot(s.x - SPAWN.x, s.z - SPAWN.z) < 44) return null;
-    // the SE corner is the race circuit
-    if (s.z > raceEdge && s.x > raceEdge) return null;
     // the bridge + picnic causeway hang off the south shore around BRIDGE_X
     if (s.z > ISLAND - 70 && Math.abs(s.x - BRIDGE_X) < 46) return null;
   }

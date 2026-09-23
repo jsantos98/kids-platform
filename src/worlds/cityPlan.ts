@@ -12,34 +12,31 @@
 //      (and where the railway would run alongside them), anything disconnected
 //      is pruned. Streets the railway crosses head-on are pinned open: every
 //      seed gets level crossings with working signals
-//   4. the tram: a rectangle of streets ringing downtown is reserved, with a
-//      stop on each of its four sides
-//   5. no dead ends: every street tip that doesn't meet a cross street is
+//   4. no dead ends: every street tip that doesn't meet a cross street is
 //      trimmed back until it does — roads always connect to the network. The
 //      only sanctioned loose ends are the four causeway mouths on the shore
-//   6. districts finish: an industrial blob near the railway, streetless urban
+//   5. districts finish: an industrial blob near the railway, streetless urban
 //      blocks become green
-//   7. junctions: ≥3 street arms → traffic lights, unless the junction became
-//      a roundabout or a paved plaza; road×rail crossings and road×river
+//   6. junctions: ≥3 street arms in built-up chunks → traffic lights, unless
+//      the junction became a paved plaza; road×rail crossings and road×river
 //      bridge spans are recorded where the corridors meet the streets
-//   8. lots: along every street segment, both sides, with proper setbacks;
+//   7. lots: along every street segment, both sides, with proper setbacks;
 //      anything too close to the railway or the river stays clear
-//   9. two train stations on straight, quiet stretches of the line
+//   8. two train stations on straight, quiet stretches of the line
 //
 // Consumers: cityChunk (roads, plazas, lamps, lots, nature, the river bed),
 // the traffic lights (via RoadGrid), traffic + pedestrians (street lines),
-// transit (crossings, stations, tram) and the minimap.
+// transit (crossings, stations) and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 import { citySeed, southExit, eastExit, streetLinesFor } from './cityGrid.js';
-import { railRouteFor, resquareRail, type RailRoute } from './railRoute.js';
+import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
 
 export type District =
   | 'downtown' | 'urban' | 'industrial' | 'park' | 'green'
-  | 'forest' | 'meadow' | 'desert'
-  | 'race';
+  | 'forest' | 'meadow' | 'desert';
 
 export interface Lot {
   kind: 'bldg' | 'trees' | 'parking';
@@ -78,21 +75,6 @@ export interface Station {
   h: number;
 }
 
-export interface TramStop {
-  x: number;   // shelter position (beside the tram lane)
-  z: number;
-  ry: number;  // shelter facing
-}
-
-export interface TramPlan {
-  /** loop control points (chamfered rectangle through downtown) */
-  pts: Array<{ x: number; z: number }>;
-  stops: TramStop[];
-  /** lattice lines the rectangle rides — streets the rail must respect */
-  linesH: number[];
-  linesV: number[];
-}
-
 export interface CityExits {
   /** lattice line of the exit road on each side (n/w belong to the neighbours'
    * south/east edges — the four corridor roads always line up) */
@@ -116,10 +98,10 @@ export interface CityPlan {
   segV(i: number, j: number): boolean;
   /** number of street arms meeting at lattice node (i, j) */
   arms(i: number, j: number): boolean[];
-  /** ≥3 arms → traffic lights (roundabouts and plazas are not signalized) */
+  /** ≥3 street arms in built-up chunks → traffic lights (plazas are not
+   * signalized); junctions bordering parks or green corners stay bare so no
+   * light ever stands alone in the grass */
   signalized(i: number, j: number): boolean;
-  /** junction is a traffic circle (no lights, central island) */
-  roundabout(i: number, j: number): boolean;
   /** junction is a paved plaza with a fountain (no lights) */
   plaza(i: number, j: number): boolean;
   district(cx: number, cz: number): District;
@@ -131,8 +113,6 @@ export interface CityPlan {
   riverBridges: RiverBridge[];
   /** train stations (0-3) */
   stations: Station[];
-  /** the downtown tram loop (always found — its streets are pinned open) */
-  tram: TramPlan | null;
   /** where the four causeways to the neighbouring cities land */
   exits: CityExits;
 }
@@ -234,7 +214,6 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   // ---- 2. districts core: nature corners, park, downtown ----
   const grid: District[][] = Array.from({ length: W }, () => Array<District>(W).fill('urban'));
-  for (const [cx, cz] of raceChunks()) grid[cx][cz] = 'race';
   // each nature corner rolls its own biome (and occasionally stays city) —
   // a forest-seeded city next to a desert-seeded one reads as a different world
   const KINDS: District[] = ['forest', 'desert', 'meadow'];
@@ -301,26 +280,10 @@ function buildPlan(bx: number, by: number): CityPlan {
   }
   const exits: CityExits = { n: exN, s: exS, w: exW, e: exE };
 
-  // ---- 4. the tram: reserve a rectangle of streets around downtown.
-  // Score every candidate perimeter by how many of its segments are already
-  // open (and whether the railway shadows a side), pin the best one open.
-  // Its closed ring anchors every one of its corners, so it never dangles. ----
-  const tram = reserveTram(downtown[0], downtown[1], rail, segHSet, segVSet, r, railRunsAlong);
-  // the tram's sides are streets the rail could not know when it shaped
-  // itself — re-square crossings and clearance against the complete set now
-  if (tram) {
-    resquareRail(
-      rail, bx, by,
-      [...H, ...tram.linesH.filter(j => !H.includes(j))],
-      [...V, ...tram.linesV.filter(i => !V.includes(i))],
-    );
-  }
-
-  // ---- 4b. R22 sweep: resquareRail may have moved the rail after the
-  // segment veto ran, so re-check every open segment against the FINAL
-  // trestle spans and drop clashing ones (exit corridors are exempt — the
-  // causeway contract outranks the bridge; they are audited separately).
-  // The dead-end trim below repairs the street web afterwards. ----
+  // ---- 4b. R22 sweep: check every open segment against the FINAL trestle
+  // spans and drop clashing ones (exit corridors are exempt — the causeway
+  // contract outranks the bridge; they are audited separately). The
+  // dead-end trim below repairs the street web afterwards. ----
   {
     const trestles2: Array<{ x: number; z: number }> = [];
     for (const p of rail.pts) {
@@ -347,6 +310,40 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (const k of [...segVSet]) {
       const [i, j] = k.split(',').map(Number);
       if (clash2(false, i, j * CH, (j + 1) * CH)) segVSet.delete(k);
+    }
+  }
+
+  // ---- 4c. no level crossing squeezed against a junction: where the rail
+  // crosses a street within 18 m of a node, the crossing's barriers (which
+  // reach 9.4 m up the road from the crossing centre) would stand inside
+  // the junction square — drop the segment instead (exit corridors exempt;
+  // the dead-end trim repairs the web). Recorded crossings need >= 18 m for
+  // the same reason, so every genuine crossing is either recorded or its
+  // street is gone. ----
+  {
+    const exitLines = new Set([exN, exS, exW, exE]);
+    const nodeClash = (horiz: boolean, line: number, a: number, b: number): boolean => {
+      if (exitLines.has(line)) return false;
+      const c = line * CH;
+      const pts = rail.pts;
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k], q = pts[(k + 1) % pts.length];
+        const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
+        if ((pa - c) * (qa - c) >= 0) continue;
+        const t = (c - pa) / (qa - pa);
+        const along = horiz ? p.x + (q.x - p.x) * t : p.z + (q.z - p.z) * t;
+        if (along < a + 18 || along > b - 18) continue;
+        return true;
+      }
+      return false;
+    };
+    for (const k of [...segHSet]) {
+      const [j, i] = k.split(',').map(Number);
+      if (nodeClash(true, j, i * CH, (i + 1) * CH)) segHSet.delete(k);
+    }
+    for (const k of [...segVSet]) {
+      const [i, j] = k.split(',').map(Number);
+      if (nodeClash(false, i, j * CH, (j + 1) * CH)) segVSet.delete(k);
     }
   }
 
@@ -452,7 +449,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       const t = (c0 - pa) / (qa - pa);
       const x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t;
       const along = horiz ? x : z;
-      if (along < a + 11 || along > b - 11) continue;
+      if (along < a + 18 || along > b - 18) continue;
       hits.push({ x, z, d: railCum[k] + t * (railCum[k + 1] - railCum[k]) });
     }
     hits.sort((u, v) => (horiz ? u.x - v.x : u.z - v.z));
@@ -544,27 +541,12 @@ function buildPlan(bx: number, by: number): CityPlan {
   const nearCrossing = (i: number, j: number, m: number): boolean =>
     crossings.some(c => Math.hypot(c.x - i * CH, c.z - j * CH) < m);
 
-  // roundabouts: a seeded few junctions become traffic circles
-  const roundaboutSet = new Set<string>();
-  {
-    const cands: Array<[number, number]> = [];
-    for (let i = 1; i < W; i++) for (let j = 1; j < W; j++) {
-      if (armsCount(i, j) >= 3 && !nearCrossing(i, j, 26)) cands.push([i, j]);
-    }
-    for (let k = cands.length - 1; k > 0; k--) {
-      const m = (r() * (k + 1)) | 0;
-      [cands[k], cands[m]] = [cands[m], cands[k]];
-    }
-    for (const [i, j] of cands.slice(0, 2 + ((r() * 2) | 0))) roundaboutSet.add(key(i, j));
-  }
-  const roundabout = (i: number, j: number): boolean => roundaboutSet.has(key(i, j));
-
-  // plazas: a few more junctions become paved squares with a fountain
+  // plazas: a seeded few junctions become paved squares with a fountain
   const plazaSet = new Set<string>();
   {
     const cands: Array<[number, number]> = [];
     for (let i = 1; i < W; i++) for (let j = 1; j < W; j++) {
-      if (armsCount(i, j) >= 3 && !roundabout(i, j) && !nearCrossing(i, j, 30)) cands.push([i, j]);
+      if (armsCount(i, j) >= 3 && !nearCrossing(i, j, 30)) cands.push([i, j]);
     }
     for (let k = cands.length - 1; k > 0; k--) {
       const m = (r() * (k + 1)) | 0;
@@ -574,8 +556,18 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (const [i, j] of cands.slice(0, want)) plazaSet.add(key(i, j));
   }
   const plaza = (i: number, j: number): boolean => plazaSet.has(key(i, j));
+  // traffic lights belong where roads cross AND people live around them: a
+  // junction whose neighbouring chunks are all park/green/nature gets no
+  // signals, so no light pole ever stands alone in the grass
+  const built = (i: number, j: number): boolean => {
+    for (const [ci, cj] of [[i - 1, j - 1], [i, j - 1], [i - 1, j], [i, j]] as const) {
+      const d = district(ci, cj);
+      if (d !== 'urban' && d !== 'downtown' && d !== 'industrial') return false;
+    }
+    return true;
+  };
   const signalized = (i: number, j: number) =>
-    armsCount(i, j) >= 3 && !roundabout(i, j) && !plaza(i, j);
+    armsCount(i, j) >= 3 && !plaza(i, j) && built(i, j);
 
   // ---- 8. lots along every street segment, both sides ----
   const lots: Lot[] = [];
@@ -583,7 +575,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   const addLot = (lot: Lot): void => {
     const cx = Math.floor(lot.x / CH), cz = Math.floor(lot.z / CH);
     const dist = district(cx, cz);
-    if (dist !== 'urban' && dist !== 'downtown' && dist !== 'industrial') return; // nature/park/race stay clear
+    if (dist !== 'urban' && dist !== 'downtown' && dist !== 'industrial') return; // nature/park stay clear
     // keep the railway corridor (plus the sweep of a barrier arm) and the
     // river banks clear — nothing built may touch the track, and the whole
     // FOOTPRINT must clear the water, not just the lot centre (a deep lot
@@ -599,6 +591,15 @@ function buildPlan(bx: number, by: number): CityPlan {
       if (rail.near(fx, fz, 3)) return;
       if (river.inWater(fx, fz) ||
           river.near(fx, fz, river.halfAt(fx, fz) + 1.5)) return;
+    }
+    // and no lot may overlap another — corner lots of meeting segments used
+    // to intersect, baking buildings into buildings. 2.5 m apart keeps kit
+    // roof overhangs clear of the neighbour's walls too.
+    for (const o of lots) {
+      const oflip = Math.abs(Math.abs(o.ry) - Math.PI / 2) < 0.01;
+      const ohx = (oflip ? o.d : o.w) / 2, ohz = (oflip ? o.w : o.d) / 2;
+      if (Math.abs(o.x - lot.x) < ohx + hx + 2.5 &&
+          Math.abs(o.z - lot.z) < ohz + hz + 2.5) return;
     }
     lots.push(lot);
     const k = key(cx, cz);
@@ -697,12 +698,11 @@ function buildPlan(bx: number, by: number): CityPlan {
     seed,
     bx,
     by,
-    lineH, lineV, segH, segV, arms, signalized, roundabout, plaza, district,
+    lineH, lineV, segH, segV, arms, signalized, plaza, district,
     lots: (cx, cz) => lotsByChunk.get(key(cx, cz)) ?? [],
     crossings,
     riverBridges,
     stations,
-    tram,
     exits,
   };
   return plan;
@@ -736,13 +736,13 @@ function forceRailCrossings(
     const i = Math.round(p.x / 64);
     if (V.includes(i) && Math.abs(p.x - i * CH) < 7) {
       const j = Math.floor(p.z / CH);
-      if (p.z - j * CH > 11 && (j + 1) * CH - p.z > 11) pinsV.add(key(i, j));
+      if (p.z - j * CH > 18 && (j + 1) * CH - p.z > 18) pinsV.add(key(i, j));
     }
     // horizontal street line j crossed at (p.x, j*64)?
     const j = Math.round(p.z / 64);
     if (H.includes(j) && Math.abs(p.z - j * CH) < 7) {
       const i = Math.floor(p.x / CH);
-      if (p.x - i * CH > 11 && (i + 1) * CH - p.x > 11) pinsH.add(key(j, i));
+      if (p.x - i * CH > 18 && (i + 1) * CH - p.x > 18) pinsH.add(key(j, i));
     }
   }
   const add = (set: Set<string>, pins: Set<string>, cap: number, horiz: boolean): void => {
@@ -759,97 +759,6 @@ function forceRailCrossings(
   };
   add(segHSet, pinsH, 6, true);
   add(segVSet, pinsV, 6, false);
-}
-
-/**
- * Reserve the tram rectangle: pick the perimeter around downtown with the
- * most streets already open (railway shadows disqualify a side), then pin any
- * missing perimeter segments open so the loop always exists.
- */
-function reserveTram(
-  dcx: number, dcz: number,
-  rail: RailRoute,
-  segHSet: Set<string>, segVSet: Set<string>,
-  r: () => number,
-  railRunsAlong: (horiz: boolean, line: number, a: number, b: number) => boolean,
-): TramPlan | null {
-  const rects: Array<{ i0: number; j0: number; n: number; score: number }> = [];
-    for (const n of [4, 3, 2]) {
-      for (const di of [-1, 0]) for (const dj of [-1, 0]) {
-        const i0 = dcx + di, j0 = dcz + dj;
-        if (i0 < 0 || j0 < 0 || i0 + n > W || j0 + n > W) continue;
-        if (!(i0 <= dcx && dcx < i0 + n && j0 <= dcz && dcz < j0 + n)) continue;
-        rects.push({ i0, j0, n, score: 0 });
-      }
-    }
-  if (!rects.length) return null;
-  // score: +2 per already-open perimeter segment, −6 per railway-shadowed one
-  for (const rc of rects) {
-    const i1 = rc.i0 + rc.n, j1 = rc.j0 + rc.n;
-    for (let i = rc.i0; i < i1; i++) {
-      if (segHSet.has(key(rc.j0, i))) rc.score += 2;
-      if (segHSet.has(key(j1, i))) rc.score += 2;
-      if (railRunsAlong(true, rc.j0, i * CH, (i + 1) * CH)) rc.score -= 6;
-      if (railRunsAlong(true, j1, i * CH, (i + 1) * CH)) rc.score -= 6;
-    }
-    for (let j = rc.j0; j < j1; j++) {
-      if (segVSet.has(key(rc.i0, j))) rc.score += 2;
-      if (segVSet.has(key(i1, j))) rc.score += 2;
-      if (railRunsAlong(false, rc.i0, j * CH, (j + 1) * CH)) rc.score -= 6;
-      if (railRunsAlong(false, i1, j * CH, (j + 1) * CH)) rc.score -= 6;
-    }
-  }
-  rects.sort((a, b) => b.score - a.score || (r() < 0.5 ? -1 : 1));
-  const win = rects[0];
-  const i1 = win.i0 + win.n, j1 = win.j0 + win.n;
-  // pin the whole perimeter open
-  for (let i = win.i0; i < i1; i++) {
-    segHSet.add(key(win.j0, i));
-    segHSet.add(key(j1, i));
-  }
-  for (let j = win.j0; j < j1; j++) {
-    segVSet.add(key(win.i0, j));
-    segVSet.add(key(i1, j));
-  }
-  // chamfered perimeter: corner cuts keep the tram from jerking 90°
-  const corners = [[win.i0, win.j0], [i1, win.j0], [i1, j1], [win.i0, j1]];
-  const pts: Array<{ x: number; z: number }> = [];
-  const C = 9;
-  for (let k = 0; k < 4; k++) {
-    const [ci, cj] = corners[k];
-    const [pi, pj] = corners[(k + 3) % 4];
-    const [ni, nj] = corners[(k + 1) % 4];
-    const inX = Math.sign(ci - pi), inZ = Math.sign(cj - pj);
-    const outX = Math.sign(ni - ci), outZ = Math.sign(nj - cj);
-    pts.push({ x: ci * CH - inX * C, z: cj * CH - inZ * C });
-    pts.push({ x: ci * CH + outX * C, z: cj * CH + outZ * C });
-    pts.push({ x: (ci + ni) / 2 * CH, z: (cj + nj) / 2 * CH }); // straightener
-  }
-  // a stop on each side, shelter just outside the loop
-  const stops: TramStop[] = [];
-  for (let k = 0; k < 4; k++) {
-    const [ci, cj] = corners[k];
-    const [ni, nj] = corners[(k + 1) % 4];
-    const mx = (ci + ni) / 2 * CH, mz = (cj + nj) / 2 * CH;
-    const horiz = cj === nj;
-    const outward = horiz ? (cj * CH < CENTER ? -1 : 1) : (ci * CH < CENTER ? -1 : 1);
-    stops.push({
-      x: horiz ? mx : mx + outward * 5.7,
-      z: horiz ? mz + outward * 5.7 : mz,
-      ry: horiz ? Math.PI / 2 : 0,
-    });
-  }
-  return {
-    pts,
-    stops,
-    linesH: [win.j0, j1],
-    linesV: [win.i0, i1],
-  };
-}
-
-function raceChunks(): Array<[number, number]> {
-  const b = W - 2;
-  return [[b, b], [b + 1, b], [b, b + 1], [b + 1, b + 1]];
 }
 
 /** Drop segments that ended up disconnected from the main network. */

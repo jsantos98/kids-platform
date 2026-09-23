@@ -5,7 +5,7 @@
 import { setCityBase, citySeed, streetLinesFor } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
-import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, TRAM } from '../src/worlds/grid.js';
+import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA } from '../src/worlds/grid.js';
 import { clearRiverCache } from '../src/worlds/riverRoute.js';
 
 const clearAllWorldCaches = (): void => {
@@ -161,7 +161,7 @@ for (const [bx, by] of cells) {
   for (let i = 0; i < raw.length; i++) {
     const b = raw[i];
     if ((b & ROAD) && (b & RAIL) && (b & RIVER)) railRiverRoadTotal++;
-    if ((b & LOT) && (b & (ROAD | RAIL | RIVER | PLAZA | TRAM))) lotClashTotal++;
+    if ((b & LOT) && (b & (ROAD | RAIL | RIVER | PLAZA))) lotClashTotal++;
   }
 }
 

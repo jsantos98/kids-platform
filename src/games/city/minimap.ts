@@ -1,9 +1,7 @@
-// Minimap: the whole island at a glance — chunk biomes, roads, the race
-// circuit, traffic-light state, missions and the player arrow. Drawn on a 2D
+// Minimap: the whole island at a glance — chunk biomes, roads,// circuit, traffic-light state, missions and the player arrow. Drawn on a 2D
 // canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
-import { racePath } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
@@ -99,25 +97,6 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
 
-    // the downtown tram loop + its stops
-    if (plan.tram) {
-      ctx.strokeStyle = '#e8b23c';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 3]);
-      ctx.beginPath();
-      plan.tram.pts.forEach((p, k) => {
-        const x = tx(p.x), y = ty(p.z);
-        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#e8b23c';
-      for (const st of plan.tram.stops) {
-        ctx.fillRect(tx(st.x) - 2.5, ty(st.z) - 2.5, 5, 5);
-      }
-    }
-
     // train stations: blue platforms
     ctx.fillStyle = '#4a90d9';
     for (const st of plan.stations) {
@@ -140,31 +119,10 @@ export class Minimap {
     ctx.fillRect(tx(ISLAND), ty(plan.exits.e * CH - 5.5), stub * scale, 11 * scale);
     ctx.fillRect(tx(-stub), ty(plan.exits.w * CH - 5.5), stub * scale, 11 * scale);
 
-    // race circuit outline (world-fixed)
-    ctx.strokeStyle = '#5a6474';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    racePath().forEach((p, i) => {
-      const x = tx(p.x), y = ty(p.z);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-
-    // traffic lights: one dot per real intersection (roundabouts get a ring,
-    // plazas an amber one); level crossings get a white ×
+    // traffic lights: one dot per real intersection (plazas get an amber
+    // one); level crossings get a white ×
     for (let i = 1; i < WORLD_CHUNKS; i++) {
       for (let j = 1; j < WORLD_CHUNKS; j++) {
-        if (plan.roundabout(i, j)) {
-          ctx.fillStyle = '#a4cf85';
-          ctx.beginPath();
-          ctx.arc(tx(i * CH), ty(j * CH), 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#fffdf8';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          continue;
-        }
         if (plan.plaza(i, j)) {
           ctx.fillStyle = '#f6c952';
           ctx.beginPath();

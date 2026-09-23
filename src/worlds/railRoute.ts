@@ -2,7 +2,6 @@
 // spline through a wobbling ring of control points, not a lattice polyline.
 // Trains lean through long gentle curves the whole way round. The loop is
 // validated per seed:
-//   - it stays out of the race-circuit corner (SE)
 //   - it never threads a street intersection (junction tile chaos)
 //   - control points keep a minimum spacing (no kinks)
 // Where the line meets a street the plan carves a level crossing (cityPlan);
@@ -32,19 +31,6 @@ export interface RailRoute {
    * parallel run (bad, shadows streets) from a square crossing (fine) */
   headingAt(x: number, z: number): number;
   control: Array<{ x: number; z: number }>;
-  /** dense samples of the pristine spline, before crossing deformation —
-   * lets the plan re-square the rail once the tram rectangle is known */
-  basePts: Array<{ x: number; z: number; h: number }>;
-  /** control rings of the runner-up candidates: resquareRail re-rolls
-   * through them once the tram streets are known, so the COMPLETE street
-   * set gets the same quality gate the lattice set did */
-  candidates?: Array<Array<{ x: number; z: number }>>;
-}
-
-// the open race-corner zone: nothing rail-ish on its SE diagonal
-const RACE_EDGE = (WORLD_CHUNKS - 2) * 64 - 4;
-function inRaceZone(x: number, z: number): boolean {
-  return x > RACE_EDGE && z > RACE_EDGE;
 }
 
 // module-level cache: the route only depends on the city cell, and the chunk
@@ -256,7 +242,6 @@ function buildRoute(bx: number, by: number): RailRoute {
     if (ranked.length === 0) continue;
     for (const a of ranked) {
       const route = finalize(bx, by, a.control, a.path);
-      route.candidates = ranked.map(t => t.control);
       const q = shapeQuality(route.path, H, V, river, zones);
       if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
@@ -266,7 +251,6 @@ function buildRoute(bx: number, by: number): RailRoute {
   for (const mul of strengths) {
     const a = forcedRoute(seed);
     const route = finalize(bx, by, a.control, a.path);
-    route.candidates = [a.control];
     const q = shapeQuality(route.path, H, V, river, zones);
     if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
     if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
@@ -296,14 +280,6 @@ function tryRoute(
     let z = CZ + Math.sin(th) * radZ * rad * (1 + 0.24 * Math.sin(th + ph2));
     x = Math.max(44, Math.min(ISLAND - 44, x));
     z = Math.max(44, Math.min(ISLAND - 44, z));
-    // duck inside around the race corner: pull toward the centre while the
-    // point sits on the SE diagonal guard
-    const GUARD = (WORLD_CHUNKS - 2) * 64 - 48;
-    let guard = 0;
-    while (x > GUARD && z > GUARD && guard++ < 60) {
-      x = CX + (x - CX) * 0.92;
-      z = CZ + (z - CZ) * 0.92;
-    }
     control.push({ x, z });
   }
   // slide control points out of the street-junction squares — a railway
@@ -346,7 +322,6 @@ function tryRoute(
   let inBridgeRun = false;
   for (let k = 0; k < path.pts.length; k++) {
     const p = path.pts[k];
-    if (inRaceZone(p.x, p.z)) score += 3;
     if (p.x < 34 || p.x > ISLAND - 34 || p.z < 34 || p.z > ISLAND - 34) score += 3;
     const i = Math.round(p.x / 64), jn = Math.round(p.z / 64);
     if (i >= 1 && i < WORLD_CHUNKS && jn >= 1 && jn < WORLD_CHUNKS) {
@@ -401,13 +376,13 @@ function tryRoute(
       if ((a.z - line * 64) * (b.z - line * 64) < 0 && Math.abs(mj * 64 - line * 64) < 1 && Math.abs((mi * 64) % 64) >= 0) {
         // crossing of an H line: too close to a V-node column?
         const midX = (a.x + b.x) / 2;
-        if (Math.abs(midX - Math.round(midX / 64) * 64) < 16) score += 25;
+        if (Math.abs(midX - Math.round(midX / 64) * 64) < 20) score += 25;
       }
     }
     for (const line of V) {
       if ((a.x - line * 64) * (b.x - line * 64) < 0) {
         const midZ = (a.z + b.z) / 2;
-        if (Math.abs(midZ - Math.round(midZ / 64) * 64) < 16) score += 25;
+        if (Math.abs(midZ - Math.round(midZ / 64) * 64) < 20) score += 25;
       }
     }
   }
@@ -470,8 +445,9 @@ function deform(
   const swung = riverSwing(pts, river, zones);
   const lifted = clearancePush(swung, H, V);
   const pushed = clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V);
-  const cleaned = deSpikes(ironSpikes(pushed));
-  if (cleaned.length === pushed.length) return cleaned;
+  const ironed = ironSpikes(clearancePush(roundCorners(pushed), H, V));
+  const cleaned = deSpikes(ironed);
+  if (cleaned.length === ironed.length) return cleaned;
   // a fold was spliced out: its chord can cut a street approach askew or
   // ride the asphalt the fold used to skirt, so re-run the crossing tail
   // once on the cleaned shape. The splice leaves locally SPARSE vertices
@@ -480,7 +456,43 @@ function deform(
   // grip the chord's middle and bend it square. (Rare — fold-free cities
   // skip this pass.)
   const repinned = perpendicularCrossings(polyPath(subdivide(cleaned)), H, V);
-  return deSpikes(ironSpikes(clearancePush(repinned, H, V)));
+  return deSpikes(ironSpikes(clearancePush(roundCorners(clearancePush(repinned, H, V)), H, V)));
+}
+
+/** round off sharp turns: any corner turning more than ~38 degrees gets its
+ * apex replaced by two points part-way along each leg (classic corner
+ * cutting), iterated twice. Crossing walls keep their square run through
+ * the asphalt — both corners of a wall cut alike and the stretch between
+ * them is untouched — while pin kinks and splice remnants read as smooth
+ * track instead of jagged zigzag. A clearance push afterwards guarantees a
+ * cut can't dip the rail back onto asphalt. */
+function roundCorners(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let pass = 0; pass < 2; pass++) {
+    const N = cur.length;
+    const MIN_TURN = (38 * Math.PI) / 180;
+    const out: Array<{ x: number; z: number }> = [];
+    let changed = false;
+    for (let k = 0; k < N; k++) {
+      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      let turn = 0;
+      if (l1 > 0.25 && l2 > 0.25) {
+        const t1 = Math.atan2(b.x - a.x, b.z - a.z), t2 = Math.atan2(c.x - b.x, c.z - b.z);
+        turn = Math.abs(t2 - t1);
+        if (turn > Math.PI) turn = Math.PI * 2 - turn;
+      }
+      if (turn < MIN_TURN || l1 < 1 || l2 < 1) { out.push(b); continue; }
+      // cut ~32% along each leg, capped at 1.8 m so gentle bends barely move
+      const f = Math.min(0.32, 1.8 / l1, 1.8 / l2);
+      out.push({ x: b.x + (a.x - b.x) * f, z: b.z + (a.z - b.z) * f });
+      out.push({ x: b.x + (c.x - b.x) * f, z: b.z + (c.z - b.z) * f });
+      changed = true;
+    }
+    cur = out;
+    if (!changed) break;
+  }
+  return cur;
 }
 
 /** insert points along every segment so none exceeds ~maxLen m */
@@ -627,45 +639,7 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
     near(x, z, r) { return p2.nearest(x, z).d2 < r * r; },
     headingAt(x, z) { return p2.nearest(x, z).p.h; },
     control,
-    basePts: path.pts,
   };
-}
-
-/**
- * Re-run the crossing deformation once the plan knows streets the rail could
- * not (the tram rectangle is reserved after this route is built). The
- * COMPLETE street set gets the same quality gate the lattice set did: every
- * candidate ring is re-deformed against H/V and the first clean one wins.
- * The tram rectangle was placed to dodge the shipped route's shadows, and a
- * re-roll candidate is itself ride-free against the complete set, so the
- * swap cannot put the rail on top of the tram corridor. Rewrites the cached
- * route in place — every consumer reads the same object.
- */
-export function resquareRail(route: RailRoute, bx: number, by: number, H: number[], V: number[]): void {
-  const cands = route.candidates && route.candidates.length > 0 ? route.candidates : [route.control];
-  // resquareRail's H/V include the tram lines, whose positions come from the
-  // plan, which exists only after a route shipped — the river, however, is
-  // plan-independent, so the R22 trestle-vs-bridge gate still applies here
-  const river = riverFor(citySeed(bx, by));
-  const zones = bridgeZones(H, V, river);
-  let best: { p2: WorldPath; q: Quality } | null = null;
-  for (const c of cands) {
-    const p2 = polyPath(deform(makePath(c, true).pts, H, V, river, zones));
-    const q = shapeQuality(p2, H, V, river, zones);
-    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) {
-      best = { p2, q };
-      break;
-    }
-    if (!best || qualityBetter(q, best.q)) best = { p2, q };
-  }
-  const p2 = best!.p2;
-  route.path = p2;
-  route.total = p2.total;
-  route.pts = p2.pts;
-  route.sample = d => p2.sample(d);
-  route.distTo = (x, z) => Math.sqrt(p2.nearest(x, z).d2);
-  route.near = (x, z, r) => p2.nearest(x, z).d2 < r * r;
-  route.headingAt = (x, z) => p2.nearest(x, z).p.h;
 }
 
 /** half-length of the straightened approach either side of a crossing (m) */
@@ -713,7 +687,7 @@ export function clearancePush(
     }
     const total = cum[N];
     // span-crossings of the CURRENT path, split by whether the plan would
-    // record them (>= 11.5 m from the nearest node, matching the
+    // record them (>= 18 m from the nearest node, matching the
     // collector's margin). Recorded crossings earn the no-push window —
     // the pin rebuilds that neighbourhood. A crossing squeezed against a
     // junction would go unrecorded (no barriers), so instead of tearing it
@@ -738,7 +712,7 @@ export function clearancePush(
           const f = (c - va) / (vb - va);
           const cross = wa + (wb - wa) * f;
           const s = cum[k] + f * (cum[k + 1] - cum[k]);
-          if (Math.abs(cross - Math.round(cross / 64) * 64) >= 12) keep.push(s);
+          if (Math.abs(cross - Math.round(cross / 64) * 64) >= 18) keep.push(s);
           else raw.push({ s, k });
         }
       }

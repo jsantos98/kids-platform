@@ -24,13 +24,6 @@ export const GAMES: GameEntry[] = [
     url: 'play/city.html?vehicle=heli',
   },
   {
-    id: 'race',
-    title: 'City Race Track',
-    icon: '🏁',
-    blurb: 'Race trucks on the circuit — set your best lap!',
-    url: 'play/city.html?race=1',
-  },
-  {
     id: 'firetruck',
     title: 'Fire Truck — City Rescue',
     icon: '🔥',

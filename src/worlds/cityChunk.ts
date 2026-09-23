@@ -2,13 +2,11 @@
 // plan (cityPlan.ts, seeded per world); this file just renders one 64 m chunk
 // of that plan into a vertex-colored mesh: wide streets, node tiles, round-
 // abouts and plazas, lamps, building lots, park ponds, the river with its
-// banks, fords and street bridges, nature scatter, the beach ring and the
-// race circuit. The whole island is built once at boot.
+// banks, fords and street bridges, and nature scatter.
 import * as THREE from 'three';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { raceTiles, tileCenter } from './racetrack.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
@@ -64,9 +62,6 @@ function kenneyTPL() {
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
-    raceStraight: bakedModel('race-straight'),
-    raceCorner: bakedModel('race-corner'),
-    raceFinish: bakedModel('race-finish'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     industrial: [...'abcdefghijklmnopqrst'].map(b => bakedModel('ind-' + b)).filter((t): t is BakedTemplate => !!t),
     indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
@@ -92,7 +87,6 @@ export function slabColor(d: District): number {
     case 'desert': return 0xe8d29a;
     case 'meadow': return 0xa9c88b;
     case 'green': return 0xa9c88b;
-    case 'race': return 0xa9c88b;
     case 'park': return 0xa4cf85;
     case 'downtown': return 0xdcd6c6;
     case 'industrial': return 0xcfccc2; // worn concrete aprons
@@ -234,12 +228,12 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const TS = 64 / 6, TY = 0.11;
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
-  // an open junction has a side road (plus/T/L, roundabout, plaza); a node
+  // an open junction has a side road (plus/T/L, plaza); a node
   // the road just runs through — or dead-ends at — does not
   const openJunction = (i: number, j: number): boolean => {
     const a = plan.arms(i, j); // [west, east, north, south]
     const n = a.filter(Boolean).length;
-    if (plan.plaza(i, j) || plan.roundabout(i, j) || n >= 3) return true;
+    if (plan.plaza(i, j) || n >= 3) return true;
     return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
   };
   const jSW = openJunction(cx, cz);     // west corner of the south run
@@ -268,8 +262,6 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
   if (plan.plaza(cx, cz)) {
     bakePlaza(X0, Z0);
-  } else if (plan.roundabout(cx, cz)) {
-    bakeRoundabout(X0, Z0);
   } else {
     // corner fillets: wherever two arms meet, an asphalt disc rounds the
     // inner corner, and the elbow of an L-bend gets a bigger disc curving
@@ -343,7 +335,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
         boxes.push({ x1: lot.x - hx, x2: lot.x + hx, z1: lot.z - hz, z2: lot.z + hz });
       }
     } else if (lot.kind === 'trees') {
-      bakeTrees(lot.x, lot.z, 2 + ((lot.v * 2) | 0), lot.w / 2);
+      bakeTrees(lot.x, lot.z, 2 + ((lot.v * 2) | 0), lot.w / 2, lot);
     } else {
       // parking lot: slab + a car or two
       const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
@@ -363,30 +355,28 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  function bakeTrees(x: number, z: number, n = 3, spread = 3): void {
+  function bakeTrees(
+    x: number, z: number, n = 3, spread = 3,
+    /** the tree row's own lot: its LOT cells are fair ground, everything
+     * built around it is not — a wandering tree must never land in a
+     * neighbouring building */
+    own?: Lot,
+  ): void {
     for (let i = 0; i < n; i++) {
       const tx = x + j(r, spread), tz = z + j(r, spread);
-      // inside its own lot, but still not on the road, track or water
+      // inside its own lot, but still not on the road, track, water — or in
+      // any other lot's building
       if (occ.claims(tx, tz, 0.8, STRUCTURED)) continue;
+      if (occ.claims(tx, tz, 0.9, LOT)) {
+        const inOwn = own && tx > own.x - own.w / 2 - 1 && tx < own.x + own.w / 2 + 1
+          && tz > own.z - own.d / 2 - 1 && tz < own.z + own.d / 2 + 1;
+        if (!inOwn) continue;
+      }
       if (TPL.trees.length) {
         bakeModel(B, pick(r, TPL.trees), tx, 0.08, tz, r() * Math.PI * 2, 5 + r() * 2.5);
       }
       boxes.push({ x1: tx - 0.55, x2: tx + 0.55, z1: tz - 0.55, z2: tz + 0.55, small: 1 });
     }
-  }
-
-  /** traffic circle: lighter circular carriageway with a painted ring,
-   * kerbed grass island with a tree, pole collision */
-  function bakeRoundabout(x: number, z: number): void {
-    B.cyl(6.4, 6.4, 0.06, 22, 0x9aa1ab, x, 0.14, z);       // circular carriageway
-    B.cyl(6.0, 6.0, 0.065, 22, 0xe8e4d8, x, 0.1425, z);    // painted ring
-    B.cyl(5.6, 5.6, 0.07, 22, 0x9aa1ab, x, 0.145, z);
-    B.cyl(2.4, 2.6, 0.22, 14, 0x8f97a3, x, 0.21, z);       // kerb
-    B.cyl(2.1, 2.1, 0.24, 14, 0xa4cf85, x, 0.29, z);       // grass island
-    if (TPL.trees.length) {
-      bakeModel(B, pick(r, TPL.trees), x, 0.41, z, r() * Math.PI * 2, 2.0 + r() * 0.6);
-    }
-    boxes.push({ x1: x - 2.1, x2: x + 2.1, z1: z - 2.1, z2: z + 2.1, small: 1 });
   }
 
   /** paved plaza with a fountain, benches and planters — the meeting place */
@@ -491,20 +481,6 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       if (!tpl) continue;
       bakeModel(B, tpl, x, 0.08, z, r() * Math.PI * 2, s);
       boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
-    }
-  }
-
-  // race circuit: bake the tiles whose centre falls inside this chunk
-  if (district === 'race' && TPL.raceStraight && TPL.raceCorner) {
-    for (const t of raceTiles()) {
-      const c = tileCenter(t.col, t.row);
-      if (c.x < X0 || c.x >= X0 + CH || c.z < Z0 || c.z >= Z0 + CH) continue;
-      const tpl = t.kind === 'straight' ? TPL.raceStraight
-        : t.kind === 'corner' ? TPL.raceCorner
-        : t.kind === 'finish' ? TPL.raceFinish : TPL.raceStraight;
-      if (!tpl) continue;
-      // kit pieces are already 10 units = one 10 m tile; no extra scaling
-      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1);
     }
   }
 

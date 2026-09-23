@@ -41,8 +41,6 @@ export function streetLinesFor(bx: number, by: number): { H: number[]; V: number
       if (!lines.includes(missing)) lines.push(missing);
     }
   }
-  // race-corner access: keep the zone boundary line as a street
-  if (!H.includes(WORLD_CHUNKS - 2) && !V.includes(WORLD_CHUNKS - 2)) H.push(WORLD_CHUNKS - 2);
   // the four causeway avenues are streets too
   for (const l of [southExit(bx, by - 1), southExit(bx, by)]) if (!V.includes(l)) V.push(l);
   for (const l of [eastExit(bx - 1, by), eastExit(bx, by)]) if (!H.includes(l)) H.push(l);
@@ -60,7 +58,7 @@ export function cityAt(x: number, z: number): CityRef {
   return { bx, by, ox: bx * CITY_PITCH, oz: by * CITY_PITCH, key: `${bx},${by}` };
 }
 
-/** exit roads live on these interior lattice lines (kept off the race corner) */
+/** exit roads live on these interior lattice lines */
 function exitCandidates(): number[] {
   const out: number[] = [];
   for (let l = 2; l <= WORLD_CHUNKS - 3; l++) out.push(l);

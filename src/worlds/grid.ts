@@ -1,5 +1,5 @@
 // The occupancy grid: ONE map per city saying what occupies every 1 m cell.
-// Streets, rail, river, lots, tram, plaza and the race circuit are all
+// Streets, rail, river, lots and plazas are all
 // PAINTED onto it from the seeded generators, and overlaps accumulate by
 // bitwise OR — so a cell under both the road and the rail reads ROAD|RAIL
 // and means "level crossing", ROAD|RIVER means "bridge", RAIL|RIVER means
@@ -14,7 +14,6 @@ import { cityPlanFor } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
-import { raceTiles, RACE_ORIGIN, RACE_TILE } from './racetrack.js';
 import { ISLAND, WORLD_CHUNKS } from './world.js';
 
 export const ROAD = 1;
@@ -22,16 +21,14 @@ export const RAIL = 2;
 export const RIVER = 4;
 export const LOT = 8;
 export const PLAZA = 16;
-export const TRAM = 32;
-export const RACE = 64;
 export const DECK = 128; // causeway decks (offshore — reserved)
 
 /** props may never claim cells carrying any of these */
-export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA | TRAM;
+export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA;
 /** built ground a prop cannot stand on even inside its own lot (trees) */
-export const STRUCTURED = ROAD | RAIL | RIVER | PLAZA | TRAM;
+export const STRUCTURED = ROAD | RAIL | RIVER | PLAZA;
 /** wild scatter (trees, junk) may own LOT-free, built-free ground only */
-export const WILD_FORBIDDEN = ROAD | RAIL | RIVER | LOT | PLAZA | TRAM | RACE;
+export const WILD_FORBIDDEN = ROAD | RAIL | RIVER | LOT | PLAZA;
 
 const MARGIN = 32;                       // river + causeway mouths overhang
 const SIZE = ISLAND + MARGIN * 2;
@@ -129,8 +126,8 @@ export function occupancyFor(bx: number, by: number): Occupancy {
 }
 
 /** paint one city from its seeded generators. cityPlanFor must be asked for
- * FIRST — building the plan is what re-squares the rail after the tram
- * rectangle is reserved, and the grid must record the final rail. */
+ * FIRST — building the plan finalizes the street set (crossing pins,
+ * R22 sweep, trims), and the grid must record that final rail. */
 function paint(bx: number, by: number): CityGrid {
   const plan = cityPlanFor(bx, by);
   const rail = railRouteFor(bx, by);
@@ -163,19 +160,9 @@ function paint(bx: number, by: number): CityGrid {
   }
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
     for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
-      if (plan.roundabout(cx, cz)) g.disc(cx * 64, cz * 64, 6.4, ROAD);
-      else if (plan.plaza(cx, cz)) g.disc(cx * 64, cz * 64, 9.4, PLAZA);
+      if (plan.plaza(cx, cz)) g.disc(cx * 64, cz * 64, 9.4, PLAZA);
     }
   }
-
-  // race circuit tiles
-  for (const t of raceTiles()) {
-    const c = RACE_ORIGIN.x + t.col * RACE_TILE, r = RACE_ORIGIN.z + t.row * RACE_TILE;
-    g.fill(c, r, c + RACE_TILE - 0.5, r + RACE_TILE - 0.5, RACE);
-  }
-
-  // tram loop (3.4 m paving)
-  if (plan.tram) g.stroke(plan.tram.pts, 1.5, 1.7, TRAM);
 
   // rail bed (3.4 m bed, stamped a little wider for approaches)
   g.stroke(rail.pts, 1.5, 2, RAIL);

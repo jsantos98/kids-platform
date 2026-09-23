@@ -13,6 +13,7 @@ import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
+import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT } from './grid.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
 import { STRAIT } from './cityGrid.js';
 
@@ -115,6 +116,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const plan = cityPlanFor(bx, by);
   const rail = railRouteFor(bx, by);
   const river = riverFor(seed);
+  const occ = occupancyFor(bx, by);
   const district = plan.district(cx, cz);
 
   // base slab — district ground, sand beach ring at the border
@@ -128,7 +130,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   // where a street bridges it ----
   const bridges = plan.riverBridges.filter(b => b.x > X0 - 30 && b.x < X0 + CH + 30 && b.z > Z0 - 30 && b.z < Z0 + CH + 30);
   const nearBridge = (x: number, z: number): boolean =>
-    bridges.some(b => Math.hypot(b.x - x, b.z - z) < 11);
+    bridges.some(b => Math.hypot(b.x - x, b.z - z) < (b.exit ? 16 : 11));
   {
     const rp = river.pts;
     for (let k = 0; k + 1 < rp.length; k++) {
@@ -151,11 +153,14 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     for (let k = 2; k + 2 < rp.length; k += 5) {
       const p = rp[k];
       if (p.x < X0 + 4 || p.x > X0 + CH - 4 || p.z < Z0 + 4 || p.z > Z0 + CH - 4) continue;
-      if (nearBridge(p.x, p.z) || nearStreet(p.x, p.z)) continue;
+      if (nearBridge(p.x, p.z)) continue;
       const side = (k % 2) * 2 - 1;
       const rx = Math.cos(p.h), rz = -Math.sin(p.h);
       const tx = p.x + rx * side * (p.w / 2 + 5 + r() * 4);
       const tz = p.z + rz * side * (p.w / 2 + 5 + r() * 4);
+      // the occupancy grid knows about the riverside lots the plan only
+      // checks at their centre — a tree past the bank line lands in a yard
+      if (occ.claims(tx, tz, 1.2, BLOCKED_FOR_PROPS)) continue;
       const bankTpl = district === 'desert' ? pick(r, [...TPL.cacti, ...TPL.rocks])
         : district === 'forest' ? pick(r, TPL.pines) : pick(r, TPL.trees);
       if (bankTpl) {
@@ -287,20 +292,22 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
-  // chunks only keep their corner collision boxes
+  // chunks only keep their corner collision boxes (skipped when the occupancy
+  // grid shows the corner is inside a lot — chunks skips that pole too)
   if (plan.signalized(cx, cz)) {
     for (const [tx, tz] of [[X0 + 12.5, Z0 + 12.5], [X0 - 12.5, Z0 - 12.5]]) {
+      if (occ.claims(tx, tz, 1, LOT)) continue;
       boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }
 
   // street lamps along surviving streets (urban fabric + industry), kept
-  // clear of the railway corridor so nothing stands in the crossing
+  // clear of the railway corridor and out of the front corners of corner lots
   const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
   if (lampDistrict) {
     for (let d = 11; d < CH; d += 18) {
-      const clearH = roadS && !rail.near(X0 + d, Z0 + 7.8, 9);
-      const clearV = roadW && !rail.near(X0 + 7.8, Z0 + d, 9);
+      const clearH = roadS && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT);
+      const clearV = roadW && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT);
       if (clearH && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
       if (clearV && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
       if (clearH) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
@@ -359,6 +366,8 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   function bakeTrees(x: number, z: number, n = 3, spread = 3): void {
     for (let i = 0; i < n; i++) {
       const tx = x + j(r, spread), tz = z + j(r, spread);
+      // inside its own lot, but still not on the road, track or water
+      if (occ.claims(tx, tz, 0.8, STRUCTURED)) continue;
       if (TPL.trees.length) {
         bakeModel(B, pick(r, TPL.trees), tx, 0.08, tz, r() * Math.PI * 2, 5 + r() * 2.5);
       }
@@ -432,17 +441,17 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     // streetless block: a little wooded green
     for (let k = 0; k < 8; k++) {
       const x = X0 + 10 + r() * (CH - 20), z = Z0 + 10 + r() * (CH - 20);
-      if (nearStreet(x, z)) continue;
+      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS)) continue;
       bakeModel(B, pick(r, [...TPL.trees, ...TPL.pines]), x, 0.08, z, r() * Math.PI * 2, 4 + r() * 3);
       boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
     }
   } else if (district === 'industrial') {
     // works yard dressing: a chimney or water tower plus scattered junk
-    // away from the streets and the rail siding
+    // on ground the occupancy grid shows is free of streets, lots and track
     if (TPL.chimney || TPL.waterTower) {
       for (let t = 0; t < 6; t++) {
         const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
-        if (nearStreet(x, z)) continue;
+        if (occ.claims(x, z, 1.6, BLOCKED_FOR_PROPS)) continue;
         const big = r() < 0.5 && TPL.chimney ? TPL.chimney : TPL.waterTower;
         if (!big) continue;
         const s = big === TPL.chimney ? 3.2 + r() * 1.6 : 4.5 + r();
@@ -453,14 +462,14 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
     if (TPL.windmill && r() < 0.3) {
       const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
-      if (!nearStreet(x, z)) {
+      if (!occ.claims(x, z, 1.4, BLOCKED_FOR_PROPS)) {
         bakeModel(B, TPL.windmill, x, 0.1, z, r() * Math.PI * 2, 4 + r() * 2);
         boxes.push({ x1: x - 1, x2: x + 1, z1: z - 1, z2: z + 1, small: 1 });
       }
     }
     for (let k = 0; k < 3; k++) {
       const x = X0 + 9 + r() * (CH - 18), z = Z0 + 9 + r() * (CH - 18);
-      if (nearStreet(x, z) || !TPL.indExtras.length) continue;
+      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS) || !TPL.indExtras.length) continue;
       const tpl = pick(r, TPL.indExtras);
       const s = 2.6 + r() * 1.4;
       bakeModel(B, tpl, x, 0.1, z, r() * Math.PI * 2, s);
@@ -468,24 +477,12 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  function nearStreet(x: number, z: number): boolean {
-    // keep scatter clear of street corridors, the railway and the river
-    const lx = Math.round(x / CH), lz = Math.round(z / CH);
-    if (Math.abs(x - lx * CH) < 8.6 &&
-        (plan.segV(lx, cz) || plan.segV(lx, cz - 1))) return true;
-    if (Math.abs(z - lz * CH) < 8.6 &&
-        (plan.segH(lz, cx) || plan.segH(lz, cx - 1))) return true;
-    if (rail.near(x, z, 9.5)) return true;
-    if (river.near(x, z, river.halfAt(x, z) + 2.5)) return true;
-    return false;
-  }
-
   function scatterNature(kind: 'forest' | 'desert' | 'meadow'): void {
     const tries = kind === 'forest' ? 30 : kind === 'desert' ? 14 : 18;
     for (let i = 0; i < tries; i++) {
       const x = X0 + 7 + r() * (CH - 14);
       const z = Z0 + 7 + r() * (CH - 14);
-      if (nearStreet(x, z)) continue;
+      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS)) continue;
       let tpl: BakedTemplate | null = null;
       const s = 3.5 + r() * 2.5;
       if (kind === 'forest') tpl = pick(r, [...TPL.pines, ...TPL.trees]);

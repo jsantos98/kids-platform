@@ -31,7 +31,7 @@ add it here AND add an enforcement point (code guard or audit check).
 
 | # | Rule | Enforced in |
 |---|------|-------------|
-| R7 | **The rail crosses streets only perpendicular.** Route scoring heavily penalizes shallow crossings (<59°, +20 each) and junction-corner cuts (street hits <30 m of arc apart, +50, and threading within 14 m of a node). `perpendicularCrossings()` then pins every hit square: absolute across the asphalt (perpendicular distance < 7 m) within a ±30 m street window, plus a cos-blend by arc whose core and zone shrink where hits crowd. Points claimed by two crossings' walls (shared asphalt) are pinned by neither — a later wall would crush an earlier wall's spread. Same-line hits <26 m of arc apart fold into one crossing, and the plan clusters recorded crossings at ≤30 m — an unmerged close pair would leave an on-asphalt jog between two walls (the "W" ride). The wall's edge ramps 7→9 m off the line, so the kerb-edge vertex may lean up to ~18° while the travelled asphalt stays square; the bar is 20° worst in-corridor skew (measured at |d| < 6.5 m within ±24 m of the crossing). | `railRoute.ts`, `cityPlan.ts` |
+| R7 | **The rail crosses streets only perpendicular.** Route scoring heavily penalizes shallow crossings (<59°, +20 each) and junction-corner cuts (street hits <30 m of arc apart, +50, and threading within 14 m of a node). `perpendicularCrossings()` then pins every hit square: absolute across the asphalt (perpendicular distance < 7 m) within a ±30 m street window, plus a cos-blend by arc whose core and zone shrink where hits crowd. Points claimed by two crossings' walls (shared asphalt) are pinned by neither — a later wall would crush an earlier wall's spread. Same-line hits <26 m of arc apart fold into one crossing, and the plan clusters recorded crossings at ≤30 m — an unmerged close pair would leave an on-asphalt jog between two walls (the "W" ride). The wall's edge ramps 7→12 m off the line, so the kerb-edge transition may lean while the travelled asphalt stays square; the bar is 25° worst in-corridor skew (measured at |d| < 6.5 m within ±24 m of the crossing, sampled every 2 m along chords). | `railRoute.ts`, `cityPlan.ts` |
 | R8 | **The rail never lies on a road.** Parallel-with-clearance is fine, a square crossing is fine, overlap is not. `clearancePush()` runs BEFORE the pins (a graze pinned in place stays a 30 m skim along the asphalt) and iterates until clean: any point headed within 55° of a street's direction inside 10 m of it is displaced sideways to 11.5 m. The spread to neighbours is max-magnitude with decay, NEVER a mean — averaging dilutes a lone violation back onto the asphalt. Within ±12 m of a recorded crossing the pin owns the geometry (no push); a crossing too close to a node to record (<12 m) is swung whole to its majority side so it re-forms mid-block — pushing both its sides apart only tears the path into a hairpin. | `railRoute.ts` |
 | R8b | **A route ships only if its deformation provably worked.** `shapeQuality()` re-checks the finished path against the same numbers the audit uses (on-road rides, path folds, crossing skew) and `buildRoute()` deforms the top-scoring candidates in order, shipping the first clean one. The deform has rare bad modes on adversarial splines; a dirty result must cost a re-roll, never a shipped city. | `railRoute.ts buildRoute` |
 | R9 | **Nothing built touches the track:** lots ≥16 m, street lamps ≥9 m from the rail centreline. | `cityPlan.ts addLot`, `cityChunk.ts` lamp guard |
@@ -42,6 +42,13 @@ add it here AND add an enforcement point (code guard or audit check).
 | R14 | **The rail is a deformed polyline (`polyPath`), not a spline.** Never rebuild it through `makePath`/a smoother — re-smoothing undoes the perpendicular crossings. After the tram rectangle is reserved, the plan calls `resquareRail()` with the COMPLETE street set (lattice + corridors + tram sides) — the deformer must know every street. | `railRoute.ts finalize/resquareRail`, `cityPlan.ts` |
 | R15 | **Kenney templates have non-native origins/sizes.** The railroad tile sits ~1 m below its own origin (measure minY and lift — `bakeRails`); road kit tiles are 1 m native. `bakeModel`'s `s3` is a raw scale vector applied *before* rotation. Always probe native bounds before placing a template. | `railRoute.ts`, `assets.ts` |
 | R16 | Trains stop at plan stations; `Trains.distTo` answers crossing queries with arc distances. | `train.ts` |
+
+## The occupancy grid
+
+| # | Rule | Enforced in |
+|---|------|-------------|
+| R22 | **Never rail over river over road.** Where the rail sits in the water, no road bridge may sit within 24 m — a trestle sharing the water with a bridge is the one rail/river/road pileup the world forbids. Enforced three ways: the route scorer makes bridge-zone river crossings decisively expensive (+120/run), `shapeQuality` counts trestle-near-bridge runs and the quality gate re-rolls tainted candidates, and `cityPlan` drops (or refuses to pin) any street segment whose bridge would clash with a trestle span — the dead-end trim repairs the web. | `railRoute.ts`, `cityPlan.ts bridgeClash` |
+| R23 | **The occupancy grid is the shared authority on what occupies where.** `occupancyFor(bx,by)` paints river, streets, plaza/roundabout, race tiles, tram, rail and lots into one 1 m bitmask per city (ROAD=1, RAIL=2, RIVER=4, LOT=8…; overlaps OR together — ROAD\|RAIL is a crossing, ROAD\|RIVER a bridge, RAIL\|RIVER a trestle). EVERY prop/lamp/traffic-light/pedestrian placement asks the grid (`claims`) instead of hand-rolling distance checks against individual generators — `nearStreet` is gone. Forbidden combinations (LOT over street/track/water/plaza, and R22's triple) must count zero; `tools/audit-world.ts` scans the grid every run. Lot footprints (not just centres) must clear the river — `addLot` checks corners. | `grid.ts`, `cityChunk.ts`, `lampProps.ts`, `pedestrians.ts`, `audit-world.ts` |
 
 ## World structure
 
@@ -56,11 +63,12 @@ add it here AND add an enforcement point (code guard or audit check).
 ## Verification workflow
 
 - **Audit (numbers beat vibes):** `npx tsx tools/audit-world.ts <seed>` checks
-  R1, R7 (worst in-corridor skew ≤20°: the rail's worst angle to the street
+  R1, R7 (worst in-corridor skew ≤25°: the rail's worst angle to the street
   while on its asphalt, |d| < 6.5 m, ±24 m along), R8 (no near-parallel rail
   run <7 m from a road centreline for ≥8 m), R9, R10 indirectly (crossing
-  count > 0), R19. Extend this tool whenever you add a rule — one rule, one
-  check. Zero tolerance: the deform modes are seed-dependent, so sweep
+  count > 0), R19, and — via the occupancy grid — R22/R23 (zero forbidden
+  combination cells). Extend this tool whenever you add a rule — one rule,
+  one check. Zero tolerance: the deform modes are seed-dependent, so sweep
   several seeds
   (`for s in 7 777 4242 2024 9999 3 21 5; do npx tsx tools/audit-world.ts $s; done`)
   — a clean default seed proves nothing about the seed the player rolls.

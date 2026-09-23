@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { makeVillager } from '../../kit/index.js';
 import { Baked, bakeObjectToMesh, templateToMesh } from '../../engine/baked.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { occupancyFor, LOT } from '../../worlds/grid.js';
+import { cityAt } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND } from '../../worlds/world.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 
@@ -94,8 +96,13 @@ export class Pedestrians {
       p.dir = Math.random() < 0.5 ? -1 : 1;
       p.speed = 0.8 + Math.random() * 0.6;
       p.phase = Math.random() * 10;
-      if (alongX) p.mesh.position.set(this.ox + along, 0.1, this.oz + idx * this.CH + offset);
-      else p.mesh.position.set(this.ox + idx * this.CH + offset, 0.1, this.oz + along);
+      const sx = alongX ? along : idx * this.CH + offset;
+      const sz = alongX ? idx * this.CH + offset : along;
+      // sidewalks run right past building fronts — the occupancy grid says
+      // whether this stretch of pavement is inside someone's front yard
+      const city = cityAt(this.ox + sx + 0.5, this.oz + sz + 0.5);
+      if (occupancyFor(city.bx, city.by).claims(sx, sz, 0.5, LOT)) continue;
+      p.mesh.position.set(this.ox + sx, 0.1, this.oz + sz);
       p.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
       return;
     }

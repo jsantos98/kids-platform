@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
+import { occupancyFor, LOT } from '../../worlds/grid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { lightState } from './lights.js';
 import { LAMP_MATS, makeTrafficLights } from './lampProps.js';
@@ -49,9 +50,13 @@ export class ChunkManager {
     this.scene.add(mesh);
     // collision boxes move from city-local to world coordinates
     const wboxes = boxes.map(b => ({ ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz }));
-    // working lights only at real intersections
+    // working lights only at real intersections; a pole that would land in a
+    // corner lot (occupancy grid) is skipped — the junction keeps its other head
     const plan = cityPlanFor(bx, by);
-    const lights = plan.signalized(cx, cz) ? makeTrafficLights(ox + cx * this.CH, oz + cz * this.CH) : null;
+    const lights = plan.signalized(cx, cz)
+      ? makeTrafficLights(ox + cx * this.CH, oz + cz * this.CH, (wx, wz) =>
+          occupancyFor(bx, by).claims(wx - ox, wz - oz, 1, LOT))
+      : null;
     if (lights) this.scene.add(lights.group);
     const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
     this.chunks.set(key, { mesh, boxes: wboxes, wx, wz, cx, cz, lights });

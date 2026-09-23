@@ -99,7 +99,29 @@ export function polyPath(raw: Array<{ x: number; z: number }>): WorldPath {
       return { x: a.x + (b.x - a.x) * fr, z: a.z + (b.z - a.z) * fr, h: a.h + dh * fr };
     },
     nearest(x: number, z: number): { d2: number; p: PathPt; i: number } {
-      return nearestOf(pts, x, z);
+      // project onto SEGMENTS, not just vertices: the deformation collapses
+      // samples, and the polyline between two far-apart vertices is real
+      // rail that vertex-based guards would miss entirely
+      let bi = 0, bd = Infinity, bt = 0;
+      for (let i = 0; i < N; i++) {
+        const a = pts[i], b = pts[(i + 1) % N];
+        const abx = b.x - a.x, abz = b.z - a.z;
+        const len2 = abx * abx + abz * abz;
+        let t = len2 > 1e-9 ? ((x - a.x) * abx + (z - a.z) * abz) / len2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = a.x + abx * t - x, dz = a.z + abz * t - z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bd) { bd = d2; bi = i; bt = t; }
+      }
+      const a = pts[bi], b = pts[(bi + 1) % N];
+      let dh = b.h - a.h;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      return {
+        d2: bd,
+        p: { x: a.x + (b.x - a.x) * bt, z: a.z + (b.z - a.z) * bt, h: a.h + dh * bt },
+        i: bi,
+      };
     },
   };
 }

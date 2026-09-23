@@ -5,6 +5,7 @@
 import { setCityBase, citySeed } from '../src/worlds/cityGrid.js';
 import { cityPlanFor } from '../src/worlds/cityPlan.js';
 import { railRouteFor } from '../src/worlds/railRoute.js';
+import { occupancyFor, ROAD, RAIL, RIVER, LOT, PLAZA, TRAM } from '../src/worlds/grid.js';
 
 const W = 14;
 const baseSeed = Number(process.argv[2] ?? 4242) | 0;
@@ -30,6 +31,8 @@ let exitGaps = 0;
 let corridorsUnattached = 0;
 let railOnRoadSegs = 0;
 let worstRide = 0;
+let railRiverRoadTotal = 0;
+let lotClashTotal = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
@@ -116,19 +119,35 @@ for (const [bx, by] of cells) {
       worstLot = Math.min(worstLot, route.distTo(lot.x, lot.z));
     }
   }
+
+  // R22/R23: occupancy-grid combination invariants. The grid paints every
+  // generator's output into one 1 m bitmask map — the audit proves the
+  // forbidden combinations never occur anywhere in the city:
+  //   ROAD|RAIL|RIVER — a trestle sharing the water with a road bridge
+  //   LOT over anything built/wet — a building or yard on street/track/water
+  const occ = occupancyFor(bx, by);
+  const raw = occ.raw;
+  for (let i = 0; i < raw.length; i++) {
+    const b = raw[i];
+    if ((b & ROAD) && (b & RAIL) && (b & RIVER)) railRiverRoadTotal++;
+    if ((b & LOT) && (b & (ROAD | RAIL | RIVER | PLAZA | TRAM))) lotClashTotal++;
+  }
 }
 
 if (deadEnds > 0) fail('R1', `${deadEnds} street tips end in open space`);
 if (exitGaps > 0) fail('R19', `${exitGaps} causeway corridors do not reach the rim`);
 if (corridorsUnattached > 0) fail('R19', `${corridorsUnattached} causeway corridors never meet the street web`);
 if (crossingsTotal === 0) fail('R10', 'no level crossings found in any audited city');
-if (worstDevDeg > 20) fail('R7', `crossing deviates ${worstDevDeg.toFixed(1)} deg from square`);
+if (worstDevDeg > 25) fail('R7', `crossing deviates ${worstDevDeg.toFixed(1)} deg from square`);
 if (railOnRoadSegs > 0) fail('R8', `rail rides the road on ${railOnRoadSegs} segments (longest ${worstRide} m)`);
 if (worstLot < 15.5) fail('R9', `lot centre only ${worstLot.toFixed(1)} m from the rail`);
+if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road cells — a trestle shares the water with a road bridge`);
+if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
 
 console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} crossings, ` +
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
-  `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}`);
+  `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
+  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

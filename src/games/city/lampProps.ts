@@ -20,9 +20,15 @@ export interface TrafficLightProps {
   ns: THREE.Mesh[];
 }
 
-export function makeTrafficLights(x0: number, z0: number): TrafficLightProps {
+export function makeTrafficLights(
+  x0: number, z0: number,
+  /** optional occupancy test in world coords — a pole on a claimed cell
+   * (building corner lot) is skipped; the junction keeps its other head */
+  blocked?: (x: number, z: number) => boolean,
+): TrafficLightProps {
   const group = new THREE.Group();
   const make = (x: number, z: number): THREE.Mesh[] => {
+    if (blocked?.(x, z)) return [];
     const g = new THREE.Group();
     const pole = new THREE.Mesh(lightPoleGeo, lightPoleMat);
     pole.position.y = 2.1;

@@ -13,6 +13,7 @@ import { Baked } from '../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { makePath, polyPath, type WorldPath } from './spline.js';
 import { citySeed, streetLinesFor } from './cityGrid.js';
+import { riverFor, type RiverRoute } from './riverRoute.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
@@ -64,15 +65,61 @@ interface Attempt { control: Array<{ x: number; z: number }>; score: number; pat
 
 /** how clean a deformed route came out — mirrors the audit's own checks,
  * so a route is only ever shipped when the deformation provably worked */
-interface Quality { ride: number; skew: number; folds: number }
+interface Quality { ride: number; skew: number; folds: number; bridge: number }
 
-function shapeQuality(p: WorldPath, H: number[], V: number[]): Quality {
+/**
+ * Where the river passes within 8 m of a lattice street line, a road bridge
+ * lives (or may live — the plan's final bridge set is a subset of these).
+ * The rail must cross the water well away from every one of them: a trestle
+ * sharing the river with a road bridge is the one rail/river/road pileup the
+ * world forbids. Zones derive from streetLinesFor + the river alone, so the
+ * gate runs inside the route search with no plan built yet.
+ */
+function bridgeZones(H: number[], V: number[], river: RiverRoute): Array<{ x: number; z: number }> {
+  const zones: Array<{ x: number; z: number }> = [];
+  for (const p of river.pts) {
+    // the water's EDGE reaches the road band (w/2 + 7 m) — that is what
+    // makes a forbidden cell, not the centreline
+    for (const j of H) {
+      if (Math.abs(p.z - j * 64) < p.w / 2 + 9 && p.x > 8 && p.x < ISLAND - 8) zones.push({ x: p.x, z: j * 64 });
+    }
+    for (const i of V) {
+      if (Math.abs(p.x - i * 64) < p.w / 2 + 9 && p.z > 8 && p.z < ISLAND - 8) zones.push({ x: i * 64, z: p.z });
+    }
+  }
+  return zones;
+}
+
+function shapeQuality(
+  p: WorldPath, H: number[], V: number[],
+  river: RiverRoute | null, zones: Array<{ x: number; z: number }>,
+): Quality {
   const pts = p.pts, N = pts.length;
   let ride = 0, run = 0, folds = 0, skew = 0;
+  // dense resample at ~2 m: pin walls collapse vertices, leaving 20 m+
+  // chords that point-based scans would skim straight over — the chords
+  // are real rail the audit will see, so the gate must see them too
+  const dense: Array<{ x: number; z: number; h: number }> = [];
+  for (let k = 0; k < N; k++) {
+    const a = pts[k], b = pts[(k + 1) % N];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const steps = Math.max(1, Math.ceil(len / 2));
+    let dh = b.h - a.h;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    for (let q = 0; q < steps; q++) {
+      const t = q / steps;
+      dense.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, h: a.h + dh * t });
+    }
+  }
+  const D = dense.length;
   for (let k = 0; k < N; k++) {
     const a = pts[(k - 1 + N) % N], b = pts[k], c = pts[(k + 1) % N];
     const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
     if (l1 > 0.5 && l2 > 0.5 && (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) folds++;
+  }
+  for (let k = 0; k < D; k++) {
+    const b = dense[k], nxt = dense[(k + 1) % D];
     const h = b.h;
     let bad = false;
     for (const line of H) {
@@ -82,7 +129,7 @@ function shapeQuality(p: WorldPath, H: number[], V: number[]): Quality {
       const dev = Math.min(Math.abs(h), Math.PI - Math.abs(h));
       if (Math.abs(b.x - line * 64) < 7 && dev < Math.PI / 3) { bad = true; break; }
     }
-    if (bad) run += l2;
+    if (bad) run += 2;
     else { ride = Math.max(ride, run); run = 0; }
   }
   ride = Math.max(ride, run);
@@ -109,12 +156,12 @@ function shapeQuality(p: WorldPath, H: number[], V: number[]): Quality {
       // diagonal chord that only tilts between wall-end vertices
       let worst = 0;
       const streetH = horiz ? Math.PI / 2 : 0;
-      for (let i = 0; i < N; i++) {
-        const pd = horiz ? Math.abs(pts[i].z - c) : Math.abs(pts[i].x - c);
+      for (let i = 0; i < D; i++) {
+        const pd = horiz ? Math.abs(dense[i].z - c) : Math.abs(dense[i].x - c);
         if (pd >= 6.5) continue;
-        const pa = horiz ? pts[i].x : pts[i].z;
+        const pa = horiz ? dense[i].x : dense[i].z;
         if (Math.abs(pa - along) >= 24) continue;
-        let dev = Math.abs(pts[i].h - streetH);
+        let dev = Math.abs(dense[i].h - streetH);
         if (dev > Math.PI) dev = Math.PI * 2 - dev;
         while (dev > Math.PI / 2) dev = Math.PI - dev;
         worst = Math.max(worst, Math.abs(90 - (dev * 180) / Math.PI));
@@ -124,51 +171,98 @@ function shapeQuality(p: WorldPath, H: number[], V: number[]): Quality {
   };
   for (const line of H) checkCross(true, line);
   for (const line of V) checkCross(false, line);
-  return { ride, skew, folds };
+  // R22: a trestle sharing the river with a road bridge is forbidden —
+  // count trestle runs (contiguous in-water stretches) that come within
+  // 12 m of any bridge zone. 12 m provably yields zero forbidden cells: a
+  // cell needs the rail bed within 9 m of the street line, and every
+  // in-bed sample is at least its zone distance from the line. (The route
+  // scorer still prefers 24 m; this is the hard gate.) The water test uses
+  // the bed's outer edge (halfAt + 2 m), matching the grid's rail stamp.
+  let bridge = 0;
+  if (river) {
+    let inRun = false;
+    for (const pt of dense) {
+      if (!river.near(pt.x, pt.z, river.halfAt(pt.x, pt.z) + 4)) { inRun = false; continue; }
+      let dmin = Infinity;
+      for (const zn of zones) {
+        const d = Math.hypot(pt.x - zn.x, pt.z - zn.z);
+        if (d < dmin) dmin = d;
+      }
+      if (dmin >= 12) { inRun = false; continue; }
+      if (!inRun) { bridge++; inRun = true; }
+    }
+  }
+  return { ride, skew, folds, bridge };
 }
 
 const qualityBetter = (a: Quality, b: Quality): boolean =>
   a.folds !== b.folds ? a.folds < b.folds
-    : a.ride !== b.ride ? a.ride < b.ride
-      : a.skew < b.skew;
+    : a.bridge !== b.bridge ? a.bridge < b.bridge
+      : a.ride !== b.ride ? a.ride < b.ride
+        : a.skew < b.skew;
 
 function buildRoute(bx: number, by: number): RailRoute {
   const seed = citySeed(bx, by);
   const { H, V } = streetLinesFor(bx, by);
+  const river = riverFor(seed);
+  const zones = bridgeZones(H, V, river);
   // rank route candidates by the cheap pre-deform score, then actually
   // deform the best few and SHIP the first whose geometry comes out clean
-  // (no on-road rides, no folds, square crossings). The deform has rare
-  // bad modes on adversarial splines; rather than patching each one, a
-  // dirty result just costs us a re-roll.
-  const ranked: Attempt[] = [];
-  const offer = (a: Attempt): void => {
-    let i = 0;
-    while (i < ranked.length && ranked[i].score <= a.score) i++;
-    if (i >= 8) return;
-    ranked.splice(i, 0, a);
-    if (ranked.length > 8) ranked.pop();
-  };
-  for (let attempt = 0; attempt < 90; attempt++) {
-    const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt));
-    const a = tryRoute(r, H, V);
-    if (!a) continue;
-    if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
-    offer(a);
-  }
-  if (ranked.length === 0) ranked.push(forcedRoute(seed));
+  // (no on-road rides, no folds, square crossings, trestles clear of road
+  // bridges). The deform has rare bad modes on adversarial splines; rather
+  // than patching each one, a dirty result just costs us a re-roll.
+  //
+  // The ring always crosses the river, and its crossing lands where the
+  // west arc happens to meet it — a narrow band of z. When one round's
+  // candidates all cross inside a bridge zone, a different control-slide
+  // strength shifts that band, so later rounds re-search with new strengths
+  // before anyone settles for a dirty fallback.
+  const strengths = [0.9, 1.4, 0.5, 1.8, 0.3];
   let fallback: { route: RailRoute; q: Quality } | null = null;
-  for (const a of ranked) {
+  for (let round = 0; round < strengths.length; round++) {
+    const mul = strengths[round];
+    const ranked: Attempt[] = [];
+    const offer = (a: Attempt): void => {
+      let i = 0;
+      while (i < ranked.length && ranked[i].score <= a.score) i++;
+      if (i >= 12) return;
+      ranked.splice(i, 0, a);
+      if (ranked.length > 12) ranked.pop();
+    };
+    for (let attempt = 0; attempt < 45; attempt++) {
+      const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt + round * 1000));
+      const a = tryRoute(r, H, V, river, zones, mul);
+      if (!a) continue;
+      if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
+      offer(a);
+    }
+    if (ranked.length === 0) continue;
+    for (const a of ranked) {
+      const route = finalize(bx, by, a.control, a.path);
+      route.candidates = ranked.map(t => t.control);
+      const q = shapeQuality(route.path, H, V, river, zones);
+      if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) return route;
+      if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
+    }
+  }
+  // last resort: the deterministic rectangle ring through every strength
+  for (const mul of strengths) {
+    const a = forcedRoute(seed);
     const route = finalize(bx, by, a.control, a.path);
-    route.candidates = ranked.map(t => t.control);
-    const q = shapeQuality(route.path, H, V);
-    if (q.folds === 0 && q.ride < 7 && q.skew < 19) return route;
+    route.candidates = [a.control];
+    const q = shapeQuality(route.path, H, V, river, zones);
+    if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) return route;
     if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
   }
   return fallback!.route;
 }
 
 /** one control-ring candidate; null when control spacing is impossible */
-function tryRoute(r: () => number, H: number[], V: number[]): Attempt | null {
+function tryRoute(
+  r: () => number, H: number[], V: number[],
+  river: RiverRoute, zones: Array<{ x: number; z: number }>,
+  slideMul = 0.9,
+): Attempt | null {
   const CX = CENTER, CZ = CENTER;
   const n = 10 + ((r() * 4) | 0);
   const base = ISLAND * (0.32 + r() * 0.06);
@@ -205,6 +299,21 @@ function tryRoute(r: () => number, H: number[], V: number[]): Attempt | null {
       p.z = nz + (p.z - nz) * f;
     }
   }
+  // the ring always crosses the river somewhere; WHERE it crosses is the
+  // one thing we can steer. Control points near a bridge zone slide along
+  // the river (in z) so the arc's water crossing lands between road
+  // bridges instead of on one (R22) — same bubble trick as the junctions.
+  for (const p of control) {
+    if (!river.near(p.x, p.z, 80)) continue;
+    let zn: { x: number; z: number } | null = null, dn = Infinity;
+    for (const z of zones) {
+      const d = Math.hypot(p.x - z.x, p.z - z.z);
+      if (d < dn) { dn = d; zn = z; }
+    }
+    if (!zn || dn > 80) continue;
+    const dz = p.z - zn.z;
+    p.z += Math.max(-45, Math.min(45, Math.sign(dz || 1) * (60 - Math.min(dn, 60)) * slideMul));
+  }
   // adjacent control points need breathing room, or the spline kinks
   for (let k = 0; k < n; k++) {
     const a = control[k], b = control[(k + 1) % n];
@@ -213,6 +322,7 @@ function tryRoute(r: () => number, H: number[], V: number[]): Attempt | null {
   const path = makePath(control, true);
   // score violations on dense samples
   let score = 0;
+  let inBridgeRun = false;
   for (let k = 0; k < path.pts.length; k++) {
     const p = path.pts[k];
     if (inRaceZone(p.x, p.z)) score += 3;
@@ -222,6 +332,20 @@ function tryRoute(r: () => number, H: number[], V: number[]): Attempt | null {
       const dx = p.x - i * 64, dz = p.z - jn * 64;
       if (dx * dx + dz * dz < 14 * 14) score += 12; // threading a junction
     }
+    // dipping into the river anywhere near a road bridge means a trestle
+    // sharing the water with the bridge — the one overlap the world
+    // forbids. Decisively expensive so clean candidates always rank above
+    // tainted ones (runs counted on every 4th sample for speed).
+    if ((k & 3) === 0 && river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4)) {
+      let dmin = Infinity;
+      for (const zn of zones) {
+        const d = (p.x - zn.x) * (p.x - zn.x) + (p.z - zn.z) * (p.z - zn.z);
+        if (d < dmin) dmin = d;
+      }
+      if (dmin < 24 * 24) {
+        if (!inBridgeRun) { score += 120; inBridgeRun = true; }
+      } else inBridgeRun = false;
+    } else inBridgeRun = false;
   }
   // a shallow line crossing means the rail rides the road corridor for tens
   // of metres no matter how the crossing itself is squared up — so any
@@ -310,14 +434,89 @@ function forcedRoute(seed: number): Attempt {
 /** shared deformation sequence. Order matters: tangential grazes are lifted
  * off the roads BEFORE the crossing pins are placed. A graze pinned in place
  * stays a ~30 m skim along the asphalt with a token square jog in the middle
- * — the pins must only ever see genuine crossings. A final clearance sweep
- * runs as insurance against pin/pin interference near junctions. */
+ * — the pins must only ever see genuine crossings. The river swing slides
+ * in-water stretches along the river until they clear every bridge zone
+ * (R22), running both before the lift (so the street clearance sees the slid
+ * shape) and after the final sweep (which can push rail back into water). */
 function deform(
   pts: Array<{ x: number; z: number; h: number }>,
   H: number[], V: number[],
+  river: RiverRoute, zones: Array<{ x: number; z: number }>,
 ): Array<{ x: number; z: number }> {
-  const lifted = clearancePush(pts, H, V);
-  return clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V);
+  // R22: slide in-water stretches along the river out of bridge zones
+  // BEFORE anything else — this early, the crossing pins re-square every
+  // street approach the slide drags, so no skew survives
+  const swung = riverSwing(pts, river, zones);
+  const lifted = clearancePush(swung, H, V);
+  return ironSpikes(clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V));
+}
+
+/** iron out sub-metre spikes left where pin cores collapsed samples onto a
+ * wall: three points within ~3 m whose middle kinks off by more than ~20
+ * degrees read as a jagged crossing. Real corners — wall ends, bends —
+ * have long segments on at least one side and are left alone. */
+function ironSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
+  const N = pts.length;
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let it = 0; it < 3; it++) {
+    let moved = false;
+    const out = cur.map(p => ({ x: p.x, z: p.z }));
+    for (let k = 0; k < N; k++) {
+      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      if (l1 >= 3 || l2 >= 3) continue;
+      const dot = (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z);
+      if (dot >= 0.9 * l1 * l2) continue;
+      out[k] = { x: (a.x + c.x) / 2, z: (a.z + c.z) / 2 };
+      moved = true;
+    }
+    cur = out;
+    if (!moved) break;
+  }
+  return cur;
+}
+
+/**
+ * R22's active half: any sample sitting in the water (bed edge touching)
+ * within 24 m of a bridge zone slides ALONG the river (in z) until the
+ * crossing clears the zone — the river is a north-south band, so sliding
+ * z moves the trestle to free water instead of piling it onto a bridge.
+ * Full-strength displacement, max-dilation spread, iterated until clean.
+ */
+function riverSwing(
+  pts: Array<{ x: number; z: number }>,
+  river: RiverRoute, zones: Array<{ x: number; z: number }>,
+): Array<{ x: number; z: number }> {
+  const N = pts.length;
+  const CLEAR = 24, REACH = 30;
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let pass = 0; pass < 4; pass++) {
+    const raw = new Array(N).fill(0);
+    for (let k = 0; k < N; k++) {
+      const p = cur[k];
+      if (!river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4)) continue;
+      let zn: { x: number; z: number } | null = null, dn = REACH;
+      for (const z of zones) {
+        const d = Math.hypot(p.x - z.x, p.z - z.z);
+        if (d < dn) { dn = d; zn = z; }
+      }
+      if (!zn) continue;
+      const dz = p.z - zn.z;
+      const adz = Math.abs(dz);
+      if (adz < CLEAR) raw[k] = (CLEAR - adz) * Math.sign(dz || 1);
+    }
+    if (raw.every(v => v === 0)) break;
+    const spread = raw.map((_, k) => {
+      let best = 0;
+      for (let j = -4; j <= 4; j++) {
+        const v = raw[(k + j + N) % N] * (1 - 0.16 * Math.abs(j));
+        if (Math.abs(v) > Math.abs(best)) best = v;
+      }
+      return best;
+    });
+    cur = cur.map((p, k) => ({ x: p.x, z: p.z + spread[k] }));
+  }
+  return cur;
 }
 
 function finalize(bx: number, by: number, control: Array<{ x: number; z: number }>, path: WorldPath): RailRoute {
@@ -327,7 +526,8 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
   // proper railway junction and gives the level crossings their barriers a
   // clean strip to guard.
   const { H, V } = streetLinesFor(bx, by);
-  const shaped = deform(path.pts, H, V);
+  const river = riverFor(citySeed(bx, by));
+  const shaped = deform(path.pts, H, V, river, bridgeZones(H, V, river));
   const p2 = polyPath(shaped);
   return {
     path: p2,
@@ -352,13 +552,18 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
  * swap cannot put the rail on top of the tram corridor. Rewrites the cached
  * route in place — every consumer reads the same object.
  */
-export function resquareRail(route: RailRoute, H: number[], V: number[]): void {
+export function resquareRail(route: RailRoute, bx: number, by: number, H: number[], V: number[]): void {
   const cands = route.candidates && route.candidates.length > 0 ? route.candidates : [route.control];
+  // resquareRail's H/V include the tram lines, whose positions come from the
+  // plan, which exists only after a route shipped — the river, however, is
+  // plan-independent, so the R22 trestle-vs-bridge gate still applies here
+  const river = riverFor(citySeed(bx, by));
+  const zones = bridgeZones(H, V, river);
   let best: { p2: WorldPath; q: Quality } | null = null;
   for (const c of cands) {
-    const p2 = polyPath(deform(makePath(c, true).pts, H, V));
-    const q = shapeQuality(p2, H, V);
-    if (q.folds === 0 && q.ride < 7 && q.skew < 19) {
+    const p2 = polyPath(deform(makePath(c, true).pts, H, V, river, zones));
+    const q = shapeQuality(p2, H, V, river, zones);
+    if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) {
       best = { p2, q };
       break;
     }
@@ -634,7 +839,7 @@ export function perpendicularCrossings(
       // crossed at a visible skew otherwise. Windowed so near-node walls of
       // the perpendicular street stay out of reach.
       const d0 = Math.abs((hit.horiz ? pts[k].z : pts[k].x) - (hit.horiz ? hit.z : hit.x));
-      const mask = d0 >= 9 ? 0 : d0 <= 7 ? 1 : (9 - d0) / 2;
+      const mask = d0 >= 12 ? 0 : d0 <= 7 ? 1 : (12 - d0) / 5;
       const pa = hit.horiz ? pts[k].x : pts[k].z;
       const inWindow = Math.abs(pa - (hit.horiz ? hit.x : hit.z)) < 30;
       const w = Math.max(arcW, inWindow ? mask : 0);

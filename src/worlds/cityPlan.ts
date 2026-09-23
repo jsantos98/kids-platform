@@ -66,6 +66,8 @@ export interface RiverBridge {
   x: number;
   z: number;
   axis: 'h' | 'v';
+  /** causeway-corridor bridges are wider: they suppress water farther */
+  exit: boolean;
 }
 
 /** a rail stop: platform beside a straight stretch of the line */
@@ -195,6 +197,37 @@ function buildPlan(bx: number, by: number): CityPlan {
     return false;
   };
 
+  // where the rail sits IN the water (trestle spans). A street whose river
+  // bridge would land within 24 m of a span is dropped — a trestle sharing
+  // the water with a road bridge is the one rail/river/road pileup the
+  // world forbids, and the dead-end trim repairs the street web afterwards.
+  const trestles: Array<{ x: number; z: number }> = [];
+  for (let k = 0; k < rail.pts.length; k++) {
+    const a = rail.pts[k], b = rail.pts[(k + 1) % rail.pts.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    // interpolated: pin-collapsed vertices leave long chords whose MIDDLE
+    // slices through water the endpoints never touch
+    const steps = Math.max(1, Math.ceil(len / 4));
+    for (let q = 0; q < steps; q++) {
+      const px = a.x + (b.x - a.x) * (q / steps), pz = a.z + (b.z - a.z) * (q / steps);
+      if (river.near(px, pz, river.halfAt(px, pz) + 4)) trestles.push({ x: px, z: pz });
+    }
+  }
+  const bridgeClash = (horiz: boolean, line: number, a: number, b: number): boolean => {
+    for (const q of river.pts) {
+      // any water a road would ride through here — bridge or ford — counts:
+      // road band ±7 m plus the river's own half width
+      const across = horiz ? Math.abs(q.z - line * CH) : Math.abs(q.x - line * CH);
+      if (across >= q.w / 2 + 9) continue;
+      const along = horiz ? q.x : q.z;
+      if (along < a + 1 || along > b - 1) continue;
+      for (const t of trestles) {
+        if (Math.hypot(t.x - q.x, t.z - q.z) < 24) return true;
+      }
+    }
+    return false;
+  };
+
   // ---- 2. districts core: nature corners, park, downtown ----
   const grid: District[][] = Array.from({ length: W }, () => Array<District>(W).fill('urban'));
   for (const [cx, cz] of raceChunks()) grid[cx][cz] = 'race';
@@ -223,15 +256,19 @@ function buildPlan(bx: number, by: number): CityPlan {
     segHSet = new Set();
     segVSet = new Set();
     for (const j of H) for (let i = 0; i < W; i++) {
-      // arterials keep all their segments (rail shadows still bite)
+      // arterials keep all their segments (rail shadows and bridge clashes still bite)
       const keep = arterialH.has(j) || r() >= dropP;
-      if (keep && !railRunsAlong(true, j, i * CH, (i + 1) * CH)) segHSet.add(key(j, i));
+      if (keep && !railRunsAlong(true, j, i * CH, (i + 1) * CH) && !bridgeClash(true, j, i * CH, (i + 1) * CH)) {
+        segHSet.add(key(j, i));
+      }
     }
     for (const i of V) for (let j = 0; j < W; j++) {
       const keep = arterialV.has(i) || r() >= dropP;
-      if (keep && !railRunsAlong(false, i, j * CH, (j + 1) * CH)) segVSet.add(key(i, j));
+      if (keep && !railRunsAlong(false, i, j * CH, (j + 1) * CH) && !bridgeClash(false, i, j * CH, (j + 1) * CH)) {
+        segVSet.add(key(i, j));
+      }
     }
-    forceRailCrossings(rail, H, V, segHSet, segVSet);
+    forceRailCrossings(rail, H, V, segHSet, segVSet, bridgeClash);
     pruneDisconnected(segHSet, segVSet);
     if (segHSet.size + segVSet.size >= 14) break;
   }
@@ -267,10 +304,44 @@ function buildPlan(bx: number, by: number): CityPlan {
   // itself — re-square crossings and clearance against the complete set now
   if (tram) {
     resquareRail(
-      rail,
+      rail, bx, by,
       [...H, ...tram.linesH.filter(j => !H.includes(j))],
       [...V, ...tram.linesV.filter(i => !V.includes(i))],
     );
+  }
+
+  // ---- 4b. R22 sweep: resquareRail may have moved the rail after the
+  // segment veto ran, so re-check every open segment against the FINAL
+  // trestle spans and drop clashing ones (exit corridors are exempt — the
+  // causeway contract outranks the bridge; they are audited separately).
+  // The dead-end trim below repairs the street web afterwards. ----
+  {
+    const trestles2: Array<{ x: number; z: number }> = [];
+    for (const p of rail.pts) {
+      if (river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4)) trestles2.push({ x: p.x, z: p.z });
+    }
+    const exitLines = new Set([exN, exS, exW, exE]);
+    const clash2 = (horiz: boolean, line: number, a: number, b: number): boolean => {
+      if (exitLines.has(line)) return false;
+      for (const q of river.pts) {
+        const across = horiz ? Math.abs(q.z - line * CH) : Math.abs(q.x - line * CH);
+        if (across >= q.w / 2 + 9) continue;
+        const along = horiz ? q.x : q.z;
+        if (along < a + 1 || along > b - 1) continue;
+        for (const t of trestles2) {
+          if (Math.hypot(t.x - q.x, t.z - q.z) < 24) return true;
+        }
+      }
+      return false;
+    };
+    for (const k of [...segHSet]) {
+      const [j, i] = k.split(',').map(Number);
+      if (clash2(true, j, i * CH, (i + 1) * CH)) segHSet.delete(k);
+    }
+    for (const k of [...segVSet]) {
+      const [i, j] = k.split(',').map(Number);
+      if (clash2(false, i, j * CH, (j + 1) * CH)) segVSet.delete(k);
+    }
   }
 
   // ---- 5. no dead ends: a road may only stop where it meets a cross street.
@@ -410,20 +481,50 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   const riverBridges: RiverBridge[] = [];
   const collectBridges = (horiz: boolean, line: number, a: number, b: number): void => {
-    // one bridge per segment: a second pass of the water becomes a ford
+    // one bridge per segment: a second pass of the water becomes a ford —
+    // EXCEPT on the causeway corridors, which may never ford the river
+    // (an exit ford is where a trestle would pile onto the road, R22) and
+    // so bridge any water they cross, node margins included
+    const exit = horiz ? line === exW || line === exE : line === exN || line === exS;
+    const m0 = exit ? 1 : 8, m1 = exit ? 1 : 8, mAcross = exit ? 13 : 8;
+    if (exit) {
+      // causeways bridge EVERY water pass — a ford is where a trestle
+      // would pile onto the road (R22). Long passes get a bridge every
+      // ~14 m so the 11 m water-suppression circles tile the whole ford.
+      let group: Array<{ x: number; z: number; along: number }> = [];
+      const flushGroup = (): void => {
+        if (!group.length) return;
+        const mid = group[(group.length / 2) | 0];
+        riverBridges.push(horiz
+          ? { x: mid.x, z: line * CH, axis: 'h' as const, exit: true }
+          : { x: line * CH, z: mid.z, axis: 'v' as const, exit: true });
+        group = [];
+      };
+      for (const p of river.pts) {
+        const along = horiz ? p.x : p.z;
+        const across = horiz ? p.z : p.x;
+        const inSpan = along >= a + m0 && along <= b - m1 && Math.abs(across - line * CH) <= p.w / 2 + 9;
+        if (inSpan) {
+          if (group.length && along - group[0].along > 14) flushGroup();
+          group.push({ x: p.x, z: p.z, along });
+        } else flushGroup();
+      }
+      flushGroup();
+      return;
+    }
     let best: { x: number; z: number } | null = null;
     for (const p of river.pts) {
       const along = horiz ? p.x : p.z;
       const across = horiz ? p.z : p.x;
-      if (along < a + 8 || along > b - 8) continue;
-      if (Math.abs(across - line * CH) > 8) continue;
+      if (along < a + m0 || along > b - m1) continue;
+      if (Math.abs(across - line * CH) > mAcross) continue;
       if (!best || Math.abs(along - (a + b) / 2) < Math.abs((horiz ? best.x : best.z) - (a + b) / 2)) {
         best = { x: p.x, z: p.z };
       }
     }
     if (best) riverBridges.push(horiz
-      ? { x: best.x, z: line * CH, axis: 'h' as const }
-      : { x: line * CH, z: best.z, axis: 'v' as const });
+      ? { x: best.x, z: line * CH, axis: 'h' as const, exit }
+      : { x: line * CH, z: best.z, axis: 'v' as const, exit });
   };
   for (const k of segHSet) {
     const [j, i] = k.split(',').map(Number);
@@ -478,9 +579,21 @@ function buildPlan(bx: number, by: number): CityPlan {
     const dist = district(cx, cz);
     if (dist !== 'urban' && dist !== 'downtown' && dist !== 'industrial') return; // nature/park/race stay clear
     // keep the railway corridor (plus the sweep of a barrier arm) and the
-    // river banks clear — nothing built may touch the track
+    // river banks clear — nothing built may touch the track, and the whole
+    // FOOTPRINT must clear the water, not just the lot centre (a deep lot
+    // whose centre clears the river can still dip its far corner into it)
     if (rail.near(lot.x, lot.z, 16)) return;
     if (river.near(lot.x, lot.z, river.halfAt(lot.x, lot.z) + 6.5)) return;
+    const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
+    const hx = (flip ? lot.d : lot.w) / 2, hz = (flip ? lot.w : lot.d) / 2;
+    // the whole FOOTPRINT must clear the track and the water — a long lot
+    // whose centre clears 16 m can still edge its wall into the rail bed
+    for (const [sx, sz] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+      const fx = lot.x + sx * hx, fz = lot.z + sz * hz;
+      if (rail.near(fx, fz, 3)) return;
+      if (river.inWater(fx, fz) ||
+          river.near(fx, fz, river.halfAt(fx, fz) + 1.5)) return;
+    }
     lots.push(lot);
     const k = key(cx, cz);
     if (!lotsByChunk.has(k)) lotsByChunk.set(k, []);
@@ -602,7 +715,13 @@ function forceRailCrossings(
   rail: RailRoute,
   H: number[], V: number[],
   segHSet: Set<string>, segVSet: Set<string>,
+  skip: (horiz: boolean, line: number, a: number, b: number) => boolean,
 ): void {
+  // `skip` vetoes segments whose river bridge would share the water with a
+  // trestle — the rail then crosses a bare lattice line with no street on
+  // it, which needs no crossing and piles up nothing
+  const veto = (horiz: boolean, line: number, i: number): boolean =>
+    skip(horiz, line, i * CH, (i + 1) * CH);
   const pinsH = new Set<string>();
   const pinsV = new Set<string>();
   for (let k = 0; k < rail.pts.length; k++) {
@@ -620,15 +739,20 @@ function forceRailCrossings(
       if (p.x - i * CH > 11 && (i + 1) * CH - p.x > 11) pinsH.add(key(j, i));
     }
   }
-  const add = (set: Set<string>, pins: Set<string>, cap: number): void => {
+  const add = (set: Set<string>, pins: Set<string>, cap: number, horiz: boolean): void => {
     let n = 0;
     for (const k of pins) {
       if (n >= cap) break;
-      if (!set.has(k)) { set.add(k); n++; }
+      if (!set.has(k)) {
+        const [a, i] = k.split(',').map(Number);
+        if (veto(horiz, a, i)) continue;
+        set.add(k);
+        n++;
+      }
     }
   };
-  add(segHSet, pinsH, 6);
-  add(segVSet, pinsV, 6);
+  add(segHSet, pinsH, 6, true);
+  add(segVSet, pinsV, 6, false);
 }
 
 /**

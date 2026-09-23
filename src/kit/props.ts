@@ -258,3 +258,27 @@ export function makeFire(): FireResult {
   }
   return { group: g, flames, smoke };
 }
+
+// flashing red/blue lightbar for the siren toggle — parented to the vehicle
+// roof; the game swaps lamp colours bright/dim while the siren is on
+export function makeSirenBar(): { group: THREE.Group; red: THREE.Mesh; blue: THREE.Mesh } {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5, 0.16, 0.52),
+    new THREE.MeshLambertMaterial({ color: 0x3d434c }),
+  );
+  base.position.y = 0.08;
+  g.add(base);
+  const mk = (x: number, color: number): THREE.Mesh => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(0.56, 0.32, 0.44),
+      new THREE.MeshBasicMaterial({ color }),
+    );
+    m.position.set(x, 0.34, 0);
+    g.add(m);
+    return m;
+  };
+  const red = mk(-0.38, 0x4a1616);
+  const blue = mk(0.38, 0x161d4a);
+  return { group: g, red, blue };
+}

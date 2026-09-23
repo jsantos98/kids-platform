@@ -27,6 +27,7 @@
 // the traffic lights (via RoadGrid), traffic + pedestrians (street lines),
 // transit (crossings, stations, tram) and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
+import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
@@ -114,6 +115,7 @@ export interface CityPlan {
 }
 
 const CH = 64;
+const W = WORLD_CHUNKS;
 const key = (a: number, b: number) => `${a},${b}`;
 const cache = new Map<number, CityPlan>();
 
@@ -131,22 +133,39 @@ function buildPlan(seed: number): CityPlan {
   const rail = railRouteFor(seed);
   const river = riverFor(seed);
 
-  // ---- 1. street lines: seeded subset of interior lines, ≥2 per axis ----
-  const pickLines = () => [1, 2, 3, 4, 5].filter(() => r() < 0.62);
+  // ---- 1. street lines: seeded subset of interior lines, ≥3 per axis.
+  // Two lines per axis are ARTERIALS — every one of their segments stays
+  // open, giving continuous roads that run the length of the island. ----
+  const pickLines = () => {
+    const out: number[] = [];
+    for (let l = 1; l < W; l++) if (r() < 0.55) out.push(l);
+    return out;
+  };
   const H = pickLines();
   const V = pickLines();
-  for (const missing of [1, 2, 3, 4, 5]) {
-    if (H.length >= 2) break;
+  for (const missing of Array.from({ length: W - 1 }, (_, k) => k + 1)) {
+    if (H.length >= 3) break;
     if (!H.includes(missing)) H.push(missing);
   }
-  for (const missing of [1, 2, 3, 4, 5]) {
-    if (V.length >= 2) break;
+  for (const missing of Array.from({ length: W - 1 }, (_, k) => k + 1)) {
+    if (V.length >= 3) break;
     if (!V.includes(missing)) V.push(missing);
   }
-  // race-corner access: keep the zone boundary line (4) as a street
-  if (!H.includes(4) && !V.includes(4)) H.push(4);
+  // race-corner access: keep the zone boundary line as a street
+  if (!H.includes(W - 2) && !V.includes(W - 2)) H.push(W - 2);
   H.sort((a, b) => a - b);
   V.sort((a, b) => a - b);
+  // the arterials: two seeded lines per axis that never drop segments
+  const pickArterials = (lines: number[]): number[] => {
+    const pool = [...lines];
+    for (let k = pool.length - 1; k > 0; k--) {
+      const m = (r() * (k + 1)) | 0;
+      [pool[k], pool[m]] = [pool[m], pool[k]];
+    }
+    return pool.slice(0, Math.min(2, pool.length));
+  };
+  const arterialH = new Set(pickArterials(H));
+  const arterialV = new Set(pickArterials(V));
 
   // the railway would run alongside this segment for a long stretch?
   // (head-on passes stay — they become level crossings)
@@ -163,19 +182,22 @@ function buildPlan(seed: number): CityPlan {
   };
 
   // ---- 2. districts core: nature corners, park, downtown ----
-  const grid: District[][] = Array.from({ length: 6 }, () => Array<District>(6).fill('urban'));
+  const grid: District[][] = Array.from({ length: W }, () => Array<District>(W).fill('urban'));
   for (const [cx, cz] of raceChunks()) grid[cx][cz] = 'race';
   const kinds = [['forest', 'desert', 'meadow'], ['desert', 'meadow', 'forest'], ['meadow', 'forest', 'desert']][(r() * 3) | 0];
-  const corners: Array<[number, number]> = [[0, 0], [4, 0], [0, 4]];
+  // three 3×3 nature corners (SW, NE, NW)
+  const corners: Array<[number, number]> = [[0, 0], [W - 3, 0], [0, W - 3]];
   corners.forEach(([bx, bz], n) => {
-    for (let dx = 0; dx < 2; dx++) for (let dz = 0; dz < 2; dz++) {
+    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) {
       grid[bx + dx][bz + dz] = kinds[n] as District;
     }
   });
-  const centre = [[2, 2], [3, 2], [2, 3], [3, 3]].filter(([cx, cz]) => grid[cx][cz] === 'urban');
-  const park = centre[(r() * centre.length) | 0] ?? [2, 2];
+  // a park next to downtown, then downtown = the central chunk left over
+  const c = W >> 1;
+  const centre = [[c - 1, c - 1], [c, c - 1], [c - 1, c], [c, c]].filter(([cx, cz]) => grid[cx][cz] === 'urban');
+  const park = centre[(r() * centre.length) | 0] ?? [c - 1, c - 1];
   grid[park[0]][park[1]] = 'park';
-  const downtown = centre.find(([cx, cz]) => !(cx === park[0] && cz === park[1])) ?? [2, 2];
+  const downtown = centre.find(([cx, cz]) => !(cx === park[0] && cz === park[1])) ?? [c, c];
   grid[downtown[0]][downtown[1]] = 'downtown';
 
   // ---- 3. segments: seeded drops minus railway shadows, pinned rail
@@ -186,11 +208,14 @@ function buildPlan(seed: number): CityPlan {
     const dropP = Math.max(0.02, 0.14 - attempt * 0.05);
     segHSet = new Set();
     segVSet = new Set();
-    for (const j of H) for (let i = 0; i <= 5; i++) {
-      if (!railRunsAlong(true, j, i * CH, (i + 1) * CH) && r() >= dropP) segHSet.add(key(j, i));
+    for (const j of H) for (let i = 0; i < W; i++) {
+      // arterials keep all their segments (rail shadows still bite)
+      const keep = arterialH.has(j) || r() >= dropP;
+      if (keep && !railRunsAlong(true, j, i * CH, (i + 1) * CH)) segHSet.add(key(j, i));
     }
-    for (const i of V) for (let j = 0; j <= 5; j++) {
-      if (!railRunsAlong(false, i, j * CH, (j + 1) * CH) && r() >= dropP) segVSet.add(key(i, j));
+    for (const i of V) for (let j = 0; j < W; j++) {
+      const keep = arterialV.has(i) || r() >= dropP;
+      if (keep && !railRunsAlong(false, i, j * CH, (j + 1) * CH)) segVSet.add(key(i, j));
     }
     forceRailCrossings(rail, H, V, segHSet, segVSet);
     pruneDisconnected(segHSet, segVSet);
@@ -199,8 +224,8 @@ function buildPlan(seed: number): CityPlan {
 
   const segH = (j: number, i: number) => segHSet.has(key(j, i));
   const segV = (i: number, j: number) => segVSet.has(key(i, j));
-  const lineH = (j: number) => H.includes(j) && [0, 1, 2, 3, 4, 5].some(i => segH(j, i));
-  const lineV = (i: number) => V.includes(i) && [0, 1, 2, 3, 4, 5].some(j => segV(i, j));
+  const lineH = (j: number) => H.includes(j) && Array.from({ length: W }, (_, i) => i).some(i => segH(j, i));
+  const lineV = (i: number) => V.includes(i) && Array.from({ length: W }, (_, j) => j).some(j => segV(i, j));
 
   // ---- 4. districts finish: industrial near the railway, green fillers ----
   const frontage = (cx: number, cz: number): boolean =>
@@ -209,7 +234,7 @@ function buildPlan(seed: number): CityPlan {
     rail.near(cx * CH + CH / 2, cz * CH + CH / 2, 82);
   const urbanLeft = (): Array<[number, number]> => {
     const out: Array<[number, number]> = [];
-    for (let cx = 0; cx < 6; cx++) for (let cz = 0; cz < 6; cz++) {
+    for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
       if (grid[cx][cz] === 'urban' && frontage(cx, cz)) out.push([cx, cz]);
     }
     return out;
@@ -224,7 +249,7 @@ function buildPlan(seed: number): CityPlan {
       const next: Array<[number, number]> = [];
       for (const [cx, cz] of zone) {
         for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]] as const) {
-          if (nx < 0 || nx > 5 || nz < 0 || nz > 5) continue;
+          if (nx < 0 || nx >= W || nz < 0 || nz >= W) continue;
           if (grid[nx][nz] !== 'urban') continue;
           if (zone.some(([ax, az]) => ax === nx && az === nz)) continue;
           if (frontage(nx, nz)) next.push([nx, nz]);
@@ -235,11 +260,11 @@ function buildPlan(seed: number): CityPlan {
     }
     for (const [cx, cz] of zone) grid[cx][cz] = 'industrial';
   }
-  for (let cx = 0; cx < 6; cx++) for (let cz = 0; cz < 6; cz++) {
+  for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
     if (grid[cx][cz] === 'urban' && !frontage(cx, cz)) grid[cx][cz] = 'green';
   }
   const district = (cx: number, cz: number): District =>
-    cx < 0 || cz < 0 || cx > 5 || cz > 5 ? 'urban' : grid[cx][cz];
+    cx < 0 || cz < 0 || cx >= W || cz >= W ? 'urban' : grid[cx][cz];
 
   // ---- 5. the tram: reserve a rectangle of streets around downtown.
   // Score every candidate perimeter by how many of its segments are already
@@ -319,33 +344,33 @@ function buildPlan(seed: number): CityPlan {
   const nearCrossing = (i: number, j: number, m: number): boolean =>
     crossings.some(c => Math.hypot(c.x - i * CH, c.z - j * CH) < m);
 
-  // roundabouts: a seeded couple of junctions become traffic circles
+  // roundabouts: a seeded few junctions become traffic circles
   const roundaboutSet = new Set<string>();
   {
     const cands: Array<[number, number]> = [];
-    for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
+    for (let i = 1; i < W; i++) for (let j = 1; j < W; j++) {
       if (armsCount(i, j) >= 3 && !nearCrossing(i, j, 26)) cands.push([i, j]);
     }
     for (let k = cands.length - 1; k > 0; k--) {
       const m = (r() * (k + 1)) | 0;
       [cands[k], cands[m]] = [cands[m], cands[k]];
     }
-    for (const [i, j] of cands.slice(0, 1 + ((r() * 2) | 0))) roundaboutSet.add(key(i, j));
+    for (const [i, j] of cands.slice(0, 2 + ((r() * 2) | 0))) roundaboutSet.add(key(i, j));
   }
   const roundabout = (i: number, j: number): boolean => roundaboutSet.has(key(i, j));
 
-  // plazas: one or two more junctions become paved squares with a fountain
+  // plazas: a few more junctions become paved squares with a fountain
   const plazaSet = new Set<string>();
   {
     const cands: Array<[number, number]> = [];
-    for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
+    for (let i = 1; i < W; i++) for (let j = 1; j < W; j++) {
       if (armsCount(i, j) >= 3 && !roundabout(i, j) && !nearCrossing(i, j, 30)) cands.push([i, j]);
     }
     for (let k = cands.length - 1; k > 0; k--) {
       const m = (r() * (k + 1)) | 0;
       [cands[k], cands[m]] = [cands[m], cands[k]];
     }
-    const want = cands.length ? Math.max(1, 1 + ((r() * 2) | 0)) : 0;
+    const want = cands.length ? Math.max(2, 2 + ((r() * 2) | 0)) : 0;
     for (const [i, j] of cands.slice(0, want)) plazaSet.add(key(i, j));
   }
   const plaza = (i: number, j: number): boolean => plazaSet.has(key(i, j));
@@ -387,7 +412,7 @@ function buildPlan(seed: number): CityPlan {
       addLot({ kind: 'parking', x, z, ry, w, d: 6.5, v: r() });
     } // else: empty grass
   };
-  for (const j of H) for (let i = 0; i <= 5; i++) {
+  for (const j of H) for (let i = 0; i < W; i++) {
     if (!segH(j, i)) continue;
     for (const side of [-1, 1]) {
       let a = i * CH + 12;
@@ -405,7 +430,7 @@ function buildPlan(seed: number): CityPlan {
       }
     }
   }
-  for (const i of V) for (let j = 0; j <= 5; j++) {
+  for (const i of V) for (let j = 0; j < W; j++) {
     if (!segV(i, j)) continue;
     for (const side of [-1, 1]) {
       let b = j * CH + 12;
@@ -435,20 +460,23 @@ function buildPlan(seed: number): CityPlan {
       if (dh > Math.PI) dh = Math.PI * 2 - dh;
       if (dh > 0.16) continue; // needs ~28 m of straight track
       const p = rail.sample(d);
-      if (p.x < 46 || p.x > 338 || p.z < 46 || p.z > 338) continue;
+      if (p.x < 46 || p.x > ISLAND - 46 || p.z < 46 || p.z > ISLAND - 46) continue;
       if (river.distTo(p.x, p.z) < 18) continue;
       if (crossings.some(c => arcGap(c.d, d, rail.total) < 24 || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
       cand.push(d);
     }
     if (cand.length) {
       const rs = rng(chunkSeed(seed, 0x9a7, 4));
-      const d1 = cand[(rs() * cand.length) | 0];
-      stations.push(mkStation(rail, d1));
-      const d2 = cand.find(c =>
-        arcGap(c, d1, rail.total) > rail.total * 0.3
-        && arcGap(c, d1, rail.total) < rail.total * 0.7
-        && Math.hypot(rail.sample(c).x - rail.sample(d1).x, rail.sample(c).z - rail.sample(d1).z) > 90);
-      if (d2 !== undefined) stations.push(mkStation(rail, d2));
+      const chosen: number[] = [cand[(rs() * cand.length) | 0]];
+      // space further stations around the loop, away from the earlier ones
+      for (let n = 0; n < 2 && chosen.length < 3; n++) {
+        const next = cand.find(c => chosen.every(cd =>
+          arcGap(c, cd, rail.total) > rail.total * 0.22
+          && Math.hypot(rail.sample(c).x - rail.sample(cd).x, rail.sample(c).z - rail.sample(cd).z) > 80));
+        if (next === undefined) break;
+        chosen.push(next);
+      }
+      for (const d of chosen) stations.push(mkStation(rail, d));
     }
   }
 
@@ -502,8 +530,8 @@ function forceRailCrossings(
       if (!set.has(k)) { set.add(k); n++; }
     }
   };
-  add(segHSet, pinsH, 3);
-  add(segVSet, pinsV, 3);
+  add(segHSet, pinsH, 6);
+  add(segVSet, pinsV, 6);
 }
 
 /**
@@ -519,14 +547,14 @@ function reserveTram(
   railRunsAlong: (horiz: boolean, line: number, a: number, b: number) => boolean,
 ): TramPlan | null {
   const rects: Array<{ i0: number; j0: number; n: number; score: number }> = [];
-  for (const n of [3, 2]) {
-    for (const di of [-1, 0]) for (const dj of [-1, 0]) {
-      const i0 = dcx + di, j0 = dcz + dj;
-      if (i0 < 0 || j0 < 0 || i0 + n > 6 || j0 + n > 6) continue;
-      if (!(i0 <= dcx && dcx < i0 + n && j0 <= dcz && dcz < j0 + n)) continue;
-      rects.push({ i0, j0, n, score: 0 });
+    for (const n of [4, 3, 2]) {
+      for (const di of [-1, 0]) for (const dj of [-1, 0]) {
+        const i0 = dcx + di, j0 = dcz + dj;
+        if (i0 < 0 || j0 < 0 || i0 + n > W || j0 + n > W) continue;
+        if (!(i0 <= dcx && dcx < i0 + n && j0 <= dcz && dcz < j0 + n)) continue;
+        rects.push({ i0, j0, n, score: 0 });
+      }
     }
-  }
   if (!rects.length) return null;
   // score: +2 per already-open perimeter segment, −6 per railway-shadowed one
   for (const rc of rects) {
@@ -577,7 +605,7 @@ function reserveTram(
     const [ni, nj] = corners[(k + 1) % 4];
     const mx = (ci + ni) / 2 * CH, mz = (cj + nj) / 2 * CH;
     const horiz = cj === nj;
-    const outward = horiz ? (cj <= 3 ? -1 : 1) : (ci <= 3 ? -1 : 1);
+    const outward = horiz ? (cj * CH < CENTER ? -1 : 1) : (ci * CH < CENTER ? -1 : 1);
     stops.push({
       x: horiz ? mx : mx + outward * 5.7,
       z: horiz ? mz + outward * 5.7 : mz,
@@ -588,7 +616,8 @@ function reserveTram(
 }
 
 function raceChunks(): Array<[number, number]> {
-  return [[4, 4], [5, 4], [4, 5], [5, 5]];
+  const b = W - 2;
+  return [[b, b], [b + 1, b], [b, b + 1], [b + 1, b + 1]];
 }
 
 /** Drop segments that ended up disconnected from the main network. */

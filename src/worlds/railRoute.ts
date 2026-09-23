@@ -12,6 +12,7 @@ import { rng, chunkSeed } from '../engine/rng.js';
 import { Baked } from '../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { makePath, type WorldPath } from './spline.js';
+import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
 export const RAIL_TOP = 0.21; // where train wheels sit
@@ -28,9 +29,10 @@ export interface RailRoute {
   control: Array<{ x: number; z: number }>;
 }
 
-// the open race-corner zone: nothing rail-ish inside x>252 && z>252
+// the open race-corner zone: nothing rail-ish on its SE diagonal
+const RACE_EDGE = (WORLD_CHUNKS - 2) * 64 - 4;
 function inRaceZone(x: number, z: number): boolean {
-  return x > 252 && z > 252;
+  return x > RACE_EDGE && z > RACE_EDGE;
 }
 
 // module-level cache: the route only depends on the world seed, and the chunk
@@ -63,9 +65,9 @@ function buildRoute(seed: number): RailRoute {
 
 /** one control-ring candidate; null when control spacing is impossible */
 function tryRoute(r: () => number): Attempt | null {
-  const CX = 192, CZ = 192;
-  const n = 9 + ((r() * 3) | 0);
-  const base = 116 + r() * 38;
+  const CX = CENTER, CZ = CENTER;
+  const n = 10 + ((r() * 4) | 0);
+  const base = ISLAND * (0.32 + r() * 0.06);
   const ph1 = r() * Math.PI * 2, ph2 = r() * Math.PI * 2;
   const control: Array<{ x: number; z: number }> = [];
   for (let k = 0; k < n; k++) {
@@ -73,12 +75,13 @@ function tryRoute(r: () => number): Attempt | null {
     const rad = base * (0.82 + 0.36 * r());
     let x = CX + Math.cos(th) * rad * (1 + 0.24 * Math.sin(th + ph1));
     let z = CZ + Math.sin(th) * rad * (1 + 0.24 * Math.sin(th + ph2));
-    x = Math.max(34, Math.min(350, x));
-    z = Math.max(34, Math.min(350, z));
+    x = Math.max(44, Math.min(ISLAND - 44, x));
+    z = Math.max(44, Math.min(ISLAND - 44, z));
     // duck inside around the race corner: pull toward the centre while the
     // point sits on the SE diagonal guard
+    const GUARD = (WORLD_CHUNKS - 2) * 64 - 48;
     let guard = 0;
-    while (x > 232 && z > 232 && guard++ < 60) {
+    while (x > GUARD && z > GUARD && guard++ < 60) {
       x = CX + (x - CX) * 0.92;
       z = CZ + (z - CZ) * 0.92;
     }
@@ -89,7 +92,7 @@ function tryRoute(r: () => number): Attempt | null {
   for (let k = 0; k < control.length; k++) {
     const p = control[k];
     const i = Math.round(p.x / 64), jz = Math.round(p.z / 64);
-    if (i < 1 || i > 5 || jz < 1 || jz > 5) continue;
+    if (i < 1 || i >= WORLD_CHUNKS || jz < 1 || jz >= WORLD_CHUNKS) continue;
     const nx = i * 64, nz = jz * 64;
     const d = Math.hypot(p.x - nx, p.z - nz);
     if (d < 16) {
@@ -101,16 +104,16 @@ function tryRoute(r: () => number): Attempt | null {
   // adjacent control points need breathing room, or the spline kinks
   for (let k = 0; k < n; k++) {
     const a = control[k], b = control[(k + 1) % n];
-    if (Math.hypot(a.x - b.x, a.z - b.z) < 46) return null;
+    if (Math.hypot(a.x - b.x, a.z - b.z) < 60) return null;
   }
   const path = makePath(control, true);
   // score violations on dense samples
   let score = 0;
   for (const p of path.pts) {
     if (inRaceZone(p.x, p.z)) score += 3;
-    if (p.x < 30 || p.x > 354 || p.z < 30 || p.z > 354) score += 3;
+    if (p.x < 34 || p.x > ISLAND - 34 || p.z < 34 || p.z > ISLAND - 34) score += 3;
     const i = Math.round(p.x / 64), jn = Math.round(p.z / 64);
-    if (i >= 1 && i <= 5 && jn >= 1 && jn <= 5) {
+    if (i >= 1 && i < WORLD_CHUNKS && jn >= 1 && jn < WORLD_CHUNKS) {
       const dx = p.x - i * 64, dz = p.z - jn * 64;
       if (dx * dx + dz * dz < 10 * 10) score += 6; // threading a junction
     }
@@ -122,13 +125,14 @@ function tryRoute(r: () => number): Attempt | null {
 function forcedRoute(seed: number): Attempt {
   const r = rng(chunkSeed(seed, 0x5a2, 3));
   const ph = r() * Math.PI * 2;
+  const off = ISLAND * 0.27;
   const control: Array<{ x: number; z: number }> = [];
-  const ring = (x: number, z: number): { x: number; z: number } => {
-    const px = Math.max(60, Math.min(240, x)), pz = Math.max(60, Math.min(240, z));
-    return { x: px + 8 * Math.sin(pz * 0.02 + ph), z: pz + 8 * Math.sin(px * 0.02 + ph) };
+  const ring = (fx: number, fz: number): { x: number; z: number } => {
+    const px = CENTER + fx * off, pz = CENTER + fz * off;
+    return { x: px + 14 * Math.sin(pz * 0.012 + ph), z: pz + 14 * Math.sin(px * 0.012 + ph) };
   };
-  for (const [x, z] of [[90, 90], [192, 70], [294, 90], [314, 192], [294, 294], [192, 314], [90, 294], [70, 192]]) {
-    control.push(ring(x, z));
+  for (const [fx, fz] of [[-1, -1], [0, -1.15], [1, -1], [1.15, 0], [1, 1], [0, 1.15], [-1, 1], [-1.15, 0]]) {
+    control.push(ring(fx, fz));
   }
   return { control, score: 0, path: makePath(control, true) };
 }

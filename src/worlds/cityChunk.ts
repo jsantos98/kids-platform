@@ -12,8 +12,9 @@ import { raceTiles, tileCenter } from './racetrack.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
+import { WORLD_CHUNKS, ISLAND } from './world.js';
 
-export const WORLD_CHUNKS = 6; // island is 6×6 chunks = 384 × 384 m
+export { WORLD_CHUNKS }; // re-exported for the game layer
 
 export interface CollisionBox {
   x1: number; x2: number; z1: number; z2: number;

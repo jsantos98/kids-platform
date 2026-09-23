@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { makeVillager } from '../../kit/index.js';
 import { Baked, bakeObjectToMesh, templateToMesh } from '../../engine/baked.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { WORLD_CHUNKS, ISLAND } from '../../worlds/world.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 
 interface Ped {
@@ -69,13 +70,13 @@ export class Pedestrians {
     for (let tries = 0; tries < 12; tries++) {
       const alongX = Math.random() < 0.5;
       const base = Math.round((alongX ? pz : px) / this.CH);
-      const idx = Math.min(5, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
+      const idx = Math.min(WORLD_CHUNKS - 1, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
       if (!(alongX ? this.grid.hasZ(idx) : this.grid.hasX(idx))) continue;
       const side = Math.random() < 0.5 ? -1 : 1;
       const offset = side * (8.2 + Math.random() * 1.4);
-      const along = Math.min(360, Math.max(24, (alongX ? px : pz) + (Math.random() - 0.5) * 140));
+      const along = Math.min(ISLAND - 24, Math.max(24, (alongX ? px : pz) + (Math.random() - 0.5) * 140));
       // the line must actually have a street segment at this stretch
-      const seg = Math.min(4, Math.max(0, Math.floor(along / this.CH)));
+      const seg = Math.min(WORLD_CHUNKS - 2, Math.max(0, Math.floor(along / this.CH)));
       if (!(alongX ? this.grid.segH(idx, seg) : this.grid.segV(idx, seg))) continue;
       p.alongX = alongX;
       p.idx = idx;

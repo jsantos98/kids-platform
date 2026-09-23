@@ -1,7 +1,9 @@
 // The race circuit: a closed 8×5-tile loop of Kenney racing-kit pieces laid on
-// a 10 m grid inside a clear zone of the endless city (chunks cx/cz 4–5).
+// a 10 m grid inside a clear zone of the endless city (the SE corner chunks).
 // The same definition drives the baked tiles, the lap gates and the AI path.
-export const RACE_ORIGIN = { x: 256, z: 256 }; // zone base = chunk (4,4)
+import { WORLD_CHUNKS } from './world.js';
+
+export const RACE_ORIGIN = { x: (WORLD_CHUNKS - 2) * 64, z: (WORLD_CHUNKS - 2) * 64 };
 export const RACE_TILE = 10;
 
 export type RaceTileKind = 'straight' | 'corner' | 'finish' | 'bump';
@@ -14,7 +16,8 @@ export interface RaceTile {
 }
 
 export function raceZoneChunk(cx: number, cz: number): boolean {
-  return (cx === 4 || cx === 5) && (cz === 4 || cz === 5);
+  return (cx === WORLD_CHUNKS - 2 || cx === WORLD_CHUNKS - 1) &&
+         (cz === WORLD_CHUNKS - 2 || cz === WORLD_CHUNKS - 1);
 }
 
 export function tileCenter(col: number, row: number): { x: number; z: number } {

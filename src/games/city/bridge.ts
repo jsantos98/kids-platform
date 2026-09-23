@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
+import { ISLAND, BRIDGE_X } from '../../worlds/world.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 const ASPHALT = 0x5f6771;
@@ -18,11 +19,14 @@ const GRASS = 0xa9c88b;
 const BEACH = 0xf0e2c0;
 
 /** X centre of the bridge, deck width, and shore/island extents */
-const X = 184;
+const X = BRIDGE_X;
 const HALF_W = 5.5;
-const Z0 = 381;        // overlaps the beach ring
-const Z1 = 421;        // lands on the picnic island
-const ISLE = { x1: 164, z1: 421, x2: 204, z2: 461 };
+const Z0 = ISLAND - 3;   // overlaps the beach ring
+const Z1 = ISLAND + 37;  // lands on the picnic island
+const ISLE = { x1: X - 20, z1: Z1, x2: X + 20, z2: Z1 + 40 };
+
+/** shared with the sea's boat detour and the minimap */
+export const BRIDGE = { X, HALF_W, Z0, Z1, ISLE };
 
 /** static collision for the picnic island's trees and rocks */
 export const BRIDGE_BOXES: CollisionBox[] = [];

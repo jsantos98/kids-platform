@@ -1,11 +1,13 @@
-// Ambient traffic: AI cars driving the road grid, obeying the traffic lights
-// AND the level crossings (they queue up when a train is passing). Lanes sit
-// at ±3.5 m — the boulevards are wide and forgiving.
+// Ambient traffic: AI cars that actually follow the streets. Each car drives
+// node-to-node along OPEN segments of the plan, picks a new direction at every
+// junction (preferring straight), keeps to the right-hand lane, stops at red
+// lights and queues at level crossings while a train passes.
 import * as THREE from 'three';
 import { makeCar } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
-import type { Crossing } from '../../worlds/cityPlan.js';
+import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
+import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { lightState, STOP_LINE } from './lights.js';
 import type { Trains } from './train.js';
 
@@ -15,30 +17,46 @@ const MODELS = [
   '/assets/kenney/hatchback-sports.glb',
 ];
 const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
-const LANE = 3.5;   // lane centre offset from the road centreline
+const LANE = 3.5; // lane centre offset from the road centreline (right-hand)
 
-interface TrafficCar extends THREE.Group {
-  userData: {
-    axis: 0 | 1;   // 0 = drives along X, 1 = along Z
-    sign: number;  // travel direction
-    speed: number;
-    wheels?: THREE.Object3D[];
-  };
+interface AI {
+  fx: number; fz: number;   // from lattice node
+  tx: number; tz: number;   // to lattice node
+  t: number;                // progress along the segment, 0..1
+  speed: number;
+  v: number;
 }
 
-const j0 = (r: () => number, amp: number) => (r() - 0.5) * 2 * amp;
+interface TrafficCar extends THREE.Group {
+  userData: { ai: AI; wheels?: THREE.Object3D[] };
+}
+
+/** right-hand perpendicular of the travel direction (screen coords: +z south) */
+const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz, z: hx });
 
 export class Traffic {
   private cars: TrafficCar[] = [];
+  /** segment key "fx,fz,tx,tz" → level crossings on it */
+  private crossingsBySeg = new Map<string, Crossing[]>();
 
-  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8,
-              extraModels: string[] = [], private crossings: Crossing[] = [], private trains: Trains | null = null) {
+  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 12,
+              extraModels: string[] = [], crossings: Crossing[] = [], private trains: Trains | null = null) {
+    for (const c of crossings) {
+      const horiz = c.axis === 'h';
+      const line = Math.round((horiz ? c.z : c.x) / CH);
+      const idx = Math.floor((horiz ? c.x : c.z) / CH);
+      const keys = horiz
+        ? [`${idx},${line},${idx + 1},${line}`, `${idx + 1},${line},${idx},${line}`]
+        : [`${line},${idx},${line},${idx + 1}`, `${line},${idx + 1},${line},${idx}`];
+      for (const k of keys) {
+        if (!this.crossingsBySeg.has(k)) this.crossingsBySeg.set(k, []);
+        this.crossingsBySeg.get(k)!.push(c);
+      }
+    }
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
-      c.userData.axis = (i % 2) as 0 | 1;
-      c.userData.sign = i < 4 ? 1 : -1;
-      c.userData.speed = 6 + Math.random() * 4;
+      c.userData.ai = { fx: 0, fz: 0, tx: 1, tz: 0, t: 0, speed: 6 + Math.random() * 4, v: 0 };
       scene.add(c);
       this.cars.push(c);
       spawnVehicle(models[i % models.length], { len: 4.4 }).then(g => {
@@ -50,73 +68,111 @@ export class Traffic {
     this.cars.forEach(c => this.respawn(c, new THREE.Vector3()));
   }
 
-  /** Move a car onto a road lane near the player (interior island lines only). */
+  /** Move a car onto an open street segment near the player. */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
-    const axis0 = c.userData.axis === 0;
-    let g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
-    g = Math.min(320, Math.max(64, g));
-    if (axis0) {
-      c.position.set(player.x + j0(Math.random, 70), 0, g + LANE * c.userData.sign);
-      c.rotation.y = c.userData.sign > 0 ? Math.PI / 2 : -Math.PI / 2;
-    } else {
-      c.position.set(g - LANE * c.userData.sign, 0, player.z + j0(Math.random, 70));
-      c.rotation.y = c.userData.sign > 0 ? 0 : Math.PI;
+    const ai = c.userData.ai;
+    const pi = Math.round(player.x / this.CH), pj = Math.round(player.z / this.CH);
+    for (let tries = 0; tries < 12; tries++) {
+      const i = Math.max(0, Math.min(WORLD_CHUNKS - 1, pi + ((Math.random() * 5) | 0) - 2));
+      const j = Math.max(0, Math.min(WORLD_CHUNKS - 1, pj + ((Math.random() * 5) | 0) - 2));
+      const opts: Array<[number, number]> = [];
+      if (this.grid.segH(j, i)) opts.push([i + 1, j]);
+      if (this.grid.segH(j, i - 1)) opts.push([i - 1, j]);
+      if (this.grid.segV(i, j)) opts.push([i, j + 1]);
+      if (this.grid.segV(i, j - 1)) opts.push([i, j - 1]);
+      if (!opts.length) continue;
+      const [tx, tz] = opts[(Math.random() * opts.length) | 0];
+      ai.fx = i; ai.fz = j; ai.tx = tx; ai.tz = tz;
+      ai.t = Math.random() * 0.7;
+      ai.v = ai.speed;
+      this.place(c, ai);
+      return;
     }
-    // keep cars off streetless stretches (a nudge is enough)
-    if (axis0) {
-      const row = Math.round(c.position.z / this.CH), col = Math.floor(c.position.x / this.CH);
-      if (!this.grid.segH(row, col)) c.position.x += this.CH / 2;
-    } else {
-      const col = Math.round(c.position.x / this.CH), row = Math.floor(c.position.z / this.CH);
-      if (!this.grid.segV(col, row)) c.position.z += this.CH / 2;
-    }
+  }
+
+  /** world position + heading for a car's current segment progress */
+  private place(c: TrafficCar, ai: AI): void {
+    const hx = Math.sign(ai.tx - ai.fx), hz = Math.sign(ai.tz - ai.fz);
+    const r = rightOf(hx, hz);
+    c.position.set(
+      ai.fx * this.CH + (ai.tx - ai.fx) * this.CH * ai.t + r.x * LANE,
+      0,
+      ai.fz * this.CH + (ai.tz - ai.fz) * this.CH * ai.t + r.z * LANE,
+    );
+    c.rotation.y = Math.atan2(hx, hz);
   }
 
   update(dt: number, elapsed: number, player: THREE.Vector3): void {
     for (const c of this.cars) {
-      let v = c.userData.speed;
-      const axis0 = c.userData.axis === 0;
-      const along = axis0 ? c.position.x : c.position.z;
-      const dir = c.userData.sign;
+      const ai = c.userData.ai;
+      const horiz = ai.tz === ai.fz;
+      const sign = horiz ? Math.sign(ai.tx - ai.fx) : Math.sign(ai.tz - ai.fz);
 
-      // next real intersection ahead (skips dropped lines)
-      let k = dir > 0 ? Math.ceil((along + 0.01) / this.CH) : Math.floor((along - 0.01) / this.CH);
-      let ix = 0, iz = 0, has = false;
-      for (let n = 0; n < 6; n++) {
-        const lineIdx = k + n * dir;
-        const ci = axis0 ? lineIdx : Math.round(c.position.x / this.CH);
-        const cj = axis0 ? Math.round(c.position.x / this.CH) : lineIdx;
-        if (this.grid.cross(ci, cj)) {
-          ix = ci; iz = cj;
-          has = true;
-          break;
+      // ---- speed target: red lights + level crossings ----
+      let vTarget = ai.speed;
+
+      // red lights at the junction we're approaching (signalized to-node)
+      if (this.grid.cross(ai.tx, ai.tz)) {
+        const st = lightState(ai.tx, ai.tz, elapsed);
+        const green = horiz ? st === 'ew' : st === 'ns';
+        if (!green) {
+          const dStop = (1 - STOP_LINE / this.CH - ai.t) * this.CH;
+          if (dStop < 12) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
         }
       }
-      if (has) {
-        const lineWorld = (axis0 ? ix : iz) * this.CH;
-        const dist = (lineWorld - along) * dir;
-        const st = lightState(ix, iz, elapsed);
-        const green = axis0 ? st === 'ew' : st === 'ns';
-        if (!green && dist >= STOP_LINE) v = Math.min(v, Math.max(0, (dist - STOP_LINE) * 1.2));
-      }
 
-      // level crossings: hold back while a train is passing
-      if (this.trains) {
-        for (const cr of this.crossings) {
-          if (cr.axis !== (axis0 ? 'h' : 'v')) continue;
-          const across = axis0 ? cr.z - c.position.z : cr.x - c.position.x;
-          if (Math.abs(across) > 4.5) continue;
-          const dist = (axis0 ? cr.x - along : cr.z - along) * dir;
-          if (dist > 0.5 && dist < 34 && this.trains.distTo(cr.d) < 42) {
-            v = Math.min(v, Math.max(0, (dist - 10.5) * 1.2));
+      // level crossings on this segment: hold back while a train is near
+      const segKey = `${ai.fx},${ai.fz},${ai.tx},${ai.tz}`;
+      const segCrossings = this.crossingsBySeg.get(segKey);
+      if (segCrossings && this.trains) {
+        for (const cr of segCrossings) {
+          const along = horiz ? cr.x : cr.z;
+          const from = (horiz ? ai.fx : ai.fz) * this.CH;
+          const tC = ((along - from) * sign) / this.CH;
+          if (tC <= ai.t) continue; // already past it — keep going
+          if (this.trains.distTo(cr.d) < 42) {
+            const dStop = (tC - 10.5 / this.CH - ai.t) * this.CH;
+            if (dStop < 16) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
           }
         }
       }
 
-      if (axis0) c.position.x += dir * v * dt;
-      else c.position.z += dir * v * dt;
-      for (const w of (c.userData.wheels ?? [])) (w as THREE.Object3D).rotation.x += (v * dt) / 0.42;
-      if (c.position.distanceTo(player) > 150) this.respawn(c, player);
+      // approach the node; pick the next street on arrival
+      ai.v += Math.max(-8 * dt, Math.min(5 * dt, vTarget - ai.v));
+      ai.t += (ai.v * dt) / this.CH;
+      if (ai.t >= 1) {
+        const over = ai.t - 1;
+        const next = this.nextNodes(ai.tx, ai.tz, horiz ? [sign, 0] : [0, sign]);
+        if (next) {
+          ai.fx = ai.tx; ai.fz = ai.tz;
+          ai.tx = next[0]; ai.tz = next[1];
+          ai.t = over;
+        } else {
+          ai.t = 0.98; // boxed in (shouldn't happen on a connected grid)
+        }
+      }
+      this.place(c, ai);
+
+      for (const w of (c.userData.wheels ?? [])) (w as THREE.Object3D).rotation.x += (ai.v * dt) / 0.42;
+      if (c.position.distanceTo(player) > 190) this.respawn(c, player);
     }
+  }
+
+  /** choose the next node at a junction: prefer straight, never U-turn
+   * unless it's the only option. Returns null when nothing is open. */
+  private nextNodes(i: number, j: number, dir: [number, number]): [number, number] | null {
+    const opts: Array<[number, number]> = [];
+    const push = (ni: number, nj: number, open: boolean): void => {
+      if (open && !(ni === i - dir[0] && nj === j - dir[1])) opts.push([ni, nj]);
+    };
+    push(i + 1, j, this.grid.segH(j, i));       // east
+    push(i - 1, j, this.grid.segH(j, i - 1));   // west
+    push(i, j + 1, this.grid.segV(i, j));       // south
+    push(i, j - 1, this.grid.segV(i, j - 1));   // north
+    if (!opts.length) return null;
+    const straight: [number, number] = [i + dir[0], j + dir[1]];
+    const straightOpt = opts.find(o => o[0] === straight[0] && o[1] === straight[1]);
+    if (straightOpt && Math.random() < 0.62) return straightOpt;
+    return opts[(Math.random() * opts.length) | 0];
   }
 }

@@ -8,9 +8,7 @@ import { C, mat } from '../../engine/stage.js';
 import { bakedModel, prepBakedModels, type BakeDef } from '../../engine/assets.js';
 import { Baked, templateToMesh } from '../../engine/baked.js';
 import { makeSailboat, makeTugboat, makeRowboat } from '../../kit/boats.js';
-
-const ISLAND = 384;
-const CENTER = ISLAND / 2;
+import { ISLAND, CENTER } from '../../worlds/world.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
 // Also drives the boats/buoys so everything floats on the same water.
@@ -90,7 +88,7 @@ export class Sea {
     // ---- waving water plane (flat-shaded facets catch the light) ----
     // sized so its far edge is past full fog from any shore viewpoint
     this.water = new THREE.Mesh(
-      new THREE.PlaneGeometry(1200, 1200, 72, 72),
+      new THREE.PlaneGeometry(ISLAND + 400, ISLAND + 400, 72, 72),
       mat(0x72c3de),
     );
     this.water.rotation.x = -Math.PI / 2;
@@ -122,7 +120,8 @@ export class Sea {
     scene.add(bakePier());
 
     // dinghies moored alongside (bobbing, heading along the shore)
-    for (const [x, z, phase] of [[326.5, 394, 1.2], [341.5, 398, 4.1]] as Array<[number, number, number]>) {
+    const PX = ISLAND - 50;
+    for (const [x, z, phase] of [[PX - 7.5, ISLAND + 10, 1.2], [PX + 7.5, ISLAND + 14, 4.1]] as Array<[number, number, number]>) {
       const boat = hullObject('boat-row-large', 4, () => makeRowboat({ hull: C.brown }));
       boat.rotation.y = Math.PI / 2;
       boat.position.set(x, 0, z);
@@ -146,12 +145,13 @@ export class Sea {
       this.bobbers.push({ mesh: buoy, x, z, amp: 1.4, phase: k * 2.3 });
     }
 
-    // an anchored cargo ship off the race-circuit shore
+    // an anchored cargo ship off the south-east shore
+    const shipX = ISLAND + 34, shipZ = ISLAND - 36;
     const ship = hullObject('ship-cargo-a', 30, () => new THREE.Group());
     ship.rotation.y = 0.5;
-    ship.position.set(424, 0, 348);
+    ship.position.set(shipX, 0, shipZ);
     scene.add(ship);
-    this.bobbers.push({ mesh: ship, x: 424, z: 348, amp: 0.5, phase: 2.8 });
+    this.bobbers.push({ mesh: ship, x: shipX, z: shipZ, amp: 0.5, phase: 2.8 });
   }
 
   private buildBoats(scene: THREE.Scene): void {
@@ -222,18 +222,19 @@ export class Sea {
   }
 }
 
-// pier deck, beams, posts and bollards in one baked mesh (south shore,
-// race-corner beach: deck runs z 384→403 at x 330..338)
+// pier deck, beams, posts and bollards in one baked mesh (south shore by the
+// race corner: deck runs z ISLAND+1.5 → ISLAND+20.5)
 function bakePier(): THREE.Mesh {
   const wood = C.brown, dark = C.brownDark;
+  const PX = ISLAND - 50, ZC = ISLAND + 9.5;
   const B = new Baked();
-  B.box(8, 0.16, 19, wood, 334, 0.42, 393.5);         // deck out to z=403
-  for (const x of [330.5, 333.5, 336.5]) B.box(0.14, 0.04, 19, dark, x, 0.51, 393.5);
-  for (const x of [330.2, 337.8]) B.box(0.32, 0.2, 19, dark, x, 0.45, 393.5);
-  for (const z of [386.5, 393.5, 400.5]) {
-    for (const x of [330.9, 337.1]) B.cyl(0.18, 0.22, 2.4, 8, dark, x, -0.4, z);
+  B.box(8, 0.16, 19, wood, PX, 0.42, ZC);         // deck out to z=ISLAND+19
+  for (const x of [PX - 3.5, PX - 0.5, PX + 2.5]) B.box(0.14, 0.04, 19, dark, x, 0.51, ZC);
+  for (const x of [PX - 3.8, PX + 3.8]) B.box(0.32, 0.2, 19, dark, x, 0.45, ZC);
+  for (const z of [ISLAND + 2.5, ZC, ISLAND + 16.5]) {
+    for (const x of [PX - 3.1, PX + 3.1]) B.cyl(0.18, 0.22, 2.4, 8, dark, x, -0.4, z);
   }
-  for (const x of [332.4, 335.6]) B.cyl(0.14, 0.18, 0.5, 8, dark, x, 0.75, 401.5); // bollards
+  for (const x of [PX - 1.6, PX + 1.6]) B.cyl(0.14, 0.18, 0.5, 8, dark, x, 0.75, ISLAND + 17.5); // bollards
   return B.build();
 }
 

@@ -8,13 +8,14 @@ import { racePath } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
+import { BRIDGE } from './bridge.js';
 import type { Missions } from './missions.js';
 
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
 
 const SIZE = 256;        // canvas backing-store pixels
-const VIEW = 540;        // world metres across (island + sea + bridge island)
-const CENTER = 192;      // island centre (6×6 chunks of 64 m)
+const VIEW = ISLAND + 170; // world metres across (island + sea + bridge island)
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
@@ -36,8 +37,8 @@ export class Minimap {
     // the island, district-tinted per chunk, on the sea
     ctx.fillStyle = '#72c3de';
     ctx.fillRect(0, 0, s, s);
-    for (let cx = 0; cx < 6; cx++) {
-      for (let cz = 0; cz < 6; cz++) {
+    for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
+      for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
         ctx.fillStyle = hex(chunkGroundColor(this.seed, cx, cz));
         ctx.fillRect(tx(cx * this.CH), ty(cz * this.CH), this.CH * scale, this.CH * scale);
       }
@@ -111,11 +112,11 @@ export class Minimap {
 
     // the bridge + picnic island off the south shore
     ctx.fillStyle = '#c8b98e';
-    ctx.fillRect(tx(164), ty(421), 40 * scale, 40 * scale);
+    ctx.fillRect(tx(BRIDGE.ISLE.x1), ty(BRIDGE.ISLE.z1), 40 * scale, 40 * scale);
     ctx.fillStyle = '#a9c88b';
-    ctx.fillRect(tx(166), ty(423), 36 * scale, 36 * scale);
+    ctx.fillRect(tx(BRIDGE.ISLE.x1 + 2), ty(BRIDGE.ISLE.z1 + 2), 36 * scale, 36 * scale);
     ctx.fillStyle = '#8f97a3';
-    ctx.fillRect(tx(179), ty(381), 11 * scale, 42 * scale);
+    ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * scale, 42 * scale);
 
     // race circuit outline (world-fixed)
     ctx.strokeStyle = '#5a6474';
@@ -130,8 +131,8 @@ export class Minimap {
 
     // traffic lights: one dot per real intersection (roundabouts get a ring,
     // plazas an amber one); level crossings get a white ×
-    for (let i = 1; i <= 5; i++) {
-      for (let j = 1; j <= 5; j++) {
+    for (let i = 1; i < WORLD_CHUNKS; i++) {
+      for (let j = 1; j < WORLD_CHUNKS; j++) {
         if (plan.roundabout(i, j)) {
           ctx.fillStyle = '#a4cf85';
           ctx.beginPath();

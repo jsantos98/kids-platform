@@ -88,10 +88,28 @@
     border-radius: 16px; border: 3px solid #fffdf8;
     box-shadow: 0 3px 0 rgba(74, 80, 88, .18);
   }
+  #sirenBtn {
+    position: fixed; left: 14px; bottom: 14px; z-index: 12;
+    display: flex; align-items: center; gap: 9px;
+    padding: 11px 20px 11px 15px; border-radius: 999px; cursor: pointer;
+    background: var(--cream); color: var(--ink); border: 3px solid #fffdf8;
+    box-shadow: 0 4px 0 rgba(74, 80, 88, .18);
+    font: 800 17px 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: 2px; touch-action: manipulation;
+  }
+  #sirenBtn .ic { font-size: 24px; line-height: 1; }
+  #sirenBtn.on {
+    background: #e25c5c; color: #fffdf8;
+    animation: sirenPulse .7s ease-out infinite;
+  }
+  @keyframes sirenPulse {
+    0%   { box-shadow: 0 4px 0 rgba(163, 42, 42, .45), 0 0 0 0 rgba(226, 92, 92, .55); }
+    100% { box-shadow: 0 4px 0 rgba(163, 42, 42, .45), 0 0 0 16px rgba(226, 92, 92, 0); }
+  }
 </style>
 </head>
 <body>
-<div id="hint"><b>W / ↑</b> gas &nbsp; <b>S / ↓</b> brake &nbsp; <b>A D / ← →</b> steer &nbsp; <b>SPACE / A</b> spray / rescue &nbsp; <b>C</b> camera (chase · high · cab) &nbsp; <b>R</b> reset<br>USB wheel: steering axis + triggers work automatically</div>
+<div id="hint"><b>W / ↑</b> gas &nbsp; <b>S / ↓</b> brake &nbsp; <b>A D / ← →</b> steer &nbsp; <b>SPACE / A</b> spray / rescue &nbsp; <b>E</b> siren &nbsp; <b>C</b> camera (chase · high · cab) &nbsp; <b>R</b> reset<br>USB wheel: steering axis + triggers work automatically</div>
 <div id="mission">loading…</div>
 <div id="guide">
   <div id="guideBadge"><span id="guideIcon"></span>
@@ -106,6 +124,7 @@
 </div>
 <div id="prompt"><span id="promptText"></span><div class="bar"><div id="promptFill"></div></div></div>
 <div id="camLabel"></div>
+<button id="sirenBtn" type="button"><span class="ic">🚨</span>SIREN</button>
 <canvas id="minimap" width="256" height="256"></canvas>
 <script type="module" src="../src/games/city/index.ts"></script>
 </body>

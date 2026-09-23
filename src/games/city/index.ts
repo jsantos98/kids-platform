@@ -18,9 +18,11 @@ import type { BakedTemplate } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
+import { ISLAND, CENTER } from '../../worlds/world.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
+import { makeSirenBar } from '../../kit/props.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
 import { Particles } from './particles.js';
@@ -57,7 +59,7 @@ function pickSpawn(): { x: number; z: number; heading: number } {
   const spots: Array<{ x: number; z: number; heading: number }> = [];
   const collect = (lines: number[]): void => {
     for (const j of lines) {
-      for (let i = 1; i <= 4; i++) {
+      for (let i = 1; i < WORLD_CHUNKS - 1; i++) {
         if (!plan.segH(j, i)) continue;
         const x = i * 64 + 18 + sr() * 28, z = j * 64 + 3.5;
         if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
@@ -66,7 +68,7 @@ function pickSpawn(): { x: number; z: number; heading: number } {
       }
     }
     for (const i of lines) {
-      for (let j = 1; j <= 4; j++) {
+      for (let j = 1; j < WORLD_CHUNKS - 1; j++) {
         if (!plan.segV(i, j)) continue;
         const x = i * 64 - 3.5, z = j * 64 + 18 + sr() * 28;
         if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
@@ -75,10 +77,11 @@ function pickSpawn(): { x: number; z: number; heading: number } {
       }
     }
   };
-  collect([2, 3]);       // prefer the central boulevards
-  if (spots.length < 4) collect([1, 4]);
-  if (!spots.length) collect([5]);
-  return spots.length ? spots[(sr() * spots.length) | 0] : { x: 130, z: 130, heading: 0 };
+  const c = WORLD_CHUNKS >> 1;
+  collect([c, c + 1]);                 // prefer the central boulevards
+  if (spots.length < 4) collect([c - 1, c + 2]);
+  if (!spots.length) collect([1, WORLD_CHUNKS - 2]);
+  return spots.length ? spots[(sr() * spots.length) | 0] : { x: CENTER, z: CENTER, heading: 0 };
 }
 
 // ---- stage & world dressing ----
@@ -115,9 +118,26 @@ const audio = new GameAudio();
 initInput(code => {
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
+  if (code === 'KeyE') setSiren(!sirenOn);
   if (code === 'KeyR') Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: 0 });
 });
 addEventListener('pointerdown', () => audio.unlock());
+
+// ---- siren: a manual toggle (screen button or the E key). While it's on the
+// truck rocks a flashing red/blue lightbar and the siren howls. ----
+const sirenBtn = document.getElementById('sirenBtn') as HTMLButtonElement;
+let sirenOn = false;
+const sirenBar = makeSirenBar();
+sirenBar.group.position.set(0, V.fly ? 3.1 : (P.vehicle === 'kart' ? 1.25 : 2.5), V.fly ? 1.5 : 0.8);
+sirenBar.group.visible = false;
+player.car.add(sirenBar.group);
+function setSiren(on: boolean): void {
+  sirenOn = on;
+  sirenBtn.classList.toggle('on', on);
+  sirenBar.group.visible = on;
+  if (on) audio.unlock();
+}
+sirenBtn.addEventListener('click', () => setSiren(!sirenOn));
 
 // ---- CC0 Kenney city kit preload ----
 // Models are baked per-face into the chunk vertex-color meshes (buildings, trees,
@@ -191,12 +211,17 @@ if (q.get('debugbake') === '1') {
 }
 
 // ---- chunk streaming ----
+// the island is far too big to build at once now: chunks spring up around the
+// truck as it drives (fog hides the seams), and the ?buildall=1 dev flag still
+// lays down every chunk for aerial screenshots
 const roadGrid = new RoadGrid(P.seed);
-const chunks = new ChunkManager(scene, P.seed, roadGrid);
+const chunks = new ChunkManager(scene, P.seed, roadGrid, 64, 4);
 const river = riverFor(P.seed);
-// the island is small: build every chunk once at boot
-for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
-  for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
+chunks.ensure(999, spawn.x, spawn.z);
+if (q.get('buildall') === '1') {
+  for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
+    for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
+  }
 }
 
 // ---- the sea: waving water, surf, pier and Kenney watercraft sailing around ----
@@ -237,7 +262,7 @@ if (q.get('spraytest') === '1') {
 const trains = new Trains(scene, P.seed);
 const transit = new Transit(scene, P.seed);
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : [],
+const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [],
   cityPlanFor(P.seed).crossings, trains);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
@@ -462,8 +487,9 @@ const tick = (): void => {
   followSky(st.x, st.z);
 
   // keep the truck on the island (the ocean is not drivable)
-  st.x = Math.min(381, Math.max(3, st.x));
-  st.z = Math.min(381, Math.max(3, st.z));
+  st.x = Math.min(ISLAND - 3, Math.max(3, st.x));
+  st.z = Math.min(ISLAND - 3, Math.max(3, st.z));
+  chunks.ensure(2, st.x, st.z);
 
   // ambient life: the trains, the tram, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly
@@ -630,8 +656,14 @@ const tick = (): void => {
     updateMissionPanel();
   }
 
-  audio.setSiren(missions.objectives.length > 0);
+  audio.setSiren(sirenOn);
   audio.setPump(jet.visible);
+  if (sirenOn) {
+    // alternate the lightbar: red flash / blue flash
+    const phase = Math.floor(elapsed * 5) % 2;
+    (sirenBar.red.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff3b30 : 0x4a1616);
+    (sirenBar.blue.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x3f7bff : 0x161d4a);
+  }
 
   if (player.crashT > 0) {
     promptEl.style.display = 'block';

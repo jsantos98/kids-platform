@@ -22,6 +22,7 @@ add it here AND add an enforcement point (code guard or audit check).
 | R1 | **No road ends in open space.** Every street tip ends at a cross street. The only sanctioned loose ends are the four causeway mouths on the shore. | `cityPlan.ts` — dead-end trim stage (5) |
 | R2 | **Streets tile gaplessly.** Each 64 m edge is six cells of 64/6 m; corner cells always bake (no pads, no skips). | `cityChunk.ts` street stage |
 | R3 | **Junctions are the union of their road cells** — a plus, T or L exactly as wide as the roads. Never add a wider pad: its corners jut past the kerb lines as orphan asphalt. | `cityChunk.ts` (no pad exists — keep it that way) |
+| R3b | **No hard 90° asphalt corners.** Every junction corner where two arms meet gets a fillet disc (r5), and an L-bend's outer elbow gets a bigger disc (r7) curving the outer edge. | `cityChunk.ts` corner-fillet stage |
 | R4 | **Kerbs + centre dashes break only at open junctions** (plus/T/L, roundabout, plaza). A road running straight through a node keeps its markings unbroken — no "- - -      - - - -" gaps. | `cityChunk.ts` `openJunction()` gate on markings |
 | R5 | Carriageway is 14 m (`ROAD_HALF = 7`). Lane logic (traffic ±3.5 m, kerbs ±6.9, lamps ±7.8, lots ≥8.1) depends on it. | `cityChunk.ts`, `traffic.ts`, `cityPlan.ts` |
 | R6 | Traffic lights stand at ±12.5 m off signalized nodes (outside the junction opening); cars stop at `STOP_LINE` 18.5 m. | `lampProps.ts`, `cityChunk.ts`, `lights.ts` |

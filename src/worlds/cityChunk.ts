@@ -261,8 +261,30 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
 
   // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
-  if (plan.plaza(cx, cz)) bakePlaza(X0, Z0);
-  else if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
+  if (plan.plaza(cx, cz)) {
+    bakePlaza(X0, Z0);
+  } else if (plan.roundabout(cx, cz)) {
+    bakeRoundabout(X0, Z0);
+  } else {
+    // corner fillets: wherever two arms meet, an asphalt disc rounds the
+    // inner corner, and the elbow of an L-bend gets a bigger disc curving
+    // the outer edge — no hard 90-degree asphalt corners anywhere
+    const a = plan.arms(cx, cz); // [west, east, north, south]
+    const corners: Array<[boolean, boolean, number, number]> = [
+      [a[0], a[2], -1, -1], // NW: west + north
+      [a[1], a[2], 1, -1],  // NE: east + north
+      [a[0], a[3], -1, 1],  // SW: west + south
+      [a[1], a[3], 1, 1],   // SE: east + south
+    ];
+    const armCount = a.filter(Boolean).length;
+    for (const [armA, armB, sx, sz] of corners) {
+      if (armA && armB) {
+        B.cyl(5, 5, 0.04, 12, CAUSEWAY_ASPHALT, X0 + sx * 5, TY, Z0 + sz * 5);
+      } else if (!armA && !armB && armCount === 2) {
+        B.cyl(7, 7, 0.04, 14, CAUSEWAY_ASPHALT, X0 + sx * 7, TY, Z0 + sz * 7);
+      }
+    }
+  }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
   // chunks only keep their corner collision boxes

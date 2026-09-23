@@ -467,6 +467,7 @@ const tick = (): void => {
     guideEl.style.opacity = '1';
     guideIcon.textContent = '🏁';
     guideArrow.style.transform = '';
+    guideArrow.style.display = 'none';
     guideDist.textContent = '';
     guideWait.textContent = '';
   } else if (mode === 'spray' && spraySession) {
@@ -510,6 +511,7 @@ const tick = (): void => {
     const rel = Math.atan2(near.pos.z - st.z, near.pos.x - st.x);
     const deg = (-rel * 180 / Math.PI).toFixed(0);
     guideArrow.style.transform = `rotate(${deg}deg)`;
+    guideArrow.style.display = '';
     const dots = Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240))));
     guideDist.textContent = '\u25CF'.repeat(dots) + '\u25CB'.repeat(5 - dots);
     guideWait.textContent = '';
@@ -552,6 +554,7 @@ const tick = (): void => {
     guideWait.textContent = toast || 'waiting for a call…';
     guideIcon.textContent = '🚨';
     guideArrow.style.transform = '';
+    guideArrow.style.display = 'none';
     guideDist.textContent = '';
     updateMissionPanel();
   }

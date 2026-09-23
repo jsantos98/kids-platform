@@ -157,13 +157,25 @@ function finalize(control: Array<{ x: number; z: number }>, path: WorldPath): Ra
 export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Mesh {
   const B = new Baked();
   const W = 3.4; // track bed width (m)
+  // the kit tile is modelled about a metre below its own origin — measure it
+  // and lift, so the bed rests on the ground (RAIL_Y) instead of hanging
+  // buried beneath the island with the trains floating above it
+  let dy = 0;
+  if (tpl) {
+    let minY = Infinity;
+    for (const src of tpl.geos) {
+      src.computeBoundingBox();
+      minY = Math.min(minY, src.boundingBox!.min.y);
+    }
+    if (Number.isFinite(minY)) dy = -minY;
+  }
   const piece = (x: number, z: number, h: number, len: number): void => {
     if (tpl) {
       const sx = W / tpl.size.x, sz = (len + 0.3) / tpl.size.z;
       for (const src of tpl.geos) {
         const g = src.clone();
         g.scale(sx, 1, sz);
-        g.translate(0, 0, -len / 2);
+        g.translate(0, dy, -len / 2);
         g.rotateY(h);
         g.translate(x, RAIL_Y, z);
         B.raw(g);

@@ -31,7 +31,7 @@
 // transit (crossings, stations, tram) and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
-import { citySeed, southExit, eastExit } from './cityGrid.js';
+import { citySeed, southExit, eastExit, streetLinesFor } from './cityGrid.js';
 import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
@@ -150,31 +150,14 @@ export function cityPlanFor(bx: number, by: number): CityPlan {
 function buildPlan(bx: number, by: number): CityPlan {
   const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, 0xc17, 0));
-  const rail = railRouteFor(seed);
+  const rail = railRouteFor(bx, by);
   const river = riverFor(seed);
 
-  // ---- 1. street lines: seeded subset of interior lines, ≥3 per axis.
-  // Two lines per axis are ARTERIALS — every one of their segments stays
-  // open, giving continuous roads that run the length of the island. ----
-  const pickLines = () => {
-    const out: number[] = [];
-    for (let l = 1; l < W; l++) if (r() < 0.55) out.push(l);
-    return out;
-  };
-  const H = pickLines();
-  const V = pickLines();
-  for (const missing of Array.from({ length: W - 1 }, (_, k) => k + 1)) {
-    if (H.length >= 3) break;
-    if (!H.includes(missing)) H.push(missing);
-  }
-  for (const missing of Array.from({ length: W - 1 }, (_, k) => k + 1)) {
-    if (V.length >= 3) break;
-    if (!V.includes(missing)) V.push(missing);
-  }
-  // race-corner access: keep the zone boundary line as a street
-  if (!H.includes(W - 2) && !V.includes(W - 2)) H.push(W - 2);
-  H.sort((a, b) => a - b);
-  V.sort((a, b) => a - b);
+  // ---- 1. street lines: the shared seeded subset (cityGrid.ts) — the same
+  // lines the railway straightens itself to cross at right angles. Two lines
+  // per axis are ARTERIALS — every one of their segments stays open, giving
+  // continuous roads that run the length of the island. ----
+  const { H, V } = streetLinesFor(bx, by);
   // the arterials: two seeded lines per axis that never drop segments
   const pickArterials = (lines: number[]): number[] => {
     const pool = [...lines];
@@ -352,14 +335,20 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   const crossings: Crossing[] = [];
   const collectCrossings = (horiz: boolean, line: number, a: number, b: number): void => {
+    // true crossings only: sample spans that actually cross the street line
+    // (a rail running alongside within a few metres is not a crossing)
+    const c0 = line * CH;
+    const pts = rail.pts;
     const hits: Array<{ x: number; z: number; d: number }> = [];
-    for (let k = 0; k < rail.pts.length; k++) {
-      const p = rail.pts[k];
-      const along = horiz ? p.x : p.z;
-      const across = horiz ? p.z : p.x;
+    for (let k = 0; k < pts.length; k++) {
+      const p = pts[k], q = pts[(k + 1) % pts.length];
+      const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
+      if ((pa - c0) * (qa - c0) >= 0) continue;
+      const t = (c0 - pa) / (qa - pa);
+      const x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t;
+      const along = horiz ? x : z;
       if (along < a + 11 || along > b - 11) continue;
-      if (Math.abs(across - line * CH) > 7) continue;
-      hits.push({ x: p.x, z: p.z, d: (k / rail.pts.length) * rail.total });
+      hits.push({ x, z, d: ((k + t) / pts.length) * rail.total });
     }
     hits.sort((u, v) => (horiz ? u.x - v.x : u.z - v.z));
     let cluster: typeof hits = [];
@@ -456,8 +445,9 @@ function buildPlan(bx: number, by: number): CityPlan {
     const cx = Math.floor(lot.x / CH), cz = Math.floor(lot.z / CH);
     const dist = district(cx, cz);
     if (dist !== 'urban' && dist !== 'downtown' && dist !== 'industrial') return; // nature/park/race stay clear
-    // keep the railway corridor and the river banks clear
-    if (rail.near(lot.x, lot.z, 12)) return;
+    // keep the railway corridor (plus the sweep of a barrier arm) and the
+    // river banks clear — nothing built may touch the track
+    if (rail.near(lot.x, lot.z, 16)) return;
     if (river.near(lot.x, lot.z, river.halfAt(lot.x, lot.z) + 6.5)) return;
     lots.push(lot);
     const k = key(cx, cz);

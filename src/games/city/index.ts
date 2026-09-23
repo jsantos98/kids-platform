@@ -58,7 +58,7 @@ function pickSpawn(bx: number, by: number): { x: number; z: number; heading: num
   const sr = rng(chunkSeed(seed, 0x5b0, 3));
   const plan = cityPlanFor(bx, by);
   const river = riverFor(seed);
-  const rail = railRouteFor(seed);
+  const rail = railRouteFor(bx, by);
   const spots: Array<{ x: number; z: number; heading: number }> = [];
   const collect = (lines: number[]): void => {
     for (const j of lines) {
@@ -278,7 +278,7 @@ if (q.get('debugsea') === '1') {
     player,
     tram: () => transit.list(),
     river: () => river,
-    route: () => railRouteFor(citySeed(curCity.bx, curCity.by)),
+    route: () => railRouteFor(curCity.bx, curCity.by),
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
       return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];

@@ -56,6 +56,54 @@ export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean):
   };
 }
 
+function nearestOf(pts: PathPt[], x: number, z: number): { d2: number; p: PathPt; i: number } {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const dx = pts[i].x - x, dz = pts[i].z - z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bd) { bd = d2; bi = i; }
+  }
+  return { d2: bd, p: pts[bi], i: bi };
+}
+
+/** A closed path that follows a dense polyline exactly (linear interpolation
+ * between samples) — used for the railway after its crossing deformation,
+ * where the shape must not be re-smoothed back off the perpendicular. */
+export function polyPath(raw: Array<{ x: number; z: number }>): WorldPath {
+  const N = raw.length;
+  const pts: PathPt[] = raw.map((p, i) => {
+    const a = raw[(i - 1 + N) % N], b = raw[(i + 1) % N];
+    return { x: p.x, z: p.z, h: Math.atan2(b.x - a.x, b.z - a.z) };
+  });
+  const cum: number[] = [0];
+  for (let k = 1; k <= N; k++) {
+    const a = raw[k - 1], b = raw[k % N];
+    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  const total = cum[N];
+  return {
+    total,
+    pts,
+    sample(dist: number): PathPt {
+      const d = ((dist % total) + total) % total;
+      let lo = 0, hi = N;
+      while (lo + 1 < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] <= d) lo = mid; else hi = mid;
+      }
+      const fr = (d - cum[lo]) / (cum[lo + 1] - cum[lo] || 1e-6);
+      const a = pts[lo], b = pts[(lo + 1) % N];
+      let dh = b.h - a.h;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      return { x: a.x + (b.x - a.x) * fr, z: a.z + (b.z - a.z) * fr, h: a.h + dh * fr };
+    },
+    nearest(x: number, z: number): { d2: number; p: PathPt; i: number } {
+      return nearestOf(pts, x, z);
+    },
+  };
+}
+
 /** shortest wrapped arc distance between two distances on a closed loop */
 export function arcGap(a: number, b: number, total: number): number {
   const d = Math.abs(((a - b) % total + total) % total);

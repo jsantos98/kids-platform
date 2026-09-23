@@ -113,7 +113,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const boxes: CollisionBox[] = [];
   const TPL = kenneyTPL();
   const plan = cityPlanFor(bx, by);
-  const rail = railRouteFor(seed);
+  const rail = railRouteFor(bx, by);
   const river = riverFor(seed);
   const district = plan.district(cx, cz);
 
@@ -267,16 +267,17 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  // street lamps along surviving streets (urban fabric + industry)
+  // street lamps along surviving streets (urban fabric + industry), kept
+  // clear of the railway corridor so nothing stands in the crossing
   const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
   if (lampDistrict) {
     for (let d = 11; d < CH; d += 18) {
-      if (TPL.lightCurved) {
-        if (roadS) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
-        if (roadW) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
-      }
-      if (roadS) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
-      if (roadW) boxes.push({ x1: X0 + 7.5, x2: X0 + 8.1, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
+      const clearH = roadS && !rail.near(X0 + d, Z0 + 7.8, 9);
+      const clearV = roadW && !rail.near(X0 + 7.8, Z0 + d, 9);
+      if (clearH && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
+      if (clearV && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
+      if (clearH) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
+      if (clearV) boxes.push({ x1: X0 + 7.5, x2: X0 + 8.1, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
     }
   }
 

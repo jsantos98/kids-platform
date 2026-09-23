@@ -11,7 +11,8 @@ import * as THREE from 'three';
 import { rng, chunkSeed } from '../engine/rng.js';
 import { Baked } from '../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { makePath, type WorldPath } from './spline.js';
+import { makePath, polyPath, type WorldPath } from './spline.js';
+import { citySeed, streetLinesFor } from './cityGrid.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
@@ -35,22 +36,24 @@ function inRaceZone(x: number, z: number): boolean {
   return x > RACE_EDGE && z > RACE_EDGE;
 }
 
-// module-level cache: the route only depends on the world seed, and the chunk
+// module-level cache: the route only depends on the city cell, and the chunk
 // baker, the city plan and the trains all ask for it
-const cache = new Map<number, RailRoute>();
+const cache = new Map<string, RailRoute>();
 
-export function railRouteFor(seed: number): RailRoute {
-  let route = cache.get(seed);
+export function railRouteFor(bx: number, by: number): RailRoute {
+  const key = `${bx},${by}`;
+  let route = cache.get(key);
   if (!route) {
-    route = buildRoute(seed);
-    cache.set(seed, route);
+    route = buildRoute(bx, by);
+    cache.set(key, route);
   }
   return route;
 }
 
 interface Attempt { control: Array<{ x: number; z: number }>; score: number; path: WorldPath }
 
-function buildRoute(seed: number): RailRoute {
+function buildRoute(bx: number, by: number): RailRoute {
+  const seed = citySeed(bx, by);
   let best: Attempt | null = null;
   for (let attempt = 0; attempt < 90; attempt++) {
     const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt));
@@ -60,7 +63,7 @@ function buildRoute(seed: number): RailRoute {
     if (a.score === 0) break;
   }
   const chosen = best ?? forcedRoute(seed);
-  return finalize(chosen.control, chosen.path);
+  return finalize(bx, by, chosen.control, chosen.path);
 }
 
 /** one control-ring candidate; null when control spacing is impossible */
@@ -137,16 +140,85 @@ function forcedRoute(seed: number): Attempt {
   return { control, score: 0, path: makePath(control, true) };
 }
 
-function finalize(control: Array<{ x: number; z: number }>, path: WorldPath): RailRoute {
+function finalize(bx: number, by: number, control: Array<{ x: number; z: number }>, path: WorldPath): RailRoute {
+  // the spline pays no attention to the street lattice, so wherever it
+  // happens to graze a road it does so at a rakish angle. Reshape the dense
+  // polyline so every street crossing is square: points near a hit are
+  // blended onto the perpendicular line through it (fully at the hit,
+  // smoothly released outward), which reads as a proper railway junction
+  // and gives the level crossings their barriers a clean strip to guard.
+  const { H, V } = streetLinesFor(bx, by);
+  const shaped = perpendicularCrossings(path, H, V);
+  const p2 = polyPath(shaped);
   return {
-    path,
-    total: path.total,
-    pts: path.pts,
-    sample: d => path.sample(d),
-    distTo(x, z) { return Math.sqrt(path.nearest(x, z).d2); },
-    near(x, z, r) { return path.nearest(x, z).d2 < r * r; },
+    path: p2,
+    total: p2.total,
+    pts: p2.pts,
+    sample: d => p2.sample(d),
+    distTo(x, z) { return Math.sqrt(p2.nearest(x, z).d2); },
+    near(x, z, r) { return p2.nearest(x, z).d2 < r * r; },
     control,
   };
+}
+
+/** half-length of the straightened approach either side of a crossing (m) */
+const CROSS_ZONE = 24;
+
+function perpendicularCrossings(
+  path: WorldPath,
+  H: number[], V: number[],
+): Array<{ x: number; z: number }> {
+  const pts = path.pts;
+  const N = pts.length;
+  const cum: number[] = [0];
+  for (let k = 1; k <= N; k++) {
+    const a = pts[k - 1], b = pts[k % N];
+    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  const total = cum[N];
+  // where does a sample span cross a street line?
+  interface Hit { s: number; x: number; z: number; horiz: boolean; line: number }
+  const hits: Hit[] = [];
+  const spanCross = (va: number, vb: number, c: number): number | null => {
+    if ((va - c) * (vb - c) >= 0) return null;
+    return (c - va) / (vb - va);
+  };
+  for (let k = 0; k < N; k++) {
+    const a = pts[k], b = pts[(k + 1) % N];
+    const segLen = cum[k + 1] - cum[k];
+    for (const line of H) {
+      const t = spanCross(a.z, b.z, line * 64);
+      if (t !== null) hits.push({ s: cum[k] + t * segLen, x: a.x + (b.x - a.x) * t, z: line * 64, horiz: true, line });
+    }
+    for (const line of V) {
+      const t = spanCross(a.x, b.x, line * 64);
+      if (t !== null) hits.push({ s: cum[k] + t * segLen, x: line * 64, z: a.z + (b.z - a.z) * t, horiz: false, line });
+    }
+  }
+  hits.sort((u, v) => u.s - v.s);
+  // a near-parallel stretch may graze one line repeatedly; the whole wiggle
+  // resolves to ONE square crossing — later hits within a blend-zone length
+  // of the kept hit fold into it (the blend flattens their span anyway)
+  const centers: Hit[] = [];
+  for (const h of hits) {
+    const prev = centers[centers.length - 1];
+    if (prev && prev.horiz === h.horiz && prev.line === h.line && h.s - prev.s < CROSS_ZONE * 2) continue;
+    centers.push(h);
+  }
+  // blend the neighbourhood of every kept hit onto the perpendicular through it
+  const out = pts.map(p => ({ x: p.x, z: p.z }));
+  for (const hit of hits) {
+    for (let k = 0; k < N; k++) {
+      let ds = cum[k] - hit.s;
+      if (ds > total / 2) ds -= total;
+      if (ds < -total / 2) ds += total;
+      if (Math.abs(ds) >= CROSS_ZONE) continue;
+      const w = 0.5 * (1 + Math.cos((Math.PI * ds) / CROSS_ZONE));
+      if (hit.horiz) out[k].x += (hit.x - out[k].x) * w;
+      else out[k].z += (hit.z - out[k].z) * w;
+    }
+  }
+  return out;
 }
 
 /**

@@ -22,10 +22,20 @@ const DIM_RED = new THREE.MeshBasicMaterial({ color: 0x4a2226 });
 const STEEL = 0x5f6774;
 const CREAM = 0xe8e4d8;
 const WOOD = 0xc9b083;
+const BOOM_RED = new THREE.MeshLambertMaterial({ color: 0xd94b32 });
+const BOOM_WHITE = new THREE.MeshLambertMaterial({ color: 0xf2ede0 });
+
+const BOOM_LEN = 8.2;   // boom reach: half the carriageway plus a shoulder
+const BOOM_UP = 1.22;   // raised tilt (rad)
+const BOOM_TIME = 1.6;  // seconds to lower or raise
+/** a train nearer than this (arc m) starts the lamps flashing and the
+ * booms closing — the car AI holds at the same distance */
+export const CROSSING_WARN_DIST = 60;
 
 interface Signal {
-  a: THREE.Mesh[];            // lamp pair on the first pole
-  b: THREE.Mesh[];            // lamp pair on the second pole
+  a: THREE.Mesh[];            // left lamps of every post
+  b: THREE.Mesh[];            // right lamps of every post
+  arms: THREE.Group[];        // boom pivots (rotation.x is animated)
   c: Crossing;
 }
 
@@ -83,7 +93,7 @@ export class Transit {
 
   private buildCity(bx: number, by: number, ox: number, oz: number, key: string): void {
     const seed = citySeed(bx, by);
-    const route = railRouteFor(seed);
+    const route = railRouteFor(bx, by);
     const river = riverFor(seed);
     const plan = cityPlanFor(bx, by);
     const r = rng(chunkSeed(seed, 0x7b2, 9));
@@ -163,30 +173,57 @@ export class Transit {
     return decks;
   }
 
-  // ---- level crossing: twin poles with a crossbuck and flashing lamps ----
+  // ---- level crossing: four posts (two per road approach) each carrying a
+  // crossbuck, a flashing lamp pair and a boom barrier. The booms swing down
+  // while a train nears (update()) and the lamps warn the whole time. ----
   private makeCrossing(B: Baked, c: Crossing, ox: number, oz: number, inst: CityInst): void {
     const alongX = c.axis === 'h'; // the street runs along X
     const ry = alongX ? Math.PI / 2 : 0;
-    const lamps: THREE.Mesh[][] = [[], []];
-    const spots: Array<[number, number]> = alongX
-      ? [[c.x + 8.8, c.z + 8.2], [c.x - 8.8, c.z - 8.2]]
-      : [[c.x + 8.2, c.z + 8.8], [c.x - 8.2, c.z - 8.8]];
-    for (let i = 0; i < 2; i++) {
-      const px = ox + spots[i][0], pz = oz + spots[i][1];
-      B.cyl(0.07, 0.09, 2.9, 8, STEEL, px, 1.45, pz);
+    // posts stand on both shoulders of both approaches; each boom reaches
+    // from its shoulder across half the carriageway
+    const spots: Array<[number, number, number]> = alongX
+      ? [[c.x - 9.4, c.z - 7.6, 0], [c.x - 9.4, c.z + 7.6, Math.PI],
+         [c.x + 9.4, c.z - 7.6, 0], [c.x + 9.4, c.z + 7.6, Math.PI]]
+      : [[c.x - 7.6, c.z - 9.4, Math.PI / 2], [c.x + 7.6, c.z - 9.4, Math.PI / 2],
+         [c.x - 7.6, c.z + 9.4, -Math.PI / 2], [c.x + 7.6, c.z + 9.4, -Math.PI / 2]];
+    const lamps: THREE.Mesh[][] = [[], [], [], []];
+    const arms: THREE.Group[] = [];
+    for (let i = 0; i < spots.length; i++) {
+      const [px, pz, ary] = spots[i];
+      const wx = ox + px, wz = oz + pz;
+      B.cyl(0.09, 0.11, 1.8, 8, STEEL, wx, 0.9, wz);
       // white crossbuck facing down the street
-      B.box(1.5, 0.22, 0.09, 0xfaf7ef, px, 2.75, pz, 0, ry + Math.PI / 4, 0);
-      B.box(1.5, 0.22, 0.09, 0xfaf7ef, px, 2.75, pz, 0, ry - Math.PI / 4, 0);
+      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry + Math.PI / 4, 0);
+      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry - Math.PI / 4, 0);
       // pair of signal lamps (kept dynamic so they can flash)
       for (const s of [-0.34, 0.34]) {
         const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), DIM_RED);
-        lamp.position.set(px + (alongX ? s : 0), 2.2, pz + (alongX ? 0 : s));
+        lamp.position.set(wx + (alongX ? s : 0), 1.75, wz + (alongX ? 0 : s));
         inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }
-      inst.boxes.push({ x1: px - 0.35, x2: px + 0.35, z1: pz - 0.35, z2: pz + 0.35, small: 1 });
+      // the boom: a striped arm on a pivot, raised while the road is open
+      const outer = new THREE.Group();
+      outer.position.set(wx, 0, wz);
+      outer.rotation.y = ary;
+      const pivot = new THREE.Group();
+      pivot.position.y = 1.05;
+      pivot.rotation.x = -BOOM_UP;
+      for (let sgm = 0; sgm < 4; sgm++) {
+        const seg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.26, 0.14, BOOM_LEN / 4),
+          sgm % 2 ? BOOM_WHITE : BOOM_RED,
+        );
+        seg.position.set(0, 0, 0.4 + (sgm + 0.5) * (BOOM_LEN / 4));
+        seg.castShadow = true;
+        pivot.add(seg);
+      }
+      outer.add(pivot);
+      inst.dyn.add(outer);
+      arms.push(pivot);
+      inst.boxes.push({ x1: wx - 0.35, x2: wx + 0.35, z1: wz - 0.35, z2: wz + 0.35, small: 1 });
     }
-    inst.signals.push({ a: lamps[0], b: lamps[1], c });
+    inst.signals.push({ a: lamps.map(l => l[0]), b: lamps.map(l => l[1]), arms, c });
   }
 
   // ---- the tram: inset track down the boulevard centre + stops + vehicles ----
@@ -257,19 +294,26 @@ export class Transit {
     return best;
   }
 
-  /** true while a train is close enough to the crossing to hold traffic */
+  /** true while a train is near enough that the barriers close and the
+   * lamps warn (the car AI holds at the same distance) */
   blocked(c: Crossing, trains: Trains): boolean {
-    return trains.distTo(c.d) < 42;
+    return trains.distTo(c.d) < CROSSING_WARN_DIST;
   }
 
   update(dt: number, elapsed: number, trains: Trains): void {
     for (const inst of this.cities.values()) {
-      // crossing lamps: alternate flash while a train is near, dim otherwise
+      // crossing lamps: alternate flash while a train is near, dim otherwise;
+      // the booms swing down for the train and lift again once it is past
       for (const sig of inst.signals) {
         const warn = this.blocked(sig.c, trains);
         const phase = Math.floor(elapsed * 2.6) % 2;
         for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
         for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;
+        const target = warn ? 0 : -BOOM_UP;
+        const rate = (BOOM_UP / BOOM_TIME) * dt;
+        for (const pivot of sig.arms) {
+          pivot.rotation.x += Math.max(-rate, Math.min(rate, target - pivot.rotation.x));
+        }
       }
       // trams: amble around the loop, dwelling at each shelter
       const path = inst.tramPath;

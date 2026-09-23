@@ -5,7 +5,7 @@
 //
 // An edge's exit line is derived from the edge's owning cell, so the two cities
 // sharing a strait always agree on where the bridge lands.
-import { chunkSeed } from '../engine/rng.js';
+import { chunkSeed, rng } from '../engine/rng.js';
 import { ISLAND, WORLD_CHUNKS, BRIDGE_X } from './world.js';
 
 export const STRAIT = 128;                 // water between two cities (m)
@@ -17,6 +17,35 @@ export function cityBase(): number { return BASE; }
 
 export function citySeed(bx: number, by: number): number {
   return chunkSeed(BASE, bx, by);
+}
+
+/** the seeded subset of lattice lines that carry streets in this city, plus
+ * the four causeway avenues. One shared source: the city plan lays streets on
+ * them, and the railway deforms itself to cross them all at right angles. */
+export function streetLinesFor(bx: number, by: number): { H: number[]; V: number[] } {
+  const seed = citySeed(bx, by);
+  const r = rng(chunkSeed(seed, 0x511e, 0));
+  const pick = (): number[] => {
+    const out: number[] = [];
+    for (let l = 1; l < WORLD_CHUNKS; l++) if (r() < 0.55) out.push(l);
+    return out;
+  };
+  const H = pick();
+  const V = pick();
+  for (const lines of [H, V]) {
+    for (const missing of Array.from({ length: WORLD_CHUNKS - 1 }, (_, k) => k + 1)) {
+      if (lines.length >= 3) break;
+      if (!lines.includes(missing)) lines.push(missing);
+    }
+  }
+  // race-corner access: keep the zone boundary line as a street
+  if (!H.includes(WORLD_CHUNKS - 2) && !V.includes(WORLD_CHUNKS - 2)) H.push(WORLD_CHUNKS - 2);
+  // the four causeway avenues are streets too
+  for (const l of [southExit(bx, by - 1), southExit(bx, by)]) if (!V.includes(l)) V.push(l);
+  for (const l of [eastExit(bx - 1, by), eastExit(bx, by)]) if (!H.includes(l)) H.push(l);
+  H.sort((a, b) => a - b);
+  V.sort((a, b) => a - b);
+  return { H, V };
 }
 
 export interface CityRef { bx: number; by: number; ox: number; oz: number; key: string }

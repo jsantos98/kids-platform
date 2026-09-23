@@ -47,7 +47,7 @@ export class Trains {
 
   constructor(scene: THREE.Scene, bx: number, by: number) {
     const seed = citySeed(bx, by);
-    this.route = railRouteFor(seed);
+    this.route = railRouteFor(bx, by);
     this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
     // rails + vehicles ride in this group (city-local coordinates); the game
     // offsets the group to the current city's world position each frame
@@ -77,7 +77,7 @@ export class Trains {
   /** move the whole railway (mesh + consists) to another city */
   setCity(scene: THREE.Scene, bx: number, by: number): void {
     const seed = citySeed(bx, by);
-    this.route = railRouteFor(seed);
+    this.route = railRouteFor(bx, by);
     this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
     // re-home the mesh + vehicles into a fresh offset group
     const parent = this.group.parent;

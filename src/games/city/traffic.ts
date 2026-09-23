@@ -9,6 +9,7 @@ import { RoadGrid } from '../../worlds/roadGrid.js';
 import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { lightState, STOP_LINE } from './lights.js';
+import { CROSSING_WARN_DIST } from './transit.js';
 import type { Trains } from './train.js';
 
 const MODELS = [
@@ -133,7 +134,8 @@ export class Traffic {
         }
       }
 
-      // level crossings on this segment: hold back while a train is near
+      // level crossings on this segment: hold back while the crossing is
+      // warning (lamps flashing, booms closing) for a train
       const segKey = `${ai.fx},${ai.fz},${ai.tx},${ai.tz}`;
       const segCrossings = this.crossingsBySeg.get(segKey);
       if (segCrossings && this.trains) {
@@ -142,7 +144,7 @@ export class Traffic {
           const from = (horiz ? ai.fx : ai.fz) * this.CH;
           const tC = ((along - from) * sign) / this.CH;
           if (tC <= ai.t) continue; // already past it — keep going
-          if (this.trains.distTo(cr.d) < 42) {
+          if (this.trains.distTo(cr.d) < CROSSING_WARN_DIST) {
             const dStop = (tC - 10.5 / this.CH - ai.t) * this.CH;
             if (dStop < 16) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
           }

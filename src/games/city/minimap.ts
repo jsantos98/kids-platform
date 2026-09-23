@@ -92,7 +92,7 @@ export class Minimap {
     ctx.strokeStyle = '#7a6248';
     ctx.lineWidth = 3.4 * scale;
     ctx.beginPath();
-    routePts(seed).forEach((p, k) => {
+    routePts(this.bx, this.by).forEach((p, k) => {
       const x = tx(p.x), y = ty(p.z);
       if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -237,7 +237,7 @@ export class Minimap {
 }
 
 // per-chunk ground colour for the minimap (slab colour per island biome)
-function routePts(seed: number): Array<{ x: number; z: number }> {
-  const pts = railRouteFor(seed).pts;
+function routePts(bx: number, by: number): Array<{ x: number; z: number }> {
+  const pts = railRouteFor(bx, by).pts;
   return pts.filter((_, k) => k % 3 === 0);
 }

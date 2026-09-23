@@ -64,6 +64,7 @@ function kenneyTPL() {
     lightCurved: bakedModel('light-curved'),
     roadStraight: bakedModel('road-straight'),
     roadInter: bakedModel('road-intersection'),
+    roadCrossroad: bakedModel('road-crossroad'),
     roadCurve: bakedModel('road-curve'),
     roadEnd: bakedModel('road-end'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
@@ -223,53 +224,61 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
 
   // ---- roads: real Kenney city-kit tiles where the kit is loaded, the
-  // procedural pastel slabs otherwise. The lattice is 64 m; tiles are 32 m
-  // squares centred on the street lines (two per edge, one overlay per
-  // node), so junctions get the kit's crosswalk-paved intersection squares,
-  // bends get its curve piece and causeway mouths get a dead-end cap. ----
-  // the kit road stripe is 0.25 of a tile, so a 56 m tile carries a 14 m
-  // road (R5) and its pavement skirts act as the sidewalks; straights are
-  // stretched lengthwise to span one full 64 m edge so nothing overlaps
-  const ROAD_TILE = 56;
-  const TILE_H = 0.02 * 14;          // flattened tile body (~0.28 m)
-  const ROAD_TOP = 0.13;             // road surface (the old slab top + kerb)
+  // procedural pastel slabs otherwise. The kit's straight piece is the
+  // carriageway itself — a full-width asphalt slab (lane markings baked
+  // in, edges crowned 0.02 units) — so a 14 m tile IS the R5 carriageway.
+  // Straights run as three pieces per 64 m edge; junctions take the kit's
+  // crossroad (4 arms), its T-piece (3 arms, closed edge facing the
+  // missing arm), its curve piece at L-bends (2x2 units, arms on the
+  // quarter lines, so it sits offset half a unit toward the bend) and the
+  // dead-end cap at exit mouths. The y scale is the tile unit everywhere
+  // so kerb heights stay consistent across differently-scaled pieces.
+  const ROAD_TILE = 14;
   const TY = 0.11;                   // legacy slab surface height
-  const tileY = ROAD_TOP - TILE_H;
-  const hasRoadKit = !!(TPL.roadStraight && TPL.roadInter && TPL.roadCurve && TPL.roadEnd);
-  const layStraight = (tpl: BakedTemplate | null, x: number, z: number, ry: number): void => {
-    if (tpl) bakeModel(B, tpl, x, tileY, z, ry, 1, [ROAD_TILE, 14, 64]);
+  const CURVE_UNIT = 23.5;           // 2x2-unit curve piece: band of 0.6u = 14 m
+  const hasRoadKit = !!(TPL.roadStraight && TPL.roadInter && TPL.roadCrossroad && TPL.roadCurve && TPL.roadEnd);
+  const layStraight = (x: number, z: number, ry: number): void => {
+    if (TPL.roadStraight) bakeModel(B, TPL.roadStraight, x, 0, z, ry, 1, [64 / 3, ROAD_TILE, ROAD_TILE]);
   };
-  const layNode = (tpl: BakedTemplate | null, x: number, z: number, ry: number): void => {
-    if (tpl) bakeModel(B, tpl, x, tileY + 0.01, z, ry, ROAD_TILE);
+  const layNode = (tpl: BakedTemplate | null, x: number, z: number, ry: number, s = ROAD_TILE): void => {
+    if (tpl) bakeModel(B, tpl, x, 0.005, z, ry, 1, [s, ROAD_TILE, s]);
   };
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
-  const a0 = plan.arms(cx, cz); // this chunk's SW node: [west, east, north, south]
+  // the TRUE [west, east, north, south] arms of this chunk's SW node —
+  // plan.arms() filters out the closed arms, which the piece rotations need
+  const a0 = [plan.segH(cz, cx - 1), plan.segH(cz, cx), plan.segV(cx, cz - 1), plan.segV(cx, cz)];
   const armN = a0.filter(Boolean).length;
   if (hasRoadKit) {
-    // two straight tiles per open edge, centred on the street line
-    if (roadS) {
-      layStraight(TPL.roadStraight, X0 + 32, Z0, 0);
-    }
-    if (roadW) {
-      layStraight(TPL.roadStraight, X0, Z0 + 32, Math.PI / 2);
-    }
-    // node overlay: intersection for 3+ arms, the 2x2 curve piece for
-    // bends (half scale: it is a double-wide tile), a dead-end cap for
-    // the sanctioned causeway mouths
-    if (armN >= 3) {
-      layNode(TPL.roadInter, X0, Z0, 0);
+    // the tile's length axis is local X (centre line, lane lines and the
+    // end ramps all run along it): east-west streets take ry=0,
+    // north-south streets ry=pi/2
+    if (roadS) for (const off of [64 / 6, 32, 5 * 64 / 6]) layStraight(X0 + off, Z0, 0);
+    if (roadW) for (const off of [64 / 6, 32, 5 * 64 / 6]) layStraight(X0, Z0 + off, Math.PI / 2);
+    // rotation tables from the pieces' vertex layouts: the T opens
+    // west/east/south, the curve connects west+south, the cap closes west.
+    if (armN === 4) {
+      layNode(TPL.roadCrossroad, X0, Z0, 0);
+    } else if (armN === 3) {
+      const miss = a0.indexOf(false); // 0=w 1=e 2=n 3=s
+      layNode(TPL.roadInter, X0, Z0,
+        miss === 2 ? 0 : miss === 3 ? Math.PI : miss === 1 ? -Math.PI / 2 : Math.PI / 2);
     } else if (armN === 2 && !(a0[0] && a0[1]) && !(a0[2] && a0[3])) {
-      // bend: orient the curve so its open arms line up with the streets
-      const rot = a0[0] && a0[2] ? Math.PI : a0[0] && a0[3] ? -Math.PI / 2 : a0[1] && a0[2] ? Math.PI / 2 : 0;
-      layNode(TPL.roadCurve, X0, Z0, rot);
+      const ws = a0[0] && a0[3]; // west + south
+      const rot = ws ? 0 : a0[1] && a0[3] ? Math.PI / 2 : a0[1] && a0[2] ? Math.PI : -Math.PI / 2;
+      // the curve's arms sit on the quarter lines: shift the piece half a
+      // unit so its arm centerlines land on the street lines
+      const ox = rot === 0 || rot === -Math.PI / 2 ? -CURVE_UNIT / 2 : CURVE_UNIT / 2;
+      const oz = rot === 0 || rot === Math.PI / 2 ? CURVE_UNIT / 2 : -CURVE_UNIT / 2;
+      layNode(TPL.roadCurve, X0 + ox, Z0 + oz, rot, CURVE_UNIT);
     } else if (armN === 1) {
-      const rot = a0[0] ? 0 : a0[1] ? Math.PI : a0[2] ? -Math.PI / 2 : Math.PI / 2;
+      const rot = a0[1] ? 0 : a0[0] ? Math.PI : a0[2] ? Math.PI / 2 : -Math.PI / 2;
       layNode(TPL.roadEnd, X0, Z0, rot);
     }
   } else {
     const openJunction = (i: number, j: number): boolean => {
-      const a = plan.arms(i, j); // [west, east, north, south]
+      // unfiltered [west, east, north, south] — bends must read as junctions
+      const a = [plan.segH(j, i - 1), plan.segH(j, i), plan.segV(i, j - 1), plan.segV(i, j)];
       const n = a.filter(Boolean).length;
       if (plan.plaza(i, j) || n >= 3) return true;
       return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));

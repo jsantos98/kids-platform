@@ -1,7 +1,7 @@
 // The Endless City fire-truck game: boot, frame loop and mode orchestration.
 import * as THREE from 'three';
 import { createStage, makeHUD } from '../../engine/stage.js';
-import { prepBakedModels, bakedModel } from '../../engine/assets.js';
+import { prepBakedModels, bakedModel, spawnVehicle } from '../../engine/assets.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
@@ -12,8 +12,8 @@ import { Trains } from './train.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
-import { spawnVehicle } from '../../engine/assets.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
@@ -36,10 +36,10 @@ const stage = createStage({
 });
 const { scene, camera, renderer, sun, followSky } = stage;
 
-// ground follower (hides the edge of the generated area)
+// ground follower — ocean blue beyond the island, hides the world's edge
 const groundFollower = new THREE.Mesh(
-  new THREE.PlaneGeometry(700, 700),
-  new THREE.MeshLambertMaterial({ color: 0xa9c88b }),
+  new THREE.PlaneGeometry(1600, 1600),
+  new THREE.MeshLambertMaterial({ color: 0x6fb7d9 }),
 );
 groundFollower.rotation.x = -Math.PI / 2;
 groundFollower.receiveShadow = true;
@@ -49,7 +49,7 @@ scene.add(groundFollower);
 const V = raceMode ? VEHICLES.kart : (VEHICLES[P.vehicle] ?? VEHICLES.truck);
 const spawn = raceMode
   ? { x: RACE_START.x, z: RACE_START.z, heading: RACE_START.heading }
-  : { x: 2.3, z: 34, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
+  : { x: 130, z: 130, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -107,9 +107,12 @@ if (q.get('debugbake') === '1') {
 }
 
 // ---- chunk streaming ----
-const roadGrid = new RoadGrid(P.seed);
+const roadGrid = new RoadGrid();
 const chunks = new ChunkManager(scene, P.seed, roadGrid);
-chunks.ensure(9, spawn.x, spawn.z); // small starting ring synchronously
+// the island is small: build every chunk once at boot
+for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
+  for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
+}
 
 // ---- water jet + steam (spray mini-scene visuals) ----
 const jet = new THREE.Mesh(
@@ -333,10 +336,12 @@ const tick = (): void => {
   groundFollower.position.set(st.x, -0.02, st.z);
   followSky(st.x, st.z);
 
-  chunks.ensure(2, st.x, st.z);
+  // keep the truck on the island (the ocean is not drivable)
+  st.x = Math.min(381, Math.max(3, st.x));
+  st.z = Math.min(381, Math.max(3, st.z));
 
   // ambient life: the trains and the patrol helicopter
-  trains.update(elapsed, st.x, st.z);
+  trains.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
   pedestrians.update(dt, st.x, st.z, st.x, st.z);
 
@@ -346,7 +351,6 @@ const tick = (): void => {
   particles.update(dt);
   chunks.updateLights(elapsed);
   minimap.update(st.x, st.z, st.heading, elapsed);
-
   // hose / ladder aiming: wheel axis, A/D / arrows, or mouse cursor position
   let aimIn = 0;
   if (isDown('KeyA') || isDown('ArrowLeft')) aimIn -= 1;

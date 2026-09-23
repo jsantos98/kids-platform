@@ -1,21 +1,30 @@
-// ENDLESS CITY — deterministic chunk generator for the city game.
-// generateCityChunk(seed, cx, cz) -> { mesh (1 baked draw call), boxes (collision AABBs) }
-// Roads run along the chunk grid lines, buildings face them; revisiting a chunk
-// always rebuilds the exact same block. All props come from CC0 Kenney kits
-// (preloaded via engine/assets) with a procedural pastel fallback.
+// The little island city: a 6×6-chunk (384 m) world with a beach ring, ocean
+// beyond, biome pockets (forest, desert, meadow), the race circuit in the
+// south-east, and the train looping the island shore. Each chunk is one
+// vertex-colored mesh; the whole island is built once at boot.
 import * as THREE from 'three';
 import { C } from '../engine/palette.js';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { RoadGrid } from './roadGrid.js';
-import { biomeAt, biomeGround } from './biomes.js';
 import { raceZoneChunk, raceTiles, tileCenter, RACE_TILE } from './racetrack.js';
+
+export const WORLD_CHUNKS = 6; // island is 6×6 chunks = 384 × 384 m
+
+export interface CollisionBox {
+  x1: number; x2: number; z1: number; z2: number;
+  small?: number;
+}
+
+export interface CityChunkResult {
+  mesh: THREE.Mesh;
+  boxes: CollisionBox[];
+}
 
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
 
-// ---- Kenney kit placement helpers (models baked into chunk vertex-color meshes) ----
+// ---- Kenney kit placement helpers ----
 const _km = new THREE.Matrix4();
 const _kq = new THREE.Quaternion();
 const _ke = new THREE.Euler();
@@ -31,37 +40,6 @@ function bakeModel(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number
   for (const g of tpl.geos) B.raw(g.clone().applyMatrix4(_km));
 }
 
-// axis-aligned footprint of the model rotated by a cardinal angle ry
-function footprint(tpl: BakedTemplate, ry: number, s: number): { ex: number; ez: number } {
-  const c = Math.abs(Math.cos(ry)), sn = Math.abs(Math.sin(ry));
-  return {
-    ex: c * tpl.size.x * s * 0.5 + sn * tpl.size.z * s * 0.5,
-    ez: sn * tpl.size.x * s * 0.5 + c * tpl.size.z * s * 0.5,
-  };
-}
-
-// tuned by inspection: yaw that points a road-straight tile's lane dashes along X
-const ROAD_DASH_X = 0;
-// extra yaw so Kenney building fronts face the street (models face +Z by default)
-const BLDG_FACE = 0;
-
-// pastel palettes for the procedural fallback pieces
-const BUILDINGS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
-const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
-const CARS = [0xfaf7ef, 0xd9dde2, 0x8f97a3, 0x5a6472, 0x7fb2d9, 0xe25c5c, 0x9cc76a, 0xf6c952];
-const AWNINGS = [[0x63b0a8, C.cream], [0xe25c5c, C.cream], [0x7fb2d9, C.cream]];
-
-export interface CollisionBox {
-  x1: number; x2: number; z1: number; z2: number;
-  /** small props (poles, trees) only collide on direct front hits */
-  small?: number;
-}
-
-export interface CityChunkResult {
-  mesh: THREE.Mesh;
-  boxes: CollisionBox[];
-}
-
 function kenneyTPL() {
   const names = ['bldg-a', 'bldg-b', 'bldg-c', 'bldg-d', 'bldg-e', 'bldg-f', 'bldg-g',
     'bldg-h', 'bldg-i', 'bldg-j', 'bldg-k', 'bldg-l', 'bldg-m', 'bldg-n'].map(bakedModel).filter((t): t is BakedTemplate => !!t);
@@ -72,16 +50,46 @@ function kenneyTPL() {
     pines: ['pine-a', 'pine-b', 'pine-c'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
-    roadStraight: bakedModel('road-straight'),
-    roadCrossroad: bakedModel('road-crossroad'),
-    roadCrossing: bakedModel('road-crossing'),
     lightCurved: bakedModel('light-curved'),
+    roadStraight: bakedModel('road-straight') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
+    roadCrossroad: bakedModel('road-crossroad') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
+    roadCrossing: bakedModel('road-crossing') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
     raceStraight: bakedModel('race-straight'),
     raceCorner: bakedModel('race-corner'),
     raceFinish: bakedModel('race-finish'),
-    raceBump: bakedModel('race-bump'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
   };
+}
+
+const BEACH = 0xf0e2c0;
+const BUILDINGS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
+const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
+const ROAD_DASH_X = 0;
+
+// biome per chunk: city centre, nature pockets at the corners, race in the SE
+export type ChunkBiome = 'city' | 'forest' | 'meadow' | 'desert' | 'race';
+export function islandBiome(cx: number, cz: number): ChunkBiome {
+  if (raceZoneChunk(cx, cz)) return 'race';
+  if (cx <= 1 && cz <= 1) return 'forest';
+  if (cx >= 4 && cz <= 1) return 'meadow';
+  if (cx <= 1 && cz >= 4) return 'desert';
+  return 'city';
+}
+
+function slabColor(biome: ChunkBiome): number {
+  switch (biome) {
+    case 'forest': return 0x7ba363;
+    case 'desert': return 0xe8d29a;
+    case 'meadow': return 0xa9c88b;
+    case 'race': return 0xa9c88b;
+    default: return C.sidewalk;
+  }
+}
+
+/** ground colour of a chunk (ocean blue outside the island) — for the minimap */
+export function chunkGroundColor(cx: number, cz: number): number {
+  if (cx < 0 || cz < 0 || cx >= WORLD_CHUNKS || cz >= WORLD_CHUNKS) return 0x6fb7d9;
+  return slabColor(islandBiome(cx, cz));
 }
 
 export function generateCityChunk(seed: number, cx: number, cz: number): CityChunkResult {
@@ -90,139 +98,37 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const B = new Baked();
   const boxes: CollisionBox[] = [];
   const TPL = kenneyTPL();
-  const biome = biomeAt(cx, cz, seed);
-  const wild = biome !== 'city'; // nature biomes: no buildings, no street lamps
-  const inZone = raceZoneChunk(cx, cz); // raceway apron chunk
+  const biome = islandBiome(cx, cz);
+  const wild = biome === 'forest' || biome === 'desert' || biome === 'meadow';
 
-  // base slab — concrete downtown, grass/sand out in the biomes, raceway apron in the zone
-  const slab = inZone ? 0xa9c88b : biomeGround(biome);
-  B.box(CH, 0.1, CH, slab, X0 + CH / 2, 0.05, Z0 + CH / 2);
+  // base slab — concrete downtown, grass pockets, sand beach ring at the border
+  B.box(CH, 0.1, CH, slabColor(biome), X0 + CH / 2, 0.05, Z0 + CH / 2);
+  if (cx === 0) B.box(6, 0.1, CH, BEACH, X0 + 3, 0.05, Z0 + CH / 2);
+  if (cx === WORLD_CHUNKS - 1) B.box(6, 0.1, CH, BEACH, X0 + CH - 3, 0.05, Z0 + CH / 2);
+  if (cz === 0) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + 3);
+  if (cz === WORLD_CHUNKS - 1) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + CH - 3);
 
-  // race zone: a clear grass apron holding the racing circuit (tiles baked below)
-
-  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines — but
-  // only where the seeded road grid keeps them: some lines are missing, which
-  // breaks the lattice into irregular blocks. Every 4th line is a RAIL
-  // corridor instead (the train shuttles along it), with level crossings
-  // where side roads pass over the rails.
+  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines.
   // tile: road surface at model y=0, raised sidewalk strips to y=0.02 — at 10 m
   // scale the curbs stand 0.2 proud; sit the surface just above the slab top
-  const grid = new RoadGrid(seed);
   const TS = 10, TY = 0.11;
-  const railZ = RoadGrid.isRail(cz);       // south edge is rail
-  const railX = RoadGrid.isRail(cx);       // west edge is rail
-  const roadS = !railZ && grid.hasZ(cz) && !(inZone && cz === 5); // interior zone roads suppressed
-  const roadW = !railX && grid.hasX(cx) && !(inZone && cx === 5);
-  const roadE2 = grid.hasX(cx + 1) && !RoadGrid.isRail(cx + 1); // N-S road east of us
-  const roadN2 = grid.hasZ(cz + 1) && !RoadGrid.isRail(cz + 1); // E-W road north of us
-  if (railZ) {
-    // rail corridor along the south edge; ballast/sleepers pause where the
-    // N-S side roads cross (rails only there, like a level crossing)
-    B.box(CH, 0.06, 5, 0xcbb894, X0 + CH / 2, 0.1, Z0);
-    for (let d = 5; d < CH - 5; d += 0.75) B.box(0.24, 0.1, 2.0, C.brownDark, X0 + d, 0.17, Z0);
-    B.box(CH, 0.1, 0.14, 0x9aa5b5, X0 + CH / 2, 0.26, Z0 - 0.75);
-    B.box(CH, 0.1, 0.14, 0x9aa5b5, X0 + CH / 2, 0.26, Z0 + 0.75);
+  for (let k = 0; k < 6; k++) {
+    const c = TS / 2 + k * TS;
+    bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
+    bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
   }
-  if (railX) {
-    B.box(5, 0.06, CH, 0xcbb894, X0, 0.1, Z0 + CH / 2);
-    for (let d = 5; d < CH - 5; d += 0.75) B.box(2.0, 0.1, 0.24, C.brownDark, X0, 0.17, Z0 + d);
-    B.box(0.14, 0.1, CH, 0x9aa5b5, X0 - 0.75, 0.26, Z0 + CH / 2);
-    B.box(0.14, 0.1, CH, 0x9aa5b5, X0 + 0.75, 0.26, Z0 + CH / 2);
-  }
-  if (TPL.roadStraight && TPL.roadCrossroad) {
-    // SW corner: crossroad where both streets meet, otherwise the surviving
-    // street runs straight through the corner
-    const corner = roadS && roadW ? 'cross' : roadS ? 'ew' : roadW ? 'ns' : 'none';
-    if (corner === 'cross') bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
-    else if (corner === 'ew') bakeModel(B, TPL.roadStraight, X0, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
-    else if (corner === 'ns') bakeModel(B, TPL.roadStraight, X0, TY, Z0, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
-    if (roadS) {
-      // E-W straight slots + crosswalk tiles facing the intersections at each end
-      const n = Math.round((CH - TS) / TS);
-      const L = (CH - TS) / n;
-      for (let k = 1; k < n; k++) {
-        const c = TS / 2 + L / 2 + k * L;
-        bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
-      }
-      if (roadW) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
-        X0 + TS / 2 + L / 2, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
-      if (roadE2) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
-        X0 + CH - TS / 2 - L / 2, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
-    }
-    if (roadW) {
-      // N-S straight slots + crosswalk tiles facing the intersections at each end
-      const n = Math.round((CH - TS) / TS);
-      const L = (CH - TS) / n;
-      for (let k = 1; k < n; k++) {
-        const c = TS / 2 + L / 2 + k * L;
-        bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
-      }
-      if (roadS) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
-        X0, TY, Z0 + TS / 2 + L / 2, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
-      if (roadN2) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
-        X0, TY, Z0 + CH - TS / 2 - L / 2, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
-    }
-  } else if (!railZ && !railX) {
-    if (roadS) B.box(CH + 9, 0.06, 9, C.road, X0 + CH / 2, 0.09, Z0);
-    if (roadW) B.box(9, 0.06, CH + 9, C.road, X0, 0.09, Z0 + CH / 2);
-  }
-  // curbs + markings: procedural look only (the tiles carry their own)
-  if (!(TPL.roadStraight && TPL.roadCrossroad) && !railZ && !railX) {
-    if (roadS) {
-      for (const cz of [Z0 - 4.7, Z0 + 4.7]) B.box(CH + 9, 0.16, 0.4, 0xd8d2c2, X0 + CH / 2, 0.12, cz);
-      for (let d = 3; d < CH - 2; d += 3.6) {
-        if (d > 6.5) B.box(1.7, 0.02, 0.16, C.roadLine, X0 + d, 0.14, Z0);
-      }
-      for (let i = 0; i < 7; i++) {
-        B.box(2.6, 0.02, 0.55, C.roadLine, X0 + 6.8, 0.15, Z0 - 3.45 + i * 1.15);
-      }
-    }
-    if (roadW) {
-      for (const cxx of [X0 - 4.7, X0 + 4.7]) B.box(0.4, 0.16, CH + 9, 0xd8d2c2, cxx, 0.12, Z0 + CH / 2);
-      for (let d = 3; d < CH - 2; d += 3.6) {
-        if (d > 6.5) B.box(0.16, 0.02, 1.7, C.roadLine, X0, 0.14, Z0 + d);
-      }
-      for (let i = 0; i < 7; i++) {
-        B.box(0.55, 0.02, 2.6, C.roadLine, X0 - 3.45 + i * 1.15, 0.15, Z0 + 6.8);
-      }
-    }
-  }
-  // race circuit: bake the tiles whose centre falls inside this chunk
-  if (inZone && TPL.raceStraight && TPL.raceCorner) {
-    for (const t of raceTiles()) {
-      const c = tileCenter(t.col, t.row);
-      if (c.x < X0 || c.x >= X0 + CH || c.z < Z0 || c.z >= Z0 + CH) continue;
-      const tpl = t.kind === 'straight' ? TPL.raceStraight
-        : t.kind === 'corner' ? TPL.raceCorner
-        : t.kind === 'finish' ? TPL.raceFinish : TPL.raceStraight;
-      if (!tpl) continue;
-      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1, [RACE_TILE, RACE_TILE, RACE_TILE]);
-      if (t.kind === 'bump') {
-        const bump = TPL.raceBump;
-        if (bump) bakeModel(B, bump, c.x, TY + 0.2, c.z, t.rot, RACE_TILE / 2.6);
-      }
-    }
-  }
-  // traffic-light corners: only at real intersections (the working lights are
-  // dynamic objects added by the game)
-  if (grid.cross(cx, cz)) {
-    for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
-      boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
-    }
+  bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+  // traffic-light corners: the working lights are dynamic objects added by the
+  // game (traffic.ts); chunks only keep their collision boxes
+  for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
+    boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
   }
   // street lamps (city streets only)
-  if (!wild && !inZone) {
+  if (biome === 'city') {
     for (let d = 10; d < CH; d += 18) {
       if (TPL.lightCurved) {
         bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
         bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
-      } else {
-        B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + d, 1.8, Z0 + 5.4);
-        B.box(1.0, 0.1, 0.1, C.dark, X0 + d - 0.5, 3.5, Z0 + 5.4);
-        B.sphere(0.17, 0xfff6cf, X0 + d - 1.0, 3.42, Z0 + 5.4);
-        B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + 5.4, 1.8, Z0 + d);
-        B.box(0.1, 0.1, 1.0, C.dark, X0 + 5.4, 3.5, Z0 + d - 0.5);
-        B.sphere(0.17, 0xfff6cf, X0 + 5.4, 3.42, Z0 + d - 1.0);
       }
       boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
       boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
@@ -236,91 +142,58 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
     if (TPL.buildings.length) {
       const tpl = pick(r, TPL.buildings);
       const s = Math.min((w * 0.95) / tpl.size.x, (d * 0.95) / tpl.size.z);
-      const fp = footprint(tpl, ry + BLDG_FACE, s);
       const dep = frontFacesZ ? tpl.size.z * s : tpl.size.x * s;
       const inX = frontFacesZ ? 0 : -fx;
       const inZ = frontFacesZ ? -fz : 0;
       const bcx = x + (inX * dep) / 2;
       const bcz = z + (inZ * dep) / 2;
-      // hard rule: a building may never touch a road corridor (belt and braces)
-      const rx = Math.abs(bcx - Math.round(bcx / CH) * CH) - fp.ex;
-      const rz = Math.abs(bcz - Math.round(bcz / CH) * CH) - fp.ez;
+      // hard rule: a building may never touch a road corridor
+      const rx = Math.abs(bcx - Math.round(bcx / CH) * CH) - dep / 2;
+      const rz = Math.abs(bcz - Math.round(bcz / CH) * CH) - dep / 2;
       if (rx < 7 || rz < 7) return;
-      bakeModel(B, tpl, bcx, 0.1, bcz, ry + BLDG_FACE, s);
-      boxes.push({ x1: bcx - fp.ex, x2: bcx + fp.ex, z1: bcz - fp.ez, z2: bcz + fp.ez });
+      bakeModel(B, tpl, bcx, 0.1, bcz, ry, s);
+      boxes.push({ x1: bcx - dep / 2, x2: bcx + dep / 2, z1: bcz - dep / 2, z2: bcz + dep / 2 });
       return;
     }
-    const floors = 2 + ((r() * 3) | 0);
-    const h = floors * 2.9 + 0.6;
-    const isShop = r() < 0.4;
+    const h = 2.9 * (2 + ((r() * 3) | 0)) + 0.6;
     const bodyC = pick(r, BUILDINGS);
-    const halfX = (frontFacesZ ? w : d) / 2;
-    const halfZ = (frontFacesZ ? d : w) / 2;
-    const inX = frontFacesZ ? 0 : -fx;
-    const inZ = frontFacesZ ? -fz : 0;
-    const bcx = frontFacesZ ? x : x + (inX * d) / 2;
-    const bcz = frontFacesZ ? z : z + (inZ * d) / 2;
+    const halfX = 2.25, halfZ = 2.25;
+    const bcx = x, bcz = z;
     const rx = Math.abs(bcx - Math.round(bcx / CH) * CH) - halfX;
     const rz = Math.abs(bcz - Math.round(bcz / CH) * CH) - halfZ;
     if (rx < 7 || rz < 7) return;
     B.box(halfX * 2, h, halfZ * 2, bodyC, bcx, h / 2, bcz);
     B.box(halfX * 2 + 0.3, 0.3, halfZ * 2 + 0.3, pick(r, ROOFS), bcx, h + 0.15, bcz);
-    if (r() < 0.5) B.box(1.1, 0.7, 0.9, 0x8f9399, bcx + j(r, halfX / 2), h + 0.3, bcz + j(r, halfZ / 3));
-    const cols = Math.max(1, Math.floor((w - 1.6) / 2.1));
-    for (let fl = 0; fl < floors - 1; fl++) {
-      const wy = 1.7 + fl * 2.9;
-      for (let c2 = 0; c2 < cols; c2++) {
-        const off = -((cols - 1) * 2.1) / 2 + c2 * 2.1;
-        const col = r() < 0.16 ? 0xf9e2ae : 0xa9cadd;
-        if (frontFacesZ) B.box(1.05, 1.05, 0.08, col, bcx + off, wy, bcz + fz * (halfZ + 0.04));
-        else B.box(0.08, 1.05, 1.05, col, bcx + fx * (halfX + 0.04), wy, bcz + off);
-      }
-    }
-    const rows = Math.max(1, Math.floor((d - 1.6) / 2.3));
-    for (let fl = 0; fl < floors - 1; fl++) {
-      const wy = 1.7 + fl * 2.9;
-      for (let c2 = 0; c2 < rows; c2++) {
-        const off = -((rows - 1) * 2.3) / 2 + c2 * 2.3;
-        const col = r() < 0.12 ? 0xf9e2ae : 0xa9cadd;
-        if (frontFacesZ) {
-          B.box(0.08, 1.0, 1.0, col, bcx - halfX - 0.04, wy, bcz + off);
-          B.box(0.08, 1.0, 1.0, col, bcx + halfX + 0.04, wy, bcz + off);
-        } else {
-          B.box(1.0, 1.0, 0.08, col, bcx + off, wy, bcz - halfZ - 0.04);
-          B.box(1.0, 1.0, 0.08, col, bcx + off, wy, bcz + halfZ + 0.04);
-        }
-      }
-    }
-    if (frontFacesZ) {
-      B.box(1.0, 2.1, 0.1, 0x6a5240, bcx + w * 0.22, 1.05, bcz + fz * (halfZ + 0.03));
-      B.box(w * 0.45, 1.4, 0.08, 0xa9cadd, bcx - w * 0.18, 1.35, bcz + fz * (halfZ + 0.03));
-      if (isShop) {
-        for (let si = 0; si < Math.floor(w * 0.45 / 0.8); si++)
-          B.box(0.8, 0.06, 0.9, si % 2 ? 0xcf7d6d : C.cream, bcx - w * 0.22 + si * 0.8, 2.35, bcz + fz * (halfZ + 0.3), -0.3);
-      }
-    } else {
-      B.box(0.1, 2.1, 1.0, 0x6a5240, bcx + fx * (halfX + 0.03), 1.05, bcz + w * 0.22);
-      B.box(0.08, 1.4, w * 0.45, 0xa9cadd, bcx + fx * (halfX + 0.03), 1.35, bcz - w * 0.18);
-      if (isShop) {
-        for (let si = 0; si < Math.floor(w * 0.45 / 0.8); si++)
-          B.box(0.9, 0.06, 0.8, si % 2 ? 0xcf7d6d : C.cream, bcx + fx * (halfX + 0.3), 2.35, bcz - w * 0.22 + si * 0.8, 0, 0, -0.3);
-      }
-    }
     boxes.push({ x1: bcx - halfX, x2: bcx + halfX, z1: bcz - halfZ, z2: bcz + halfZ });
   }
 
   function bakeTrees(x: number, z: number, n = 3): void {
     for (let i = 0; i < n; i++) {
-      const tx = x + j(r, 3), tz = z + j(r, 3), s = 1 + r() * 0.8;
+      const tx = x + j(r, 3), tz = z + j(r, 3);
       if (TPL.trees.length) {
-        // street trees: scale the kit models up to real 6-13 m next to the buildings
         bakeModel(B, pick(r, TPL.trees), tx, 0.08, tz, r() * Math.PI * 2, 5 + r() * 2.5);
-      } else {
-        B.cyl(0.14 * s, 0.2 * s, 0.9 * s, 6, C.brown, tx, 0.45 * s, tz);
-        B.sphere(0.75 * s, C.leaf, tx, 1.4 * s, tz);
-        B.sphere(0.5 * s, C.leafLight, tx + 0.4 * s, 1.05 * s, tz);
       }
       boxes.push({ x1: tx - 0.55, x2: tx + 0.55, z1: tz - 0.55, z2: tz + 0.55, small: 1 });
+    }
+  }
+
+  // wild biomes: scatter nature instead of buildings
+  function scatterNature(): void {
+    const tries = biome === 'forest' ? 30 : biome === 'desert' ? 14 : 18;
+    for (let i = 0; i < tries; i++) {
+      const x = X0 + 7 + r() * (CH - 14);
+      const z = Z0 + 7 + r() * (CH - 14);
+      const gx = Math.abs(x - Math.round(x / CH) * CH);
+      const gz = Math.abs(z - Math.round(z / CH) * CH);
+      if (gx < 6.5 || gz < 6.5) continue;
+      let tpl: BakedTemplate | null = null;
+      const s = 3.5 + r() * 2.5;
+      if (biome === 'forest') tpl = pick(r, [...TPL.pines, ...TPL.trees]);
+      else if (biome === 'desert') tpl = pick(r, [...TPL.cacti, ...TPL.rocks]);
+      else tpl = pick(r, TPL.trees);
+      if (!tpl) continue;
+      bakeModel(B, tpl, x, 0.08, z, r() * Math.PI * 2, s);
+      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
     }
   }
 
@@ -328,8 +201,6 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
     if (TPL.cars.length) {
       const tpl = pick(r, TPL.cars);
       bakeModel(B, tpl, x, 0.17, z, ry, 4.3 / Math.max(tpl.size.x, tpl.size.z));
-    } else {
-      bakeCarInto(B, pick(r, CARS), x, z, ry);
     }
   }
 
@@ -337,7 +208,7 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
     let s = 8.4;
     while (s < CH - 9) {
       let w = 9 + r() * 6;
-      if (s + w > CH - 8.4) w = (CH - 8.4) - s; // never spill into the next street
+      if (s + w > CH - 8.4) w = (CH - 8.4) - s;
       if (w < 5) { s += (CH - 8.4) - s + 2; break; }
       const roll = r();
       const along = axis === 'x';
@@ -349,13 +220,11 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
         const d = 9 + r() * 4;
         bakeBuilding(px, pz, w, d, edgeRy);
       } else if (roll < 0.72) {
-        // pocket park: grass + trees + bench, offset inward off the street
         const pcx = px + diX * 4, pcz = pz + diZ * 4;
         B.box(along ? 8 : w, 0.08, along ? w : 8, 0xa9c88b, pcx, 0.14, pcz);
         bakeTrees(pcx, pcz, 3);
         B.box(1.6, 0.08, 0.45, C.brown, pcx - w / 4, 0.55, pcz + 2.5);
       } else if (roll < 0.86) {
-        // parking lot with cars, offset inward off the street
         const pcx = px + diX * 4, pcz = pz + diZ * 4;
         B.box(along ? 8 : w, 0.06, along ? w : 8, 0x828a96, pcx, 0.14, pcz);
         const n = 1 + ((r() * 2) | 0);
@@ -370,39 +239,30 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
             boxes.push({ x1: pcx - 2.3, x2: pcx + 2.3, z1: ccz - 1.0, z2: ccz + 1.0 });
           }
         }
-      } // else: empty plot
+      }
       s += w + 0.8 + r() * 2;
     }
   }
-  // wild biomes: scatter nature instead of buildings
-  function scatterNature(): void {
-    const tries = biome === 'forest' ? 30 : biome === 'desert' ? 14 : 18;
-    for (let i = 0; i < tries; i++) {
-      const x = X0 + 7 + r() * (CH - 14);
-      const z = Z0 + 7 + r() * (CH - 14);
-      // keep clear of the road corridors on the grid lines
-      const gx = Math.abs(x - Math.round(x / CH) * CH);
-      const gz = Math.abs(z - Math.round(z / CH) * CH);
-      if (gx < 6.5 || gz < 6.5) continue;
-      let tpl: BakedTemplate | null = null;
-      const s = 3.5 + r() * 2.5;
-      if (biome === 'forest') tpl = pick(r, [...TPL.pines, ...TPL.trees]);
-      else if (biome === 'desert') tpl = pick(r, [...TPL.cacti, ...TPL.rocks]);
-      else tpl = pick(r, TPL.trees);
-      if (!tpl) continue;
-      bakeModel(B, tpl, x, 0.08, z, r() * Math.PI * 2, s);
-      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
-    }
-  }
-  if (inZone) {
-    // raceway apron: the circuit tiles are baked above, keep the rest clear
-  } else if (wild) {
+  if (wild) {
     scatterNature();
   } else {
-    edge(Math.PI, 'x', Z0 + 7.6);          // south edge, fronts face -Z toward the road
-    edge(0, 'x', Z0 + CH - 7.6);           // north edge
-    edge(-Math.PI / 2, 'z', X0 + 7.6);     // west edge
-    edge(Math.PI / 2, 'z', X0 + CH - 7.6); // east edge
+    edge(Math.PI, 'x', Z0 + 7.6);
+    edge(0, 'x', Z0 + CH - 7.6);
+    edge(-Math.PI / 2, 'z', X0 + 7.6);
+    edge(Math.PI / 2, 'z', X0 + CH - 7.6);
+  }
+
+  // race circuit: bake the tiles whose centre falls inside this chunk
+  if (biome === 'race' && TPL.raceStraight && TPL.raceCorner) {
+    for (const t of raceTiles()) {
+      const c = tileCenter(t.col, t.row);
+      if (c.x < X0 || c.x >= X0 + CH || c.z < Z0 || c.z >= Z0 + CH) continue;
+      const tpl = t.kind === 'straight' ? TPL.raceStraight
+        : t.kind === 'corner' ? TPL.raceCorner
+        : t.kind === 'finish' ? TPL.raceFinish : TPL.raceStraight;
+      if (!tpl) continue;
+      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1, [RACE_TILE, RACE_TILE, RACE_TILE]);
+    }
   }
 
   return { mesh: B.build(), boxes };

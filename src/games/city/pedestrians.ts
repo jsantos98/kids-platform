@@ -41,11 +41,12 @@ export class Pedestrians {
   respawn(p: Ped, px: number, pz: number): void {
     for (let tries = 0; tries < 12; tries++) {
       const alongX = Math.random() < 0.5;
-      const idx = Math.round((alongX ? pz : px) / this.CH) + ((Math.random() * 3) | 0) - 1;
-      if (RoadGrid.isRail(idx) || !(alongX ? this.grid.hasZ(idx) : this.grid.hasX(idx))) continue;
+      const base = Math.round((alongX ? pz : px) / this.CH);
+      const idx = Math.min(5, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
+      if (!(alongX ? this.grid.hasZ(idx) : this.grid.hasX(idx))) continue;
       const side = Math.random() < 0.5 ? -1 : 1;
       const offset = side * (5.8 + Math.random() * 1.4);
-      const along = (alongX ? px : pz) + (Math.random() - 0.5) * 140;
+      const along = Math.min(360, Math.max(24, (alongX ? px : pz) + (Math.random() - 0.5) * 140));
       p.alongX = alongX;
       p.idx = idx;
       p.dir = Math.random() < 0.5 ? -1 : 1;

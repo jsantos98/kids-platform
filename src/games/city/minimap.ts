@@ -1,78 +1,49 @@
-// Minimap: a small north-up map in the corner showing the road grid, fires,
-// cats, traffic-light state and the player's heading. Drawn on a 2D canvas.
+// Minimap: the whole island at a glance — chunk biomes, roads, the race
+// circuit, traffic-light state, missions and the player arrow. Drawn on a 2D
+// canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
-import { biomeAt, biomeMapColor, BIOME_CELL } from '../../worlds/biomes.js';
+import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { racePath } from '../../worlds/racetrack.js';
-import type { Missions, Objective } from './missions.js';
+import type { Missions } from './missions.js';
 
-const SIZE = 256;         // canvas backing-store pixels
-const RANGE = 180;        // world metres shown across (radius*2 window)
+const SIZE = 256;        // canvas backing-store pixels
+const VIEW = 210;        // world metres across (whole island + margin)
+const CENTER = 192;      // island centre (6×6 chunks of 64 m)
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
 
-  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid,
-              private CH = 64, private seed = 0) {
+  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH: number, private seed: number) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
   }
 
-  update(px: number, pz: number, heading: number, elapsed: number): void {
+  update(playerX: number, playerZ: number, heading: number, elapsed: number): void {
     const ctx = this.ctx;
     const s = SIZE;
-    const scale = s / (RANGE * 2);
-    const tx = (x: number) => s / 2 + (x - px) * scale;
-    const ty = (z: number) => s / 2 + (pz - z) * scale; // world +Z points up
+    const scale = s / VIEW;
+    const tx = (x: number) => (x - (CENTER - VIEW / 2)) * scale;
+    const ty = (z: number) => (z - (CENTER - VIEW / 2)) * scale;
 
-    // ground tinted by biome (forest green, desert sand, city cream)
-    const cellW = BIOME_CELL * this.CH;
-    const c0 = Math.floor((px - RANGE) / cellW);
-    const c1 = Math.ceil((px + RANGE) / cellW);
-    const d0 = Math.floor((pz - RANGE) / cellW);
-    const d1 = Math.ceil((pz + RANGE) / cellW);
-    for (let a = c0; a <= c1; a++) {
-      for (let b = d0; b <= d1; b++) {
-        ctx.fillStyle = biomeMapColor(biomeAt(a * BIOME_CELL, b * BIOME_CELL, this.seed));
-        const x0 = Math.max(0, tx(a * cellW));
-        const y0 = Math.max(0, ty((b + 1) * cellW));
-        const x1 = Math.min(s, tx((a + 1) * cellW));
-        const y1 = Math.min(s, ty(b * cellW));
-        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    // ground tinted per chunk biome
+    for (let cx = 0; cx < 6; cx++) {
+      for (let cz = 0; cz < 6; cz++) {
+        ctx.fillStyle = chunkGroundColorHex(cx, cz, this.seed);
+        ctx.fillRect(tx(cx * this.CH), ty(cz * this.CH), this.CH * scale, this.CH * scale);
       }
     }
 
-    // roads: the surviving grid lines (rails drawn tan, missing lines skipped)
-    const k0 = Math.floor((px - RANGE) / this.CH);
-    const k1 = Math.ceil((px + RANGE) / this.CH);
-    const j0 = Math.floor((pz - RANGE) / this.CH);
-    const j1 = Math.ceil((pz + RANGE) / this.CH);
+    // roads: the interior grid lines
+    ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 10 * scale;
     ctx.beginPath();
-    ctx.strokeStyle = '#8f97a3';
-    for (let k = k0; k <= k1; k++) {
-      if (!this.grid.hasX(k)) continue;
-      const x = tx(k * this.CH);
-      ctx.moveTo(x, 0); ctx.lineTo(x, s);
-    }
-    for (let j = j0; j <= j1; j++) {
-      if (!this.grid.hasZ(j)) continue;
-      const y = ty(j * this.CH);
-      ctx.moveTo(0, y); ctx.lineTo(s, y);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = '#cbb894';
-    ctx.beginPath();
-    for (let k = k0; k <= k1; k++) {
-      if (!RoadGrid.isRail(k)) continue;
-      const x = tx(k * this.CH);
-      ctx.moveTo(x, 0); ctx.lineTo(x, s);
-    }
-    for (let j = j0; j <= j1; j++) {
-      if (!RoadGrid.isRail(j)) continue;
-      const y = ty(j * this.CH);
-      ctx.moveTo(0, y); ctx.lineTo(s, y);
+    for (let i = 1; i <= 5; i++) {
+      const c = i * this.CH;
+      const m = tx(c);
+      ctx.moveTo(m, ty(0)); ctx.lineTo(m, ty(384));
+      ctx.moveTo(tx(0), ty(c)); ctx.lineTo(tx(384), ty(c));
     }
     ctx.stroke();
 
@@ -87,36 +58,32 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
 
-    // traffic lights: one dot per real intersection in view
-    for (let k = k0; k <= k1; k++) {
-      for (let j2 = j0; j2 <= j1; j2++) {
-        if (!this.grid.cross(k, j2)) continue;
-        const st = lightState(k, j2, elapsed);
+    // traffic lights: one dot per real intersection
+    for (let i = 1; i <= 5; i++) {
+      for (let j = 1; j <= 5; j++) {
+        if (!this.grid.cross(i, j)) continue;
+        const st = lightState(i, j, elapsed);
         ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
         ctx.beginPath();
-        ctx.arc(tx(k * this.CH), ty(j2 * this.CH), 3, 0, Math.PI * 2);
+        ctx.arc(tx(i * this.CH), ty(j * this.CH), 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
-    // objectives: fires orange, cats pink, patients blue — clamped to the edge
+    // objectives: fires orange, cats pink, patients blue
     for (const o of this.missions.objectives) {
-      let x = tx(o.pos.x), y = ty(o.pos.z);
-      const m = 10;
-      const cx = Math.max(m, Math.min(s - m, x));
-      const cy = Math.max(m, Math.min(s - m, y));
       ctx.fillStyle = o.type === 'fire' ? '#f4661f' : o.type === 'patient' ? '#4a90d9' : '#f06292';
       ctx.strokeStyle = '#fffdf8';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+      ctx.arc(tx(o.pos.x), ty(o.pos.z), 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
 
-    // player: white ring + heading arrow at the centre
+    // player arrow
     ctx.save();
-    ctx.translate(s / 2, s / 2);
+    ctx.translate(tx(playerX), ty(playerZ));
     ctx.rotate(heading);
     ctx.fillStyle = '#e25c5c';
     ctx.strokeStyle = '#fffdf8';
@@ -131,4 +98,16 @@ export class Minimap {
     ctx.stroke();
     ctx.restore();
   }
+}
+
+// per-chunk ground colour for the minimap (slab colour per island biome)
+function chunkGroundColorHex(cx: number, cz: number, seed: number): string {
+  void seed;
+  if (cx === 4 && cz === 4) return '#c9ccd6'; // race apron
+  if (cx === 5 && cz === 4) return '#c9ccd6';
+  if (cx <= 1 && cz <= 1) return '#8fba74';   // forest pocket
+  if (cx >= 4 && cz <= 1) return '#b5d194';   // meadow pocket
+  if (cx <= 1 && cz >= 4) return '#eedaa4';   // desert pocket
+  if (cx >= 4 && cz >= 4) return '#eedaa4';
+  return '#e9e1cf';                           // city
 }

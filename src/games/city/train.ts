@@ -1,15 +1,79 @@
-// The city trains: several trains shuttle along the rail corridors that cross
-// the world, driven purely by (time, player position) so they stream with the
-// chunks. Each train is baked into a single mesh (one draw call per train).
+// The island train: three trains circle the island on the perimeter loop,
+// evenly spaced, purely a function of time.
 import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { makeTrainCar, makeTrainLoco } from '../../kit/index.js';
 
-const SPEED = 0.15;  // shuttle angular speed (rad/s)
-const AMP = 40;      // shuttle amplitude around the player, in metres
-const BANDS = [0x63b0a8, 0xe25c5c, 0x7fb2d9, 0xf6c952];
+const SPEED = 9;       // m/s
+const LO = 12;         // loop inset from the island edge
+const HI = 384 - LO;
+const CUT = 20;        // octagon corner cut
 
-function bakeGroup(baked: Baked, g: THREE.Object3D): void {
+// octagon vertices of the loop (clockwise from the bottom-left)
+const V: Array<{ x: number; z: number }> = [
+  { x: LO + CUT, z: LO }, { x: HI - CUT, z: LO },
+  { x: HI, z: LO + CUT }, { x: HI, z: HI - CUT },
+  { x: HI - CUT, z: HI }, { x: LO + CUT, z: HI },
+  { x: LO, z: HI - CUT }, { x: LO, z: LO + CUT },
+];
+
+// sample the octagon edges into a closed path every ~3 m
+function buildLoop(): Array<{ x: number; z: number }> {
+  const pts: Array<{ x: number; z: number }> = [];
+  for (let i = 0; i < V.length; i++) {
+    const a = V[i], b = V[(i + 1) % V.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const steps = Math.max(1, Math.round(len / 3));
+    for (let k = 0; k < steps; k++) {
+      const f = k / steps;
+      pts.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f });
+    }
+  }
+  return pts;
+}
+
+const LOOP_PTS = buildLoop();
+
+export class Trains {
+  private trains: Array<{ mesh: THREE.Mesh; offset: number }> = [];
+
+  constructor(scene: THREE.Scene, count = 3) {
+    const bands = [0x63b0a8, 0xe25c5c, 0x7fb2d9];
+    for (let i = 0; i < count; i++) {
+      const g = new THREE.Group();
+      const loco = makeTrainLoco();
+      const car1 = makeTrainCar({ color: 0xf0ece2, band: bands[i % bands.length] });
+      const car2 = makeTrainCar({ color: 0xf0ece2, band: bands[(i + 1) % bands.length] });
+      for (const [m, x] of [[loco, 6.6], [car1, 0], [car2, -6.6]] as Array<[THREE.Object3D, number]>) {
+        m.rotation.y = Math.PI / 2;
+        m.position.x = x;
+        g.add(m);
+      }
+      const b = new Baked();
+      bakeGroupInto(b, g);
+      const mesh = b.build();
+      mesh.position.y = 0.15;
+      scene.add(mesh);
+      this.trains.push({ mesh, offset: (i * LOOP_PTS.length) / count });
+    }
+  }
+
+  update(elapsed: number): void {
+    const total = LOOP_PTS.length;
+    for (const t of this.trains) {
+      // SPEED m/s along a path with points every ~3 m → 3 points per second
+      const f = (elapsed * (SPEED / 3) + t.offset) % total;
+      const i0 = Math.floor(f) % total;
+      const i1 = (i0 + 1) % total;
+      const fr = f - i0;
+      const a = LOOP_PTS[i0], b = LOOP_PTS[i1];
+      t.mesh.position.set(a.x + (b.x - a.x) * fr, 0.15, a.z + (b.z - a.z) * fr);
+      t.mesh.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+    }
+  }
+}
+
+function bakeGroupInto(baked: Baked, g: THREE.Object3D): void {
   g.updateMatrixWorld(true);
   g.traverse(node => {
     if (!(node instanceof THREE.Mesh) || !node.geometry) return;
@@ -30,57 +94,4 @@ function bakeGroup(baked: Baked, g: THREE.Object3D): void {
     geo.applyMatrix4(node.matrixWorld);
     baked.raw(geo);
   });
-}
-
-function buildTrainMesh(band: number): THREE.Mesh {
-  const g = new THREE.Group();
-  const loco = makeTrainLoco();
-  const car1 = makeTrainCar({ color: 0xf0ece2, band });
-  const car2 = makeTrainCar({ color: 0xf0ece2, band });
-  const parts: Array<[THREE.Object3D, number]> = [[loco, 6.6], [car1, 0], [car2, -6.6]];
-  for (const [m, x] of parts) {
-    m.rotation.y = Math.PI / 2; // face +X along the corridor
-    m.position.x = x;
-    g.add(m);
-  }
-  const b = new Baked();
-  bakeGroup(b, g);
-  const mesh = b.build();
-  mesh.position.y = 0.15;
-  return mesh;
-}
-
-export class Trains {
-  private trains: Array<{ mesh: THREE.Mesh; index: number; phase: number; dirLast: number }> = [];
-
-  constructor(scene: THREE.Scene, private CH: number, count = 4) {
-    for (let i = 0; i < count; i++) {
-      const mesh = buildTrainMesh(BANDS[i % BANDS.length]);
-      scene.add(mesh);
-      this.trains.push({ mesh, index: i, phase: i * 1.7, dirLast: 1 });
-    }
-  }
-
-  update(elapsed: number, playerX: number, playerZ: number): void {
-    const railStep = 4 * this.CH; // rail corridors every 4th grid line
-    for (const t of this.trains) {
-      const vertical = t.index % 2 === 0;
-      // spread trains over the nearest rail lines: 0 = nearest, 1 = one step out
-      const slotShift = t.index < 2 ? 0 : (t.index === 2 ? 1 : -1);
-      const perp = vertical ? playerZ : playerX;
-      const base = Math.round((perp / this.CH - 2) / 4) * 4 + 2;
-      const lineIdx = base + slotShift * 4;
-      const lineWorld = lineIdx * this.CH;
-
-      const off = Math.sin(elapsed * SPEED + t.phase) * AMP;
-      const dir = Math.cos(elapsed * SPEED + t.phase) >= 0 ? 1 : -1;
-      t.mesh.rotation.y = vertical ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2)
-        : (dir > 0 ? 0 : Math.PI);
-      if (vertical) {
-        t.mesh.position.set(lineWorld, 0.15, playerZ + off);
-      } else {
-        t.mesh.position.set(playerX + off, 0.15, lineWorld);
-      }
-    }
-  }
 }

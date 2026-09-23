@@ -45,15 +45,11 @@ export class Traffic {
     this.cars.forEach(c => this.respawn(c, new THREE.Vector3()));
   }
 
-  /** Move a car onto a road lane near the player (never rails or dropped lines). */
+  /** Move a car onto a road lane near the player (interior island lines only). */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
     const axis0 = c.userData.axis === 0;
     let g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
-    let idx = Math.round(g / this.CH);
-    for (let tries = 0; tries < 4 && (RoadGrid.isRail(idx) || !(axis0 ? this.grid.hasZ(idx) : this.grid.hasX(idx))); tries++) {
-      g += this.CH;
-      idx += 1;
-    }
+    g = Math.min(320, Math.max(64, g));
     if (axis0) {
       c.position.set(player.x + j0(Math.random, 70), 0, g + 2.3 * c.userData.sign);
       c.rotation.y = c.userData.sign > 0 ? Math.PI / 2 : -Math.PI / 2;

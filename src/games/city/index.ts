@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { createStage, makeHUD } from '../../engine/stage.js';
 import { prepBakedModels, bakedModel, spawnVehicle } from '../../engine/assets.js';
+import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
@@ -31,10 +32,54 @@ import { loadTotals, saveTotals } from './state.js';
 // ---- params ----
 const q = new URLSearchParams(location.search);
 const raceMode = q.get('race') === '1';
+// every new game generates a fresh island; the rolled seed is written back
+// into the URL so a refresh (or a share) replays the exact same world
+const seedParam = q.get('seed');
 const P = {
-  seed: Number(q.get('seed') ?? 11),
+  seed: seedParam !== null && Number.isFinite(Number(seedParam)) && seedParam !== ''
+    ? Number(seedParam)
+    : 1 + ((Math.random() * 999999999) | 0),
   vehicle: raceMode ? 'kart' : (q.get('vehicle') ?? 'truck'),
 };
+if (seedParam === null) {
+  const u = new URL(location.href);
+  u.searchParams.set('seed', String(P.seed));
+  history.replaceState(null, '', u.toString());
+}
+
+/** a starting lane spot that suits THIS world: on a street near the centre,
+ * clear of the river, the railway, and level crossings */
+function pickSpawn(): { x: number; z: number; heading: number } {
+  const sr = rng(chunkSeed(P.seed, 0x5b0, 3));
+  const plan = cityPlanFor(P.seed);
+  const river = riverFor(P.seed);
+  const rail = railRouteFor(P.seed);
+  const spots: Array<{ x: number; z: number; heading: number }> = [];
+  const collect = (lines: number[]): void => {
+    for (const j of lines) {
+      for (let i = 1; i <= 4; i++) {
+        if (!plan.segH(j, i)) continue;
+        const x = i * 64 + 18 + sr() * 28, z = j * 64 + 3.5;
+        if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
+        if (plan.crossings.some(c => Math.abs(c.x - x) < 17 && Math.abs(c.z - z) < 12)) continue;
+        spots.push({ x, z, heading: Math.PI / 2 });
+      }
+    }
+    for (const i of lines) {
+      for (let j = 1; j <= 4; j++) {
+        if (!plan.segV(i, j)) continue;
+        const x = i * 64 - 3.5, z = j * 64 + 18 + sr() * 28;
+        if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
+        if (plan.crossings.some(c => Math.abs(c.x - x) < 12 && Math.abs(c.z - z) < 17)) continue;
+        spots.push({ x, z, heading: 0 });
+      }
+    }
+  };
+  collect([2, 3]);       // prefer the central boulevards
+  if (spots.length < 4) collect([1, 4]);
+  if (!spots.length) collect([5]);
+  return spots.length ? spots[(sr() * spots.length) | 0] : { x: 130, z: 130, heading: 0 };
+}
 
 // ---- stage & world dressing ----
 const stage = createStage({
@@ -56,7 +101,11 @@ scene.add(groundFollower);
 const V = raceMode ? VEHICLES.kart : (VEHICLES[P.vehicle] ?? VEHICLES.truck);
 const spawn = raceMode
   ? { x: RACE_START.x, z: RACE_START.z, heading: RACE_START.heading }
-  : { x: 130, z: 130, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
+  : (() => {
+      const s = pickSpawn();
+      const h = q.get('heading');
+      return h !== null && Number.isFinite(Number(h)) ? { ...s, heading: Number(h) * Math.PI / 180 } : s;
+    })();
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -202,6 +251,7 @@ if (q.get('debugsea') === '1') {
     trains,
     traffic,
     transit,
+    player,
     tram: () => transit.list(),
     river,
     route: railRouteFor(P.seed),

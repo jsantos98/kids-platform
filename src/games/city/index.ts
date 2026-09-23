@@ -42,7 +42,7 @@ const P = {
   seed: seedParam !== null && Number.isFinite(Number(seedParam)) && seedParam !== ''
     ? Number(seedParam)
     : 1 + ((Math.random() * 999999999) | 0),
-  vehicle: raceMode ? 'kart' : (q.get('vehicle') ?? 'truck'),
+  vehicle: raceMode ? 'kart' : (q.get('vehicle') ?? 'heli'),
 };
 if (seedParam === null) {
   const u = new URL(location.href);

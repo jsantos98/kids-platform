@@ -33,14 +33,14 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     make: makeFireTruck, glb: '/assets/kenney/firetruck.glb', glbLen: 6.6,
     accel: 5, brake: 13, maxF: 9.5, maxR: 3, radius: 1.35,
     camBack: 12.5, camUp: 5.6, highBack: 14, highUp: 13, highAhead: 6,
-    wheelbase: 3.6, steerMax: 0.46, cabF: 1.3, cabY: 2.55,
+    wheelbase: 3.6, steerMax: 0.46, cabF: 3.0, cabY: 2.9,
     front: 1.95, halfW: 1.15, frontR: 1.05,
   },
   car: {
     make: () => makeCar({ body: 0x7fb2d9 }), glb: '/assets/kenney/hatchback-sports.glb', glbLen: 4.2,
     accel: 6.5, brake: 15, maxF: 12, maxR: 3, radius: 1.0,
     camBack: 11, camUp: 5.2, highBack: 12, highUp: 11.5, highAhead: 6,
-    wheelbase: 2.7, steerMax: 0.5, cabF: 0.45, cabY: 1.4,
+    wheelbase: 2.7, steerMax: 0.5, cabF: 1.8, cabY: 1.6,
     front: 1.5, halfW: 0.95, frontR: 0.95,
   },
 };

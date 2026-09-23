@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { raceZoneChunk, raceTiles, tileCenter, RACE_TILE } from './racetrack.js';
+import { raceZoneChunk, raceTiles, tileCenter } from './racetrack.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 
@@ -60,6 +60,12 @@ function kenneyTPL() {
     raceCorner: bakedModel('race-corner'),
     raceFinish: bakedModel('race-finish'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    industrial: [...'abcdefghijklmnopqrst'].map(b => bakedModel('ind-' + b)).filter((t): t is BakedTemplate => !!t),
+    indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
+      .map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    chimney: bakedModel('ind-chimney-l') ?? bakedModel('ind-chimney-m'),
+    waterTower: bakedModel('ind-tower'),
+    windmill: bakedModel('ind-mill'),
   };
 }
 
@@ -77,6 +83,7 @@ export function slabColor(d: District): number {
     case 'race': return 0xa9c88b;
     case 'park': return 0xa4cf85;
     case 'downtown': return 0xdcd6c6;
+    case 'industrial': return 0xcfccc2; // worn concrete aprons
     default: return 0xe9e1cf; // urban
   }
 }
@@ -141,8 +148,8 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
     }
   }
 
-  // street lamps along surviving streets (urban fabric only)
-  const lampDistrict = district === 'urban' || district === 'downtown';
+  // street lamps along surviving streets (urban fabric + industry)
+  const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
   if (lampDistrict) {
     for (let d = 10; d < CH; d += 18) {
       if (TPL.lightCurved) {
@@ -159,9 +166,13 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
 
   function bakeLot(lot: Lot): void {
     if (lot.kind === 'bldg') {
-      const tpls = TPL.buildings;
+      const industrial = district === 'industrial';
+      const tpls = industrial ? TPL.industrial : TPL.buildings;
       if (tpls.length) {
-        const tpl = tpls[((lot.v * tpls.length) | 0) % tpls.length];
+        // occasionally an industrial lot is just stacked containers / a tank
+        const tpl = industrial && TPL.indExtras.length && r() < 0.22
+          ? pick(r, TPL.indExtras)
+          : tpls[((lot.v * tpls.length) | 0) % tpls.length];
         const s = Math.min((lot.w * 0.92) / tpl.size.x, (lot.d * 0.92) / tpl.size.z);
         bakeModel(B, tpl, lot.x, 0.1, lot.z, lot.ry, s);
         // collision AABB from the rotated footprint (ry is axis-aligned)
@@ -239,6 +250,36 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       bakeModel(B, pick(r, [...TPL.trees, ...TPL.pines]), x, 0.08, z, r() * Math.PI * 2, 4 + r() * 3);
       boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
     }
+  } else if (district === 'industrial') {
+    // works yard dressing: a chimney or water tower plus scattered junk
+    // away from the streets and the rail siding
+    if (TPL.chimney || TPL.waterTower) {
+      for (let t = 0; t < 6; t++) {
+        const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
+        if (nearStreet(x, z)) continue;
+        const big = r() < 0.5 && TPL.chimney ? TPL.chimney : TPL.waterTower;
+        if (!big) continue;
+        const s = big === TPL.chimney ? 3.2 + r() * 1.6 : 4.5 + r();
+        bakeModel(B, big, x, 0.1, z, r() * Math.PI * 2, s);
+        boxes.push({ x1: x - 1.2, x2: x + 1.2, z1: z - 1.2, z2: z + 1.2, small: 1 });
+        break;
+      }
+    }
+    if (TPL.windmill && r() < 0.3) {
+      const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
+      if (!nearStreet(x, z)) {
+        bakeModel(B, TPL.windmill, x, 0.1, z, r() * Math.PI * 2, 4 + r() * 2);
+        boxes.push({ x1: x - 1, x2: x + 1, z1: z - 1, z2: z + 1, small: 1 });
+      }
+    }
+    for (let k = 0; k < 3; k++) {
+      const x = X0 + 9 + r() * (CH - 18), z = Z0 + 9 + r() * (CH - 18);
+      if (nearStreet(x, z) || !TPL.indExtras.length) continue;
+      const tpl = pick(r, TPL.indExtras);
+      const s = 2.6 + r() * 1.4;
+      bakeModel(B, tpl, x, 0.1, z, r() * Math.PI * 2, s);
+      boxes.push({ x1: x - 1.4, x2: x + 1.4, z1: z - 1.4, z2: z + 1.4, small: 1 });
+    }
   }
 
   function nearStreet(x: number, z: number): boolean {
@@ -277,7 +318,8 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
         : t.kind === 'corner' ? TPL.raceCorner
         : t.kind === 'finish' ? TPL.raceFinish : TPL.raceStraight;
       if (!tpl) continue;
-      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1, [RACE_TILE, RACE_TILE, RACE_TILE]);
+      // kit pieces are already 10 units = one 10 m tile; no extra scaling
+      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1);
     }
   }
 

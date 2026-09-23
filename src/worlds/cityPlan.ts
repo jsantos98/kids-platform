@@ -9,8 +9,9 @@
 //      and anything disconnected from the main network is pruned
 //   3. signalized intersections: nodes where ≥3 street arms meet
 //   4. districts: three seeded nature corners (forest / desert / meadow), a
-//      park next to downtown, a downtown chunk with big buildings, the fixed
-//      race corner — the rest is urban fabric
+//      park next to downtown, a downtown chunk with big buildings, an
+//      industrial district hugging the railway, the fixed race corner — the
+//      rest is urban fabric
 //   5. lots: along every street segment, both sides, with proper setbacks;
 //      contents rolled per district (building / trees / parking / grass)
 //
@@ -20,7 +21,7 @@ import { rng, chunkSeed } from '../engine/rng.js';
 import { railRouteFor } from './railRoute.js';
 
 export type District =
-  | 'downtown' | 'urban' | 'park' | 'green'
+  | 'downtown' | 'urban' | 'industrial' | 'park' | 'green'
   | 'forest' | 'meadow' | 'desert'
   | 'race';
 
@@ -140,9 +141,42 @@ function buildPlan(seed: number): CityPlan {
   grid[park[0]][park[1]] = 'park';
   const downtown = centre.find(([cx, cz]) => !(cx === park[0] && cz === park[1])) ?? [2, 2];
   grid[downtown[0]][downtown[1]] = 'downtown';
-  // urban blocks with no street frontage become green space (tree-filled)
+  // an industrial district: seeded blob of 2-4 urban chunks, anchored on a
+  // chunk whose edges touch the railway (freight needs a siding) and with
+  // street frontage so its lots get built
   const frontage = (cx: number, cz: number): boolean =>
     segH(cz, cx) || segH(cz + 1, cx) || segV(cx, cz) || segV(cx + 1, cz);
+  const railFrontage = (cx: number, cz: number): boolean =>
+    rail.edgeH(cz, cx) || rail.edgeH(cz + 1, cx) || rail.edgeV(cx, cz) || rail.edgeV(cx + 1, cz);
+  const urbanLeft = (): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    for (let cx = 0; cx < 6; cx++) for (let cz = 0; cz < 6; cz++) {
+      if (grid[cx][cz] === 'urban' && frontage(cx, cz)) out.push([cx, cz]);
+    }
+    return out;
+  };
+  const withRail = urbanLeft().filter(([cx, cz]) => railFrontage(cx, cz));
+  const anchorList = withRail.length ? withRail : urbanLeft();
+  if (anchorList.length) {
+    const anchor = anchorList[(r() * anchorList.length) | 0];
+    const zone: Array<[number, number]> = [anchor];
+    const want = 2 + ((r() * 3) | 0); // 2..4 chunks
+    while (zone.length < want) {
+      const next: Array<[number, number]> = [];
+      for (const [cx, cz] of zone) {
+        for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]] as const) {
+          if (nx < 0 || nx > 5 || nz < 0 || nz > 5) continue;
+          if (grid[nx][nz] !== 'urban') continue;
+          if (zone.some(([ax, az]) => ax === nx && az === nz)) continue;
+          if (frontage(nx, nz)) next.push([nx, nz]);
+        }
+      }
+      if (!next.length) break;
+      zone.push(next[(r() * next.length) | 0]);
+    }
+    for (const [cx, cz] of zone) grid[cx][cz] = 'industrial';
+  }
+  // urban blocks with no street frontage become green space (tree-filled)
   for (let cx = 0; cx < 6; cx++) for (let cz = 0; cz < 6; cz++) {
     if (grid[cx][cz] === 'urban' && !frontage(cx, cz)) grid[cx][cz] = 'green';
   }
@@ -155,7 +189,7 @@ function buildPlan(seed: number): CityPlan {
   const addLot = (lot: Lot): void => {
     const cx = Math.floor(lot.x / CH), cz = Math.floor(lot.z / CH);
     const dist = district(cx, cz);
-    if (dist !== 'urban' && dist !== 'downtown') return; // nature/park/race stay clear
+    if (dist !== 'urban' && dist !== 'downtown' && dist !== 'industrial') return; // nature/park/race stay clear
     lots.push(lot);
     const k = key(cx, cz);
     if (!lotsByChunk.has(k)) lotsByChunk.set(k, []);
@@ -164,16 +198,20 @@ function buildPlan(seed: number): CityPlan {
   const rollLot = (dist: District, along: number, roadCentre: number, side: number, ry: number,
                    w: number, horiz: boolean): void => {
     const downtown = dist === 'downtown';
+    const industrial = dist === 'industrial';
     const roll = r();
-    const depth = downtown ? 11 + r() * 5 : 8 + r() * 4;
+    const depth = industrial ? 10 + r() * 5 : downtown ? 11 + r() * 5 : 8 + r() * 4;
     const centre = roadCentre + side * (6.6 + depth / 2); // road half + sidewalk + half depth
     const x = horiz ? along : centre;
     const z = horiz ? centre : along;
-    if (roll < (downtown ? 0.74 : 0.5)) {
+    const pBldg = industrial ? 0.62 : downtown ? 0.74 : 0.5;
+    const pTrees = roll + (industrial ? 0.08 : downtown ? 0.12 : 0.22);
+    const pPark = industrial ? 0.92 : downtown ? 0.86 : 0.72;
+    if (roll < pBldg) {
       addLot({ kind: 'bldg', x, z, ry, w, d: depth, v: r() });
-    } else if (roll < (downtown ? 0.86 : 0.72)) {
+    } else if (roll < pTrees) {
       addLot({ kind: 'trees', x, z, ry, w, d: 6, v: r() });
-    } else if (roll < (downtown ? 0.95 : 0.87)) {
+    } else if (roll < pPark) {
       addLot({ kind: 'parking', x, z, ry, w, d: 6.5, v: r() });
     } // else: empty grass
   };
@@ -188,7 +226,7 @@ function buildPlan(seed: number): CityPlan {
         const cx = Math.floor(along / CH);
         const cz = Math.floor((j * CH + side * 12) / CH);
         const dist = district(cx, cz);
-        if (dist === 'urban' || dist === 'downtown') {
+        if (dist === 'urban' || dist === 'downtown' || dist === 'industrial') {
           rollLot(dist, along, j * CH, side, side > 0 ? Math.PI : 0, w, true);
         }
         a += w + 1.6 + r() * 2;
@@ -206,7 +244,7 @@ function buildPlan(seed: number): CityPlan {
         const cx = Math.floor((i * CH + side * 12) / CH);
         const cz = Math.floor(along / CH);
         const dist = district(cx, cz);
-        if (dist === 'urban' || dist === 'downtown') {
+        if (dist === 'urban' || dist === 'downtown' || dist === 'industrial') {
           rollLot(dist, along, i * CH, side, side > 0 ? -Math.PI / 2 : Math.PI / 2, w, false);
         }
         b += w + 1.6 + r() * 2;

@@ -9,8 +9,10 @@ import { VEHICLES, createPlayer, physicsStep } from './player.js';
 import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
+import { createSea } from './sea.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
+import type { BakedTemplate } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
@@ -36,7 +38,7 @@ const stage = createStage({
 });
 const { scene, camera, renderer, sun, followSky } = stage;
 
-// ground follower — ocean blue beyond the island, hides the world's edge
+// ground follower — deep backdrop below the sea, hides the world's edge
 const groundFollower = new THREE.Mesh(
   new THREE.PlaneGeometry(1600, 1600),
   new THREE.MeshLambertMaterial({ color: 0x6fb7d9 }),
@@ -114,6 +116,22 @@ for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
   for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
 }
 
+// ---- the sea: waving water, surf, pier and Kenney watercraft sailing around ----
+const sea = await createSea(scene);
+if (q.get('debugsea') === '1') {
+  const v = new THREE.Vector3();
+  (window as unknown as { __dbg: unknown }).__dbg = {
+    sea,
+    scene,
+    camera,
+    renderer,
+    probe: (x: number, y: number, z: number) => {
+      const out = v.set(x, y, z).project(camera);
+      return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
+    },
+  };
+}
+
 // ---- water jet + steam (spray mini-scene visuals) ----
 const jet = new THREE.Mesh(
   new THREE.CylinderGeometry(0.16, 0.3, 1, 8),
@@ -149,7 +167,10 @@ const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/fir
 // circles the neighbourhood while the kid plays the fire truck ----
 const trains = new Trains(scene, 64);
 const patrol = V.fly ? null : new PatrolHeli(scene);
-const pedestrians = new Pedestrians(scene, roadGrid, 64, 14);
+// ---- pets: cube pets from the Kenney kit wander the sidewalks too ----
+const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];
+const pedestrians = new Pedestrians(scene, roadGrid, 64, 14,
+  PET_NAMES.map(n => bakedModel(n)).filter((t): t is BakedTemplate => !!t));
 // dev probe: current pedestrian spots (via console/window)
 (window as unknown as { __peds: () => unknown }).__peds = () => pedestrians.list();
 
@@ -167,7 +188,7 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid, 64, P.seed);
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid, 64, P.seed, () => sea.boatDots());
 const hud = makeHUD();
 function updateMissionPanel(): void {
   missionEl.innerHTML = `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`;
@@ -333,15 +354,16 @@ const tick = (): void => {
   sun.position.set(st.x - 40, 90, st.z - 55);
   sun.target.position.set(st.x, 0, st.z);
   sun.target.updateMatrixWorld();
-  groundFollower.position.set(st.x, -0.02, st.z);
+  groundFollower.position.set(st.x, -0.85, st.z);
   followSky(st.x, st.z);
 
   // keep the truck on the island (the ocean is not drivable)
   st.x = Math.min(381, Math.max(3, st.x));
   st.z = Math.min(381, Math.max(3, st.z));
 
-  // ambient life: the trains and the patrol helicopter
+  // ambient life: the trains, the sea with its boats and the patrol helicopter
   trains.update(elapsed);
+  sea.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
   pedestrians.update(dt, st.x, st.z, st.x, st.z);
 

@@ -8,13 +8,14 @@ import { racePath } from '../../worlds/racetrack.js';
 import type { Missions } from './missions.js';
 
 const SIZE = 256;        // canvas backing-store pixels
-const VIEW = 210;        // world metres across (whole island + margin)
+const VIEW = 440;        // world metres across (whole island + sea margin)
 const CENTER = 192;      // island centre (6×6 chunks of 64 m)
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
 
-  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH: number, private seed: number) {
+  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH: number, private seed: number,
+              private seaBoats: () => Array<{ x: number; z: number }> = () => []) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
@@ -27,7 +28,9 @@ export class Minimap {
     const tx = (x: number) => (x - (CENTER - VIEW / 2)) * scale;
     const ty = (z: number) => (z - (CENTER - VIEW / 2)) * scale;
 
-    // ground tinted per chunk biome
+    // the sea, then the island on top of it
+    ctx.fillStyle = '#72c3de';
+    ctx.fillRect(0, 0, s, s);
     for (let cx = 0; cx < 6; cx++) {
       for (let cz = 0; cz < 6; cz++) {
         ctx.fillStyle = chunkGroundColorHex(cx, cz, this.seed);
@@ -81,6 +84,17 @@ export class Minimap {
       ctx.stroke();
     }
 
+    // boats: white dots out on the water
+    for (const b of this.seaBoats()) {
+      ctx.fillStyle = '#fffdf8';
+      ctx.strokeStyle = '#4a7d94';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(tx(b.x), ty(b.z), 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
     // player arrow
     ctx.save();
     ctx.translate(tx(playerX), ty(playerZ));
@@ -103,11 +117,9 @@ export class Minimap {
 // per-chunk ground colour for the minimap (slab colour per island biome)
 function chunkGroundColorHex(cx: number, cz: number, seed: number): string {
   void seed;
-  if (cx === 4 && cz === 4) return '#c9ccd6'; // race apron
-  if (cx === 5 && cz === 4) return '#c9ccd6';
+  if (cx >= 4 && cz >= 4) return '#c9ccd6';   // race zone (2×2 apron)
   if (cx <= 1 && cz <= 1) return '#8fba74';   // forest pocket
   if (cx >= 4 && cz <= 1) return '#b5d194';   // meadow pocket
   if (cx <= 1 && cz >= 4) return '#eedaa4';   // desert pocket
-  if (cx >= 4 && cz >= 4) return '#eedaa4';
   return '#e9e1cf';                           // city
 }

@@ -100,6 +100,7 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const TPL = kenneyTPL();
   const biome = islandBiome(cx, cz);
   const wild = biome === 'forest' || biome === 'desert' || biome === 'meadow';
+  const openZone = biome === 'race'; // clear apron: no buildings, no scatter
 
   // base slab — concrete downtown, grass pockets, sand beach ring at the border
   B.box(CH, 0.1, CH, slabColor(biome), X0 + CH / 2, 0.05, Z0 + CH / 2);
@@ -245,7 +246,7 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   }
   if (wild) {
     scatterNature();
-  } else {
+  } else if (!openZone) {
     edge(Math.PI, 'x', Z0 + 7.6);
     edge(0, 'x', Z0 + CH - 7.6);
     edge(-Math.PI / 2, 'z', X0 + 7.6);

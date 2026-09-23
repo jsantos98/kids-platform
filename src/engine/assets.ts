@@ -86,6 +86,9 @@ export interface BakedTemplate {
 export interface BakeOptions {
   /** per-channel multiplier applied to the sampled colors */
   tint?: [number, number, number];
+  /** sample the palette with a flipped V — some kit exports store UVs
+   * bottom-up against the baker's top-left convention */
+  flipUvY?: boolean;
 }
 
 async function bakeTemplate(url: string, cmapUrl: string | null, opts: BakeOptions = {}): Promise<BakedTemplate> {
@@ -125,7 +128,8 @@ async function bakeTemplate(url: string, cmapUrl: string | null, opts: BakeOptio
       let r = 1, g = 0, b = 1;
       if (px && uv) {
         const u = (uv.getX(f) + uv.getX(f + 1) + uv.getX(f + 2)) / 3;
-        const v = (uv.getY(f) + uv.getY(f + 1) + uv.getY(f + 2)) / 3;
+        let v = (uv.getY(f) + uv.getY(f + 1) + uv.getY(f + 2)) / 3;
+        if (opts.flipUvY) v = 1 - v;
         // glTF UV origin is the image TOP-LEFT (GLTFLoader keeps flipY=false)
         const xi = Math.min(px.width - 1, Math.max(0, (u * px.width) | 0));
         const yi = Math.min(px.height - 1, Math.max(0, (v * px.height) | 0));

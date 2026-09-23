@@ -62,6 +62,10 @@ function kenneyTPL() {
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
+    roadStraight: bakedModel('road-straight'),
+    roadInter: bakedModel('road-intersection'),
+    roadCurve: bakedModel('road-curve'),
+    roadEnd: bakedModel('road-end'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     industrial: [...'abcdefghijklmnopqrst'].map(b => bakedModel('ind-' + b)).filter((t): t is BakedTemplate => !!t),
     indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
@@ -218,43 +222,98 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  // ---- wide streets: this chunk's south (z=Z0) and west (x=X0) edges.
-  // Six cells per 64 m edge, each a plain 14 m asphalt slab. Intersections
-  // are the UNION of the corner cells meeting at a node — a plus, a T or an
-  // L exactly as wide as the roads — so there is no wider pad jutting past
-  // the kerb lines. Kerbs and centre dashes run everywhere except across an
-  // open junction (plus/T/L): a road that merely runs straight through a
-  // node keeps its markings unbroken. ----
-  const TS = 64 / 6, TY = 0.11;
+  // ---- roads: real Kenney city-kit tiles where the kit is loaded, the
+  // procedural pastel slabs otherwise. The lattice is 64 m; tiles are 32 m
+  // squares centred on the street lines (two per edge, one overlay per
+  // node), so junctions get the kit's crosswalk-paved intersection squares,
+  // bends get its curve piece and causeway mouths get a dead-end cap. ----
+  // the kit road stripe is 0.25 of a tile, so a 56 m tile carries a 14 m
+  // road (R5) and its pavement skirts act as the sidewalks; straights are
+  // stretched lengthwise to span one full 64 m edge so nothing overlaps
+  const ROAD_TILE = 56;
+  const TILE_H = 0.02 * 14;          // flattened tile body (~0.28 m)
+  const ROAD_TOP = 0.13;             // road surface (the old slab top + kerb)
+  const TY = 0.11;                   // legacy slab surface height
+  const tileY = ROAD_TOP - TILE_H;
+  const hasRoadKit = !!(TPL.roadStraight && TPL.roadInter && TPL.roadCurve && TPL.roadEnd);
+  const layStraight = (tpl: BakedTemplate | null, x: number, z: number, ry: number): void => {
+    if (tpl) bakeModel(B, tpl, x, tileY, z, ry, 1, [ROAD_TILE, 14, 64]);
+  };
+  const layNode = (tpl: BakedTemplate | null, x: number, z: number, ry: number): void => {
+    if (tpl) bakeModel(B, tpl, x, tileY + 0.01, z, ry, ROAD_TILE);
+  };
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
-  // an open junction has a side road (plus/T/L, plaza); a node
-  // the road just runs through — or dead-ends at — does not
-  const openJunction = (i: number, j: number): boolean => {
-    const a = plan.arms(i, j); // [west, east, north, south]
-    const n = a.filter(Boolean).length;
-    if (plan.plaza(i, j) || n >= 3) return true;
-    return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
-  };
-  const jSW = openJunction(cx, cz);     // west corner of the south run
-  const jS = openJunction(cx + 1, cz);  // east corner of the south run
-  const jW = openJunction(cx, cz + 1);  // north corner of the west run
-  for (let k = 0; k < 6; k++) {
-    const c = TS / 2 + k * TS;
-    const markS = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jS);
-    const markW = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jW);
+  const a0 = plan.arms(cx, cz); // this chunk's SW node: [west, east, north, south]
+  const armN = a0.filter(Boolean).length;
+  if (hasRoadKit) {
+    // two straight tiles per open edge, centred on the street line
     if (roadS) {
-      B.box(TS + 0.02, 0.04, 14, CAUSEWAY_ASPHALT, X0 + c, TY, Z0);
-      if (markS) {
-        for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
-        for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
-      }
+      layStraight(TPL.roadStraight, X0 + 32, Z0, 0);
     }
     if (roadW) {
-      B.box(14, 0.04, TS + 0.02, CAUSEWAY_ASPHALT, X0, TY, Z0 + c);
-      if (markW) {
-        for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
-        for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
+      layStraight(TPL.roadStraight, X0, Z0 + 32, Math.PI / 2);
+    }
+    // node overlay: intersection for 3+ arms, the 2x2 curve piece for
+    // bends (half scale: it is a double-wide tile), a dead-end cap for
+    // the sanctioned causeway mouths
+    if (armN >= 3) {
+      layNode(TPL.roadInter, X0, Z0, 0);
+    } else if (armN === 2 && !(a0[0] && a0[1]) && !(a0[2] && a0[3])) {
+      // bend: orient the curve so its open arms line up with the streets
+      const rot = a0[0] && a0[2] ? Math.PI : a0[0] && a0[3] ? -Math.PI / 2 : a0[1] && a0[2] ? Math.PI / 2 : 0;
+      layNode(TPL.roadCurve, X0, Z0, rot);
+    } else if (armN === 1) {
+      const rot = a0[0] ? 0 : a0[1] ? Math.PI : a0[2] ? -Math.PI / 2 : Math.PI / 2;
+      layNode(TPL.roadEnd, X0, Z0, rot);
+    }
+  } else {
+    const openJunction = (i: number, j: number): boolean => {
+      const a = plan.arms(i, j); // [west, east, north, south]
+      const n = a.filter(Boolean).length;
+      if (plan.plaza(i, j) || n >= 3) return true;
+      return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
+    };
+    const TS = 64 / 6;
+    const jSW = openJunction(cx, cz);
+    const jS = openJunction(cx + 1, cz);
+    const jW = openJunction(cx, cz + 1);
+    for (let k = 0; k < 6; k++) {
+      const c = TS / 2 + k * TS;
+      const markS = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jS);
+      const markW = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jW);
+      if (roadS) {
+        B.box(TS + 0.02, 0.04, 14, CAUSEWAY_ASPHALT, X0 + c, TY, Z0);
+        if (markS) {
+          for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
+          for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
+        }
+      }
+      if (roadW) {
+        B.box(14, 0.04, TS + 0.02, CAUSEWAY_ASPHALT, X0, TY, Z0 + c);
+        if (markW) {
+          for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
+          for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
+        }
+      }
+    }
+    // corner fillets: wherever two arms meet, an asphalt disc rounds the
+    // inner corner, and the elbow of an L-bend gets a bigger disc curving
+    // the outer edge — no hard 90-degree asphalt corners anywhere
+    {
+      const corners: Array<[boolean, boolean, number, number]> = [
+        [a0[0], a0[2], -1, -1], // NW: west + north
+        [a0[1], a0[2], 1, -1],  // NE: east + north
+        [a0[0], a0[3], -1, 1],  // SW: west + south
+        [a0[1], a0[3], 1, 1],   // SE: east + south
+      ];
+      const armCount = armN;
+      for (const [armA, armB, sx, sz] of corners) {
+        if (armA && armB) {
+          B.cyl(5, 5, 0.04, 12, CAUSEWAY_ASPHALT, X0 + sx * 5, TY, Z0 + sz * 5);
+        } else if (!armA && !armB && armCount === 2) {
+          B.cyl(7, 7, 0.04, 14, CAUSEWAY_ASPHALT, X0 + sx * 7, TY, Z0 + sz * 7);
+        }
       }
     }
   }
@@ -262,25 +321,6 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
   if (plan.plaza(cx, cz)) {
     bakePlaza(X0, Z0);
-  } else {
-    // corner fillets: wherever two arms meet, an asphalt disc rounds the
-    // inner corner, and the elbow of an L-bend gets a bigger disc curving
-    // the outer edge — no hard 90-degree asphalt corners anywhere
-    const a = plan.arms(cx, cz); // [west, east, north, south]
-    const corners: Array<[boolean, boolean, number, number]> = [
-      [a[0], a[2], -1, -1], // NW: west + north
-      [a[1], a[2], 1, -1],  // NE: east + north
-      [a[0], a[3], -1, 1],  // SW: west + south
-      [a[1], a[3], 1, 1],   // SE: east + south
-    ];
-    const armCount = a.filter(Boolean).length;
-    for (const [armA, armB, sx, sz] of corners) {
-      if (armA && armB) {
-        B.cyl(5, 5, 0.04, 12, CAUSEWAY_ASPHALT, X0 + sx * 5, TY, Z0 + sz * 5);
-      } else if (!armA && !armB && armCount === 2) {
-        B.cyl(7, 7, 0.04, 14, CAUSEWAY_ASPHALT, X0 + sx * 7, TY, Z0 + sz * 7);
-      }
-    }
   }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;

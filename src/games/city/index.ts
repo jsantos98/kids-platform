@@ -140,13 +140,17 @@ sirenBtn.addEventListener('click', () => setSiren(!sirenOn));
 // world falls back to the procedural pastel generator.
 const KIT = '/assets/kenney/city';
 const TRAINKIT = '/assets/kenney/train';
-const ROADTINT = { tint: [0.55, 0.57, 0.63] as [number, number, number] };
 const KITDEFS: Record<string, Parameters<typeof prepBakedModels>[0][string]> = {};
 for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`];
 Object.assign(KITDEFS, {
-  'road-straight': [`${KIT}/road-straight.glb`, `${KIT}/cmap-roads.png`, ROADTINT],
-  'road-crossroad': [`${KIT}/road-crossroad.glb`, `${KIT}/cmap-roads.png`, ROADTINT],
-  'road-crossing': [`${KIT}/road-crossing.glb`, `${KIT}/cmap-roads.png`, ROADTINT],
+  'road-straight': [`${KIT}/road-straight.glb`, `${KIT}/cmap-roads.png`],
+  'road-crossroad': [`${KIT}/road-crossroad.glb`, `${KIT}/cmap-roads.png`],
+  'road-crossing': [`${KIT}/road-crossing.glb`, `${KIT}/cmap-roads.png`],
+  'road-intersection': [`${KIT}/road-intersection.glb`, `${KIT}/cmap-roads.png`],
+  'road-curve': [`${KIT}/road-curve.glb`, `${KIT}/cmap-roads.png`],
+  'road-end': [`${KIT}/road-end.glb`, `${KIT}/cmap-roads.png`],
+  'road-side-entry': [`${KIT}/road-side-entry.glb`, `${KIT}/cmap-roads.png`],
+  'road-side-exit': [`${KIT}/road-side-exit.glb`, `${KIT}/cmap-roads.png`],
   'light-curved': [`${KIT}/light-curved.glb`, `${KIT}/cmap-roads.png`],
   'tree-default': [`${KIT}/nature/tree_default.glb`, null],
   'tree-oak': [`${KIT}/nature/tree_oak.glb`, null],

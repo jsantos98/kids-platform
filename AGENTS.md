@@ -20,11 +20,11 @@ add it here AND add an enforcement point (code guard or audit check).
 | # | Rule | Enforced in |
 |---|------|-------------|
 | R1 | **No road ends in open space, and the web is ONE piece.** Every street tip ends at a cross street (the four causeway mouths are the only sanctioned loose ends), and every street node connects to the same component — the segment vetoes can strand little "private" roads, so prune again after them; the audit counts components. | `cityPlan.ts` trim + stage 4c prune, `audit-world.ts` |
-| R2 | **Streets tile gaplessly.** Each 64 m edge is six cells of 64/6 m; corner cells always bake (no pads, no skips). | `cityChunk.ts` street stage |
-| R3 | **Junctions are the union of their road cells** — a plus, T or L exactly as wide as the roads. Never add a wider pad: its corners jut past the kerb lines as orphan asphalt. | `cityChunk.ts` (no pad exists — keep it that way) |
-| R3b | **No hard 90° asphalt corners.** Every junction corner where two arms meet gets a fillet disc (r5), and an L-bend's outer elbow gets a bigger disc (r7) curving the outer edge. | `cityChunk.ts` corner-fillet stage |
-| R4 | **Kerbs + centre dashes break only at open junctions** (plus/T/L, plaza). A road running straight through a node keeps its markings unbroken — no "- - -      - - - -" gaps. | `cityChunk.ts` `openJunction()` gate on markings |
-| R5 | Carriageway is 14 m (`ROAD_HALF = 7`). Lane logic (traffic ±3.5 m, kerbs ±6.9, lamps ±7.8, lots ≥8.1) depends on it. | `cityChunk.ts`, `traffic.ts`, `cityPlan.ts` |
+| R2 | **Streets are Kenney kit tiles.** Each open 64 m edge bakes ONE `road-straight` tile stretched lengthwise (56 m wide — the kit road stripe is 0.25 of a tile, giving exactly the 14 m carriageway); nodes overlay `road-intersection` (3+ arms), `road-curve` at half scale (bends) or `road-end` (causeway mouths). The procedural slab path remains only as the fallback when the kit fails to load. | `cityChunk.ts` road stage, `index.ts` KITDEFS |
+| R3 | **Junctions are kit intersection/curve tiles**, never a wider procedural pad. | `cityChunk.ts` node overlay |
+| R3b | **No hard 90° asphalt corners.** The tile path covers bends with the kit's curve piece; the legacy slab path rounds inner corners with fillet discs (r5) and L elbows with r7 discs. | `cityChunk.ts` |
+| R4 | **Markings come from the kit tiles** (dashes, crosswalks); the tile pavement skirts act as sidewalks. In the legacy path, kerbs + dashes break only at open junctions (plus/T/L, plaza). | `cityChunk.ts` |
+| R5 | Carriageway is 14 m (`ROAD_HALF = 7`; kit tiles at `ROAD_TILE = 56` give the same 14 m stripe). Lane logic (traffic ±3.5 m, kerbs ±6.9, lamps ±7.8, lots ≥8.1) depends on it. | `cityChunk.ts`, `traffic.ts`, `cityPlan.ts` |
 | R6 | **Traffic lights only where roads cross AND buildings surround them** — a signalized node is ≥3 street arms whose four neighbouring chunks are all urban/downtown/industrial, so no pole ever stands alone in the grass. Lights are SYNCHRONIZED into a green wave (`lights.ts`: phase shifts 8 s per 64 m of x+z); poles stand at ±12.5 m off the node, cars stop at `STOP_LINE` 18.5 m. | `cityPlan.ts signalized`, `lampProps.ts`, `lights.ts` |
 
 ## Railway

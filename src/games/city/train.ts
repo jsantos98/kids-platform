@@ -7,6 +7,7 @@ import { spawnVehicle, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { railRouteFor, bakeRails, RAIL_TOP, type RailRoute } from '../../worlds/railRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { citySeed } from '../../worlds/cityGrid.js';
 import { arcGap } from '../../worlds/spline.js';
 
 const SPEED = 9;    // m/s cruising
@@ -44,11 +45,15 @@ export class Trains {
   private stations: number[] = []; // arc distances, ascending
   private consists: Consist[] = [];
 
-  constructor(scene: THREE.Scene, seed: number) {
+  constructor(scene: THREE.Scene, bx: number, by: number) {
+    const seed = citySeed(bx, by);
     this.route = railRouteFor(seed);
-    this.stations = cityPlanFor(seed).stations.map(s => s.d).sort((a, b) => a - b);
-    // the rails: one baked mesh for the whole island
-    scene.add(bakeRails(this.route, bakedModel('rail-straight')));
+    this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
+    // rails + vehicles ride in this group (city-local coordinates); the game
+    // offsets the group to the current city's world position each frame
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this.group.add(bakeRails(this.route, bakedModel('rail-straight')));
 
     // three consists, evenly spaced around the loop, random loco + wagons
     const r = rng(chunkSeed(seed, 0x7a1, 2));
@@ -56,15 +61,45 @@ export class Trains {
       const consist: Consist = { s: (t * this.route.total) / 3, v: SPEED, hold: 0, next: 0, units: [] };
       consist.next = this.nextStation(consist.s);
       const loco = LOCOS[(r() * LOCOS.length) | 0];
-      consist.units.push(this.makeUnit(scene, loco, LOCO_LEN, 0));
+      consist.units.push(this.makeUnit(loco, LOCO_LEN, 0));
       const nCars = 2 + ((r() * 2) | 0); // 2..3 wagons
       let back = LOCO_LEN + GAP;
       for (let c = 0; c < nCars; c++) {
-        consist.units.push(this.makeUnit(scene, CARS[(r() * CARS.length) | 0], CAR_LEN, back));
+        consist.units.push(this.makeUnit(CARS[(r() * CARS.length) | 0], CAR_LEN, back));
         back += CAR_LEN + GAP;
       }
       this.consists.push(consist);
     }
+  }
+
+  private group: THREE.Group;
+
+  /** move the whole railway (mesh + consists) to another city */
+  setCity(scene: THREE.Scene, bx: number, by: number): void {
+    const seed = citySeed(bx, by);
+    this.route = railRouteFor(seed);
+    this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
+    // re-home the mesh + vehicles into a fresh offset group
+    const parent = this.group.parent;
+    if (parent) parent.remove(this.group);
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this.group.add(bakeRails(this.route, bakedModel('rail-straight')));
+    for (const c of this.consists) {
+      c.next = this.nextStation(c.s);
+      c.hold = 0;
+      for (const u of c.units) {
+        if (u.obj && u.obj.parent !== this.group) {
+          (u.obj.parent ?? scene).remove(u.obj);
+          this.group.add(u.obj);
+        }
+      }
+    }
+  }
+
+  /** world offset applied to mesh + vehicles this frame */
+  setOrigin(ox: number, oz: number): void {
+    this.group.position.set(ox, 0, oz);
   }
 
   /** wrapped arc distance from `s` to the next station ahead */
@@ -78,12 +113,12 @@ export class Trains {
     return best;
   }
 
-  private makeUnit(scene: THREE.Scene, url: string, len: number, back: number): Unit {
+  private makeUnit(url: string, len: number, back: number): Unit {
     const unit: Unit = { obj: null, back };
     spawnVehicle(url, { len }).then(obj => {
       obj.traverse(o => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
       obj.position.y = RAIL_TOP;
-      scene.add(obj);
+      this.group.add(obj);
       unit.obj = obj;
     }).catch(() => { /* stays invisible; the world falls back gracefully */ });
     return unit;

@@ -25,14 +25,15 @@ const Z0 = ISLAND - 3;   // overlaps the beach ring
 const Z1 = ISLAND + 37;  // lands on the picnic island
 const ISLE = { x1: X - 20, z1: Z1, x2: X + 20, z2: Z1 + 40 };
 
-/** shared with the sea's boat detour and the minimap */
+/** shared with the sea's boat loop and the minimap (city-local coordinates) */
 export const BRIDGE = { X, HALF_W, Z0, Z1, ISLE };
 
-/** static collision for the picnic island's trees and rocks */
-export const BRIDGE_BOXES: CollisionBox[] = [];
+export interface BuiltBridge { group: THREE.Group; boxes: CollisionBox[] }
 
-export function createBridge(scene: THREE.Scene): void {
+/** Build this city's picnic-island causeway, offset into world space. */
+export function buildBridge(ox: number, oz: number): BuiltBridge {
   const B = new Baked();
+  const boxes: CollisionBox[] = [];
   const r = rng(chunkSeed(77, 1, 4));
 
   // deck + lane dashes
@@ -78,24 +79,27 @@ export function createBridge(scene: THREE.Scene): void {
     x > ISLE.x1 + 4 && x < ISLE.x2 - 4 && z > ISLE.z1 + 4 && z < ISLE.z2 - 4 &&
     !(x > X - HALF_W && x < X + HALF_W && z < ISLE.z1 + 10);
   for (let k = 0; k < 22 && trees.length; k++) {
-    if (BRIDGE_BOXES.length >= 7) break;
+    if (boxes.length >= 7) break;
     const x = ISLE.x1 + 6 + r() * (iw - 12), z = ISLE.z1 + 6 + r() * (id - 12);
     if (!clear(x, z)) continue;
     bakeTpl(B, trees[(r() * trees.length) | 0], x, 0.08, z, r() * Math.PI * 2, 4.5 + r() * 2.5);
-    BRIDGE_BOXES.push({ x1: x - 0.55, x2: x + 0.55, z1: z - 0.55, z2: z + 0.55, small: 1 });
+    boxes.push({ x1: x - 0.55, x2: x + 0.55, z1: z - 0.55, z2: z + 0.55, small: 1 });
   }
   for (let k = 0; k < 8 && rocks.length; k++) {
-    if (BRIDGE_BOXES.length >= 10) break;
+    if (boxes.length >= 10) break;
     const x = ISLE.x1 + 5 + r() * (iw - 10), z = ISLE.z1 + 5 + r() * (id - 10);
     if (!clear(x, z)) continue;
     bakeTpl(B, rocks[(r() * rocks.length) | 0], x, 0.08, z, r() * Math.PI * 2, 2 + r() * 1.2);
-    BRIDGE_BOXES.push({ x1: x - 0.8, x2: x + 0.8, z1: z - 0.8, z2: z + 0.8, small: 1 });
+    boxes.push({ x1: x - 0.8, x2: x + 0.8, z1: z - 0.8, z2: z + 0.8, small: 1 });
   }
 
   const mesh = B.build();
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  scene.add(mesh);
+  const group = new THREE.Group();
+  group.add(mesh);
+  group.position.set(ox, 0, oz);
+  return { group, boxes };
 }
 
 function bakeTpl(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number, ry: number, s: number): void {

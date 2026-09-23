@@ -28,6 +28,7 @@
 // transit (crossings, stations, tram) and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
+import { citySeed, southExit, eastExit } from './cityGrid.js';
 import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
@@ -84,8 +85,20 @@ export interface TramPlan {
   stops: TramStop[];
 }
 
+export interface CityExits {
+  /** lattice line of the exit road on each side (n/w belong to the neighbours'
+   * south/east edges — the four corridor roads always line up) */
+  n: number;
+  s: number;
+  w: number;
+  e: number;
+}
+
 export interface CityPlan {
   seed: number;
+  /** which grid cell this city is (the world is an archipelago of them) */
+  bx: number;
+  by: number;
   /** street lines (any open segment somewhere on the line) */
   lineH(j: number): boolean;
   lineV(i: number): boolean;
@@ -108,27 +121,31 @@ export interface CityPlan {
   crossings: Crossing[];
   /** road × river bridge spans */
   riverBridges: RiverBridge[];
-  /** train stations (0-2, usually 2) */
+  /** train stations (0-3) */
   stations: Station[];
   /** the downtown tram loop (always found — its streets are pinned open) */
   tram: TramPlan | null;
+  /** where the four causeways to the neighbouring cities land */
+  exits: CityExits;
 }
 
 const CH = 64;
 const W = WORLD_CHUNKS;
 const key = (a: number, b: number) => `${a},${b}`;
-const cache = new Map<number, CityPlan>();
+const cache = new Map<string, CityPlan>();
 
-export function cityPlanFor(seed: number): CityPlan {
-  let plan = cache.get(seed);
+export function cityPlanFor(bx: number, by: number): CityPlan {
+  const k = `${bx},${by}`;
+  let plan = cache.get(k);
   if (!plan) {
-    plan = buildPlan(seed);
-    cache.set(seed, plan);
+    plan = buildPlan(bx, by);
+    cache.set(k, plan);
   }
   return plan;
 }
 
-function buildPlan(seed: number): CityPlan {
+function buildPlan(bx: number, by: number): CityPlan {
+  const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, 0xc17, 0));
   const rail = railRouteFor(seed);
   const river = riverFor(seed);
@@ -226,6 +243,23 @@ function buildPlan(seed: number): CityPlan {
   const segV = (i: number, j: number) => segVSet.has(key(i, j));
   const lineH = (j: number) => H.includes(j) && Array.from({ length: W }, (_, i) => i).some(i => segH(j, i));
   const lineV = (i: number) => V.includes(i) && Array.from({ length: W }, (_, j) => j).some(j => segV(i, j));
+
+  // ---- 3b. exit corridors: one full-length road leaves on each side and
+  // runs to the causeway across the strait. The line indices come from the
+  // shared edge hash, so the neighbour's road continues ours exactly. Where
+  // the railway shadows the road, the road still wins — a cut corridor
+  // would strand the causeway. ----
+  const exN = southExit(bx, by - 1);
+  const exS = southExit(bx, by);
+  const exW = eastExit(bx - 1, by);
+  const exE = eastExit(bx, by);
+  for (let k = 0; k < W; k++) {
+    segVSet.add(key(exN, k));
+    segVSet.add(key(exS, k));
+    segHSet.add(key(exW, k));
+    segHSet.add(key(exE, k));
+  }
+  const exits: CityExits = { n: exN, s: exS, w: exW, e: exE };
 
   // ---- 4. districts finish: industrial near the railway, green fillers ----
   const frontage = (cx: number, cz: number): boolean =>
@@ -482,12 +516,15 @@ function buildPlan(seed: number): CityPlan {
 
   const plan: CityPlan = {
     seed,
+    bx,
+    by,
     lineH, lineV, segH, segV, arms, signalized, roundabout, plaza, district,
     lots: (cx, cz) => lotsByChunk.get(key(cx, cz)) ?? [],
     crossings,
     riverBridges,
     stations,
     tram,
+    exits,
   };
   return plan;
 }

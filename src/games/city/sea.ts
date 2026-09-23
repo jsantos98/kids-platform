@@ -1,34 +1,27 @@
-// The island sea: a gently waving ocean plane around the island, foam surf on
-// the beach rim, a wooden pier with moored dinghies, and Kenney watercraft
-// sailing an offshore loop (CC0 watercraft kit, baked to vertex colors like
-// the city kit; procedural boats only as fallback if the assets are missing).
-// Purely scenic — the player can never reach the water.
+// The sea: a gently waving ocean plane around every island city, with the
+// Kenney watercraft fleet sailing the current city's offshore loop. The
+// per-city shoreline dressing (foam, pier, dinghies, buoys, the picnic
+// causeway) lives in scenery.ts.
 import * as THREE from 'three';
 import { C, mat } from '../../engine/stage.js';
 import { bakedModel, prepBakedModels, type BakeDef } from '../../engine/assets.js';
-import { Baked, templateToMesh } from '../../engine/baked.js';
+import { templateToMesh } from '../../engine/baked.js';
 import { makeSailboat, makeTugboat, makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
-// Also drives the boats/buoys so everything floats on the same water.
-function waveAt(x: number, z: number, t: number): number {
+export function waveAt(x: number, z: number, t: number): number {
   return 0.032 * Math.sin(0.075 * x + t * 0.9)
        + 0.026 * Math.sin(0.105 * z - t * 0.7)
        + 0.018 * Math.sin(0.05 * (x + z) + t * 0.5);
 }
 
-// offshore lane: rounded rectangle 52 m beyond the island edge, ~3 m spacing.
-// The south run detours around the bridge + picnic island (bridge.ts).
+// offshore lane: rounded rectangle 52 m beyond the island edge, ~3 m spacing
 const LO = -26, HI = ISLAND + 26, CUT = 26;
 const CORNERS: Array<{ x: number; z: number }> = [
   { x: LO + CUT, z: LO }, { x: HI - CUT, z: LO },
   { x: HI, z: LO + CUT }, { x: HI, z: HI - CUT },
-  { x: HI - CUT, z: HI },
-  // swing wide around the bridge island before rejoining the south run
-  { x: 292, z: HI }, { x: 262, z: HI + 38 }, { x: 248, z: HI + 58 },
-  { x: 120, z: HI + 58 }, { x: 106, z: HI + 38 }, { x: 76, z: HI },
-  { x: LO + CUT, z: HI },
+  { x: HI - CUT, z: HI }, { x: LO + CUT, z: HI },
   { x: LO, z: HI - CUT }, { x: LO, z: LO + CUT },
 ];
 function buildLoop(): Array<{ x: number; z: number }> {
@@ -46,10 +39,15 @@ function buildLoop(): Array<{ x: number; z: number }> {
 }
 const LOOP = buildLoop();
 
+/** the current city's offshore sailing lane (city-local coordinates) */
+export function boatLoop(): Array<{ x: number; z: number }> {
+  return LOOP;
+}
+
 const mod = (a: number, n: number) => ((a % n) + n) % n;
 
 /** One merged, re-centred hull mesh at the requested length (y=0 waterline). */
-function hullObject(tplName: string, len: number, fallback: () => THREE.Object3D): THREE.Object3D {
+export function hullObject(tplName: string, len: number, fallback: () => THREE.Object3D): THREE.Object3D {
   const tpl = bakedModel(tplName);
   if (!tpl) return fallback();
   const m = templateToMesh(tpl);
@@ -70,19 +68,12 @@ interface Boat {
   phase: number;
 }
 
-interface Bobber {
-  mesh: THREE.Object3D;
-  x: number; z: number;
-  amp: number;
-  phase: number;
-}
-
 export class Sea {
   private boats: Boat[] = [];
-  private bobbers: Bobber[] = [];
   private water: THREE.Mesh;
   private waterBase: Float32Array;
-  private foamMat: THREE.MeshLambertMaterial;
+  private ox = 0;
+  private oz = 0;
 
   constructor(scene: THREE.Scene) {
     // ---- waving water plane (flat-shaded facets catch the light) ----
@@ -99,59 +90,14 @@ export class Sea {
       (this.water.geometry.attributes.position as THREE.BufferAttribute).array,
     );
 
-    // ---- foam surf hugging the beach rim ----
-    this.foamMat = mat(0xffffff, { transparent: true, opacity: 0.4, depthWrite: false });
-    const strip = (w: number, d: number, x: number, z: number) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), this.foamMat);
-      m.position.set(x, 0.05, z);
-      scene.add(m);
-    };
-    strip(3, ISLAND + 6, -1.8, CENTER);
-    strip(3, ISLAND + 6, ISLAND + 1.8, CENTER);
-    strip(ISLAND + 6, 3, CENTER, -1.8);
-    strip(ISLAND + 6, 3, CENTER, ISLAND + 1.8);
-
-    this.buildPier(scene);
     this.buildBoats(scene);
   }
 
-  /** Wooden pier off the race-corner shore + moored dinghies + buoys + ship. */
-  private buildPier(scene: THREE.Scene): void {
-    scene.add(bakePier());
-
-    // dinghies moored alongside (bobbing, heading along the shore)
-    const PX = ISLAND - 50;
-    for (const [x, z, phase] of [[PX - 7.5, ISLAND + 10, 1.2], [PX + 7.5, ISLAND + 14, 4.1]] as Array<[number, number, number]>) {
-      const boat = hullObject('boat-row-large', 4, () => makeRowboat({ hull: C.brown }));
-      boat.rotation.y = Math.PI / 2;
-      boat.position.set(x, 0, z);
-      scene.add(boat);
-      this.bobbers.push({ mesh: boat, x, z, amp: 1.6, phase });
-    }
-
-    // course buoys just outside the sailing lane
-    for (let k = 0; k < 6; k++) {
-      const p = LOOP[Math.floor((k / 6) * LOOP.length)];
-      const nx = p.x - CENTER, nz = p.z - CENTER;
-      const nl = Math.hypot(nx, nz) || 1;
-      const x = p.x + (nx / nl) * 8, z = p.z + (nz / nl) * 8;
-      const name = k % 2 ? 'buoy' : 'buoy-flag';
-      const tpl = bakedModel(name);
-      if (!tpl) continue;
-      const buoy = hullObject(name, k % 2 ? 1.4 : 2.2, () => new THREE.Group());
-      buoy.position.set(x, 0, z);
-      buoy.rotation.y = Math.random() * Math.PI * 2;
-      scene.add(buoy);
-      this.bobbers.push({ mesh: buoy, x, z, amp: 1.4, phase: k * 2.3 });
-    }
-
-    // an anchored cargo ship off the south-east shore
-    const shipX = ISLAND + 34, shipZ = ISLAND - 36;
-    const ship = hullObject('ship-cargo-a', 30, () => new THREE.Group());
-    ship.rotation.y = 0.5;
-    ship.position.set(shipX, 0, shipZ);
-    scene.add(ship);
-    this.bobbers.push({ mesh: ship, x: shipX, z: shipZ, amp: 0.5, phase: 2.8 });
+  /** move water plane + sailing lane to the current city */
+  setCity(ox: number, oz: number): void {
+    this.ox = ox;
+    this.oz = oz;
+    this.water.position.set(ox + CENTER, -0.02, oz + CENTER);
   }
 
   private buildBoats(scene: THREE.Scene): void {
@@ -185,14 +131,11 @@ export class Sea {
     const pos = this.water.geometry.attributes.position as THREE.BufferAttribute;
     const arr = pos.array as Float32Array;
     for (let i = 0; i < arr.length; i += 3) {
-      arr[i + 2] = waveAt(CENTER + this.waterBase[i], CENTER - this.waterBase[i + 1], elapsed);
+      arr[i + 2] = waveAt(this.ox + CENTER + this.waterBase[i], this.oz + CENTER - this.waterBase[i + 1], elapsed);
     }
     pos.needsUpdate = true;
 
-    // surf breathing
-    this.foamMat.opacity = 0.3 + 0.14 * (0.5 + 0.5 * Math.sin(elapsed * 0.9));
-
-    // sailing boats follow the lane
+    // sailing boats follow the lane around the current city
     const total = LOOP.length;
     for (const b of this.boats) {
       const f = mod(b.offset + elapsed * (b.speed / 3) * b.dir, total);
@@ -200,19 +143,12 @@ export class Sea {
       const i1 = mod(i0 + b.dir, total);
       const fr = f - Math.floor(f);
       const a = LOOP[i0], c = LOOP[i1];
-      const x = a.x + (c.x - a.x) * fr;
-      const z = a.z + (c.z - a.z) * fr;
+      const x = this.ox + a.x + (c.x - a.x) * fr;
+      const z = this.oz + a.z + (c.z - a.z) * fr;
       b.mesh.position.set(x, waveAt(x, z, elapsed) * 1.6 + 0.05, z);
       b.mesh.rotation.y = Math.atan2(c.x - a.x, c.z - a.z);
       b.mesh.rotation.x = Math.sin(elapsed * 0.7 + b.phase) * 0.035;
       b.mesh.rotation.z = Math.sin(elapsed * 0.9 + b.phase) * 0.05;
-    }
-
-    // buoys, dinghies and the anchored ship ride the swell
-    for (const b of this.bobbers) {
-      b.mesh.position.y = waveAt(b.x, b.z, elapsed) * b.amp + 0.03;
-      b.mesh.rotation.x = Math.sin(elapsed * 0.8 + b.phase) * 0.02 * b.amp;
-      b.mesh.rotation.z = Math.sin(elapsed * 0.65 + b.phase) * 0.03 * b.amp;
     }
   }
 
@@ -220,22 +156,6 @@ export class Sea {
   boatDots(): Array<{ x: number; z: number }> {
     return this.boats.map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
   }
-}
-
-// pier deck, beams, posts and bollards in one baked mesh (south shore by the
-// race corner: deck runs z ISLAND+1.5 → ISLAND+20.5)
-function bakePier(): THREE.Mesh {
-  const wood = C.brown, dark = C.brownDark;
-  const PX = ISLAND - 50, ZC = ISLAND + 9.5;
-  const B = new Baked();
-  B.box(8, 0.16, 19, wood, PX, 0.42, ZC);         // deck out to z=ISLAND+19
-  for (const x of [PX - 3.5, PX - 0.5, PX + 2.5]) B.box(0.14, 0.04, 19, dark, x, 0.51, ZC);
-  for (const x of [PX - 3.8, PX + 3.8]) B.box(0.32, 0.2, 19, dark, x, 0.45, ZC);
-  for (const z of [ISLAND + 2.5, ZC, ISLAND + 16.5]) {
-    for (const x of [PX - 3.1, PX + 3.1]) B.cyl(0.18, 0.22, 2.4, 8, dark, x, -0.4, z);
-  }
-  for (const x of [PX - 1.6, PX + 1.6]) B.cyl(0.14, 0.18, 0.5, 8, dark, x, 0.75, ISLAND + 17.5); // bollards
-  return B.build();
 }
 
 /** Bake the watercraft kit templates, then build the sea. */

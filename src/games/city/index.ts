@@ -11,14 +11,15 @@ import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
 import { createSea } from './sea.js';
-import { createBridge, BRIDGE_BOXES } from './bridge.js';
+import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
-import { ISLAND, CENTER } from '../../worlds/world.js';
+import { CENTER } from '../../worlds/world.js';
+import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
@@ -48,14 +49,16 @@ if (seedParam === null) {
   u.searchParams.set('seed', String(P.seed));
   history.replaceState(null, '', u.toString());
 }
+setCityBase(P.seed);
 
-/** a starting lane spot that suits THIS world: on a street near the centre,
- * clear of the river, the railway, and level crossings */
-function pickSpawn(): { x: number; z: number; heading: number } {
-  const sr = rng(chunkSeed(P.seed, 0x5b0, 3));
-  const plan = cityPlanFor(P.seed);
-  const river = riverFor(P.seed);
-  const rail = railRouteFor(P.seed);
+/** a starting lane spot that suits THIS city: on a street near the centre,
+ * clear of the river, the railway, and level crossings (city-local coords) */
+function pickSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
+  const seed = citySeed(bx, by);
+  const sr = rng(chunkSeed(seed, 0x5b0, 3));
+  const plan = cityPlanFor(bx, by);
+  const river = riverFor(seed);
+  const rail = railRouteFor(seed);
   const spots: Array<{ x: number; z: number; heading: number }> = [];
   const collect = (lines: number[]): void => {
     for (const j of lines) {
@@ -102,13 +105,9 @@ scene.add(groundFollower);
 
 // ---- player vehicle ----
 const V = raceMode ? VEHICLES.kart : (VEHICLES[P.vehicle] ?? VEHICLES.truck);
-const spawn = raceMode
+let spawn = raceMode
   ? { x: RACE_START.x, z: RACE_START.z, heading: RACE_START.heading }
-  : (() => {
-      const s = pickSpawn();
-      const h = q.get('heading');
-      return h !== null && Number.isFinite(Number(h)) ? { ...s, heading: Number(h) * Math.PI / 180 } : s;
-    })();
+  : pickSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -211,23 +210,23 @@ if (q.get('debugbake') === '1') {
 }
 
 // ---- chunk streaming ----
-// the island is far too big to build at once now: chunks spring up around the
-// truck as it drives (fog hides the seams), and the ?buildall=1 dev flag still
-// lays down every chunk for aerial screenshots
-const roadGrid = new RoadGrid(P.seed);
-const chunks = new ChunkManager(scene, P.seed, roadGrid, 64, 4);
-const river = riverFor(P.seed);
+// the archipelago is far too big to build at once: chunks spring up around
+// the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
+// still lays down the whole starting city for aerial screenshots
+const roadGrid = new RoadGrid(0, 0);
+const chunks = new ChunkManager(scene, 64, 4);
+let river = riverFor(citySeed(0, 0));
 chunks.ensure(999, spawn.x, spawn.z);
 if (q.get('buildall') === '1') {
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
-    for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
+    for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(0, 0, cx, cz);
   }
 }
 
-// ---- the sea: waving water, surf, pier and Kenney watercraft sailing around ----
+// ---- the sea: waving water + the watercraft fleet (shore dressing is
+// per-city scenery: foam ring, pier, dinghies, buoys, the picnic causeway) ----
 const sea = await createSea(scene);
-// ---- the bridge: causeway to the picnic island off the south shore ----
-createBridge(scene);
+const scenery = new CityScenery(scene);
 
 // ---- water jet + steam (spray mini-scene visuals) ----
 const jet = new THREE.Mesh(
@@ -246,7 +245,7 @@ scene.add(ladderMod.getLadderMesh());
 
 // ---- missions ----
 const heliMode = P.vehicle === 'heli';
-const missions = new Missions(scene, P.seed, 64, roadGrid, heliMode);
+const missions = new Missions(scene, 64, roadGrid, heliMode);
 const MAX_ACTIVE = 3;
 for (let i = 0; i < 3; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
 
@@ -259,11 +258,10 @@ if (q.get('spraytest') === '1') {
 // ---- ambient life: trains on the smooth main line (with station stops),
 // the tram circling downtown, level crossings that hold the cars, a patrol
 // heli circling the neighbourhood while the kid plays the fire truck ----
-const trains = new Trains(scene, P.seed);
-const transit = new Transit(scene, P.seed);
+const trains = new Trains(scene, 0, 0);
+const transit = new Transit(scene);
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [],
-  cityPlanFor(P.seed).crossings, trains);
+const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -276,10 +274,11 @@ if (q.get('debugsea') === '1') {
     trains,
     traffic,
     transit,
+    chunks,
     player,
     tram: () => transit.list(),
-    river,
-    route: railRouteFor(P.seed),
+    river: () => river,
+    route: () => railRouteFor(citySeed(curCity.bx, curCity.by)),
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
       return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
@@ -316,7 +315,29 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid, 64, P.seed, () => sea.boatDots());
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => sea.boatDots());
+
+// ---- the city grid: drive across a strait and the next city wakes up.
+// Every system (plan, trains, tram, traffic, pedestrians, shore scenery,
+// minimap) repoints itself at the new island; the seed is derived from the
+// city's coordinates, so city (3, -2) is always the same city. ----
+let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
+function applyCity(c: CityRef): void {
+  curCity = c;
+  roadGrid.setCity(c.bx, c.by);
+  river = riverFor(citySeed(c.bx, c.by));
+  traffic.setCity(c.bx, c.by, c.ox, c.oz, player.car.position);
+  pedestrians.setCity(c.ox, c.oz, player.state.x, player.state.z);
+  trains.setCity(scene, c.bx, c.by);
+  transit.setCity(c.bx, c.by, c.ox, c.oz);
+  sea.setCity(c.ox, c.oz);
+  scenery.ensure(c.bx, c.by, c.ox, c.oz);
+  minimap.setCity(c.bx, c.by, c.ox, c.oz);
+  missions.setCity(c.ox, c.oz);
+  const s = pickSpawn(c.bx, c.by);
+  if (!raceMode) spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
+}
+applyCity(curCity);
 const hud = makeHUD();
 function updateMissionPanel(): void {
   missionEl.innerHTML = `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`;
@@ -417,11 +438,14 @@ const tick = (): void => {
   elapsed += dt;
   const input = readDriveInput();
   const st = player.state;
+  // crossed into a neighbouring city?
+  const here = cityAt(st.x, st.z);
+  if (here.key !== curCity.key) applyCity(here);
 
   // physics + collision (frozen during the mini-scenes: the truck stays put
   // until the fire is out / the cat is down)
   if (mode === 'drive' || player.crashT > 0) {
-    const boxes = chunks.boxesNear(st.x, st.z).concat(BRIDGE_BOXES);
+    const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
     const step = physicsStep(player, input, dt, boxes);
     if (step.crashed) {
       audio.thud();
@@ -486,19 +510,18 @@ const tick = (): void => {
   groundFollower.position.set(st.x, -0.85, st.z);
   followSky(st.x, st.z);
 
-  // keep the truck on the island (the ocean is not drivable)
-  st.x = Math.min(ISLAND - 3, Math.max(3, st.x));
-  st.z = Math.min(ISLAND - 3, Math.max(3, st.z));
+  // the archipelago is endless; stray into the sea and R brings you back
   chunks.ensure(2, st.x, st.z);
 
   // ambient life: the trains, the tram, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly
   trains.update(dt);
+  trains.setOrigin(curCity.ox, curCity.oz);
   transit.update(dt, elapsed, trains);
   sea.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
   pedestrians.update(dt, st.x, st.z, st.x, st.z);
-  if (!V.fly && river.inWater(st.x, st.z)) {
+  if (!V.fly && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);
     splashTimer -= dt;
     if (Math.abs(st.v) > 1.5 && splashTimer <= 0) {
@@ -676,7 +699,7 @@ const tick = (): void => {
     statTime = elapsed;
     const i = renderer.info.render;
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(`${P.vehicle} · seed ${P.seed} · ${kmh} km/h · draw calls ${i.calls} · triangles ${i.triangles.toLocaleString('en-US')}`);
+    hud.set(`city ${curCity.bx},${curCity.by} · ${P.vehicle} · ${kmh} km/h · draw calls ${i.calls} · triangles ${i.triangles.toLocaleString('en-US')}`);
     document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
   }

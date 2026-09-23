@@ -38,21 +38,12 @@ export class Traffic {
   private cars: TrafficCar[] = [];
   /** segment key "fx,fz,tx,tz" → level crossings on it */
   private crossingsBySeg = new Map<string, Crossing[]>();
+  /** world offset of the city the AI is driving in */
+  private ox = 0;
+  private oz = 0;
 
   constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 12,
-              extraModels: string[] = [], crossings: Crossing[] = [], private trains: Trains | null = null) {
-    for (const c of crossings) {
-      const horiz = c.axis === 'h';
-      const line = Math.round((horiz ? c.z : c.x) / CH);
-      const idx = Math.floor((horiz ? c.x : c.z) / CH);
-      const keys = horiz
-        ? [`${idx},${line},${idx + 1},${line}`, `${idx + 1},${line},${idx},${line}`]
-        : [`${line},${idx},${line},${idx + 1}`, `${line},${idx + 1},${line},${idx}`];
-      for (const k of keys) {
-        if (!this.crossingsBySeg.has(k)) this.crossingsBySeg.set(k, []);
-        this.crossingsBySeg.get(k)!.push(c);
-      }
-    }
+              extraModels: string[] = [], private trains: Trains | null = null) {
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
@@ -65,13 +56,34 @@ export class Traffic {
         c.userData.wheels = wheelNodes(g);
       }).catch(() => {});
     }
-    this.cars.forEach(c => this.respawn(c, new THREE.Vector3()));
   }
 
-  /** Move a car onto an open street segment near the player. */
+  /** switch cities: rebuild the crossing map, move the origin, respawn the
+   * cars on the new street network near the player */
+  setCity(bx: number, by: number, ox: number, oz: number, player: THREE.Vector3): void {
+    this.ox = ox;
+    this.oz = oz;
+    this.crossingsBySeg.clear();
+    for (const c of cityPlanFor(bx, by).crossings) {
+      const horiz = c.axis === 'h';
+      const line = Math.round((horiz ? c.z : c.x) / this.CH);
+      const idx = Math.floor((horiz ? c.x : c.z) / this.CH);
+      const keys = horiz
+        ? [`${idx},${line},${idx + 1},${line}`, `${idx + 1},${line},${idx},${line}`]
+        : [`${line},${idx},${line},${idx + 1}`, `${line},${idx + 1},${line},${idx}`];
+      for (const k of keys) {
+        if (!this.crossingsBySeg.has(k)) this.crossingsBySeg.set(k, []);
+        this.crossingsBySeg.get(k)!.push(c);
+      }
+    }
+    for (const c of this.cars) this.respawn(c, player);
+  }
+
+  /** Move a car onto an open street segment near the player (city-local). */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
     const ai = c.userData.ai;
-    const pi = Math.round(player.x / this.CH), pj = Math.round(player.z / this.CH);
+    const lx = player.x - this.ox, lz = player.z - this.oz;
+    const pi = Math.round(lx / this.CH), pj = Math.round(lz / this.CH);
     for (let tries = 0; tries < 12; tries++) {
       const i = Math.max(0, Math.min(WORLD_CHUNKS - 1, pi + ((Math.random() * 5) | 0) - 2));
       const j = Math.max(0, Math.min(WORLD_CHUNKS - 1, pj + ((Math.random() * 5) | 0) - 2));
@@ -95,9 +107,9 @@ export class Traffic {
     const hx = Math.sign(ai.tx - ai.fx), hz = Math.sign(ai.tz - ai.fz);
     const r = rightOf(hx, hz);
     c.position.set(
-      ai.fx * this.CH + (ai.tx - ai.fx) * this.CH * ai.t + r.x * LANE,
+      this.ox + ai.fx * this.CH + (ai.tx - ai.fx) * this.CH * ai.t + r.x * LANE,
       0,
-      ai.fz * this.CH + (ai.tz - ai.fz) * this.CH * ai.t + r.z * LANE,
+      this.oz + ai.fz * this.CH + (ai.tz - ai.fz) * this.CH * ai.t + r.z * LANE,
     );
     c.rotation.y = Math.atan2(hx, hz);
   }

@@ -26,6 +26,16 @@ const PED_SCALE = 2.2;
 
 export class Pedestrians {
   private peds: Ped[] = [];
+  /** world offset of the city the locals are strolling in */
+  private ox = 0;
+  private oz = 0;
+
+  /** move the crowd to another city's sidewalks near the player */
+  setCity(ox: number, oz: number, px: number, pz: number): void {
+    this.ox = ox;
+    this.oz = oz;
+    for (const p of this.peds) this.respawn(p, px, pz);
+  }
 
   constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number,
               count = 14, petTpls: BakedTemplate[] = [], peopleTpls: BakedTemplate[] = []) {
@@ -67,14 +77,15 @@ export class Pedestrians {
 
   /** Place a pedestrian or pet on a sidewalk of a real street near (px, pz). */
   respawn(p: Ped, px: number, pz: number): void {
+    const lx = px - this.ox, lz = pz - this.oz;
     for (let tries = 0; tries < 12; tries++) {
       const alongX = Math.random() < 0.5;
-      const base = Math.round((alongX ? pz : px) / this.CH);
+      const base = Math.round((alongX ? lz : lx) / this.CH);
       const idx = Math.min(WORLD_CHUNKS - 1, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
       if (!(alongX ? this.grid.hasZ(idx) : this.grid.hasX(idx))) continue;
       const side = Math.random() < 0.5 ? -1 : 1;
       const offset = side * (8.2 + Math.random() * 1.4);
-      const along = Math.min(ISLAND - 24, Math.max(24, (alongX ? px : pz) + (Math.random() - 0.5) * 140));
+      const along = Math.min(ISLAND - 24, Math.max(24, (alongX ? lx : lz) + (Math.random() - 0.5) * 140));
       // the line must actually have a street segment at this stretch
       const seg = Math.min(WORLD_CHUNKS - 2, Math.max(0, Math.floor(along / this.CH)));
       if (!(alongX ? this.grid.segH(idx, seg) : this.grid.segV(idx, seg))) continue;
@@ -83,8 +94,8 @@ export class Pedestrians {
       p.dir = Math.random() < 0.5 ? -1 : 1;
       p.speed = 0.8 + Math.random() * 0.6;
       p.phase = Math.random() * 10;
-      if (alongX) p.mesh.position.set(along, 0.1, idx * this.CH + offset);
-      else p.mesh.position.set(idx * this.CH + offset, 0.1, along);
+      if (alongX) p.mesh.position.set(this.ox + along, 0.1, this.oz + idx * this.CH + offset);
+      else p.mesh.position.set(this.ox + idx * this.CH + offset, 0.1, this.oz + along);
       p.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
       return;
     }

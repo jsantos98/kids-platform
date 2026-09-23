@@ -1,8 +1,10 @@
-// Street-level transit furniture: gated level crossings where the railway
-// meets a road (twin flashing red signals — the car AI stops for them), the
-// station platforms where trains dwell, the river trestles under the rails,
-// and the downtown tram: inset tracks down the middle of the boulevard,
-// sheltered stops on each side, and two trams ambling around the loop.
+// Street-level transit furniture, built per city: gated level crossings where
+// the railway meets a road (twin flashing red signals — the car AI stops for
+// them), the station platforms where trains dwell, the river trestles under
+// the rails, and each city's downtown tram: inset tracks down the middle of
+// the boulevard, sheltered stops, and two trams ambling around the loop.
+// A city builds its set the first time the player arrives; the four most
+// recent stay alive so nothing pops when crossing a strait and coming back.
 import * as THREE from 'three';
 import { Baked, templateToMesh } from '../../engine/baked.js';
 import { bakedModel } from '../../engine/assets.js';
@@ -10,6 +12,7 @@ import { rng, chunkSeed } from '../../engine/rng.js';
 import { RAIL_Y, railRouteFor, type RailRoute } from '../../worlds/railRoute.js';
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
 import { cityPlanFor, type Crossing, type Station, type TramPlan } from '../../worlds/cityPlan.js';
+import { citySeed } from '../../worlds/cityGrid.js';
 import { makePath, type WorldPath } from '../../worlds/spline.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 import type { Trains } from './train.js';
@@ -27,46 +30,89 @@ interface Signal {
 }
 
 interface Tram {
-  obj: THREE.Object3D | null; // null until the kit template bakes
+  obj: THREE.Object3D | null;
   s: number;                  // arc distance along the tram loop
   v: number;
   next: number;               // stop index
   hold: number;
 }
 
+interface CityInst {
+  ox: number;
+  oz: number;
+  mesh: THREE.Mesh;
+  /** dynamic per-city props (signal lamps + trams) */
+  dyn: THREE.Group;
+  signals: Signal[];
+  trams: Tram[];
+  tramPath: WorldPath | null;
+  stopD: number[];
+  boxes: CollisionBox[];
+}
+
+const MAX_CITIES = 4;
+
 export class Transit {
-  /** small collision boxes (signal poles, tram shelters) for the physics */
-  boxes: CollisionBox[] = [];
-  private signals: Signal[] = [];
-  private trams: Tram[] = [];
-  private tramPath: WorldPath | null = null;
-  private stopD: number[] = [];
+  private cities = new Map<string, CityInst>();
 
-  constructor(private scene: THREE.Scene, seed: number) {
-    const route = railRouteFor(seed);
-    const river = riverFor(seed);
-    const plan = cityPlanFor(seed);
-    const r = rng(chunkSeed(seed, 0x7b2, 9));
-    const B = new Baked();
-    let baked = 0;
+  constructor(private scene: THREE.Scene) {}
 
-    for (const st of plan.stations) { this.bakeStation(B, st, r); baked++; }
-    baked += this.bakeTrestles(B, route, river);
-    for (const c of plan.crossings) { this.makeCrossing(B, c); baked++; }
-    if (plan.tram) { this.buildTram(B, plan.tram); baked++; }
-
-    if (baked > 0) {
-      const mesh = B.build();
-      mesh.receiveShadow = true;
-      scene.add(mesh);
+  /** build this city's transit furniture if it's the first visit */
+  setCity(bx: number, by: number, ox: number, oz: number): void {
+    const key = `${bx},${by}`;
+    const have = this.cities.get(key);
+    if (have) {
+      this.cities.delete(key);
+      this.cities.set(key, have); // LRU touch
+      return;
+    }
+    this.buildCity(bx, by, ox, oz, key);
+    while (this.cities.size > MAX_CITIES) {
+      const oldest = this.cities.keys().next().value as string;
+      const inst = this.cities.get(oldest)!;
+      this.scene.remove(inst.mesh);
+      this.scene.remove(inst.dyn);
+      inst.mesh.geometry.dispose();
+      inst.dyn.traverse(o => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.geometry.dispose();
+      });
+      this.cities.delete(oldest);
     }
   }
 
+  private buildCity(bx: number, by: number, ox: number, oz: number, key: string): void {
+    const seed = citySeed(bx, by);
+    const route = railRouteFor(seed);
+    const river = riverFor(seed);
+    const plan = cityPlanFor(bx, by);
+    const r = rng(chunkSeed(seed, 0x7b2, 9));
+    const B = new Baked();
+    const inst: CityInst = {
+      ox, oz, mesh: null as unknown as THREE.Mesh, dyn: new THREE.Group(),
+      signals: [], trams: [], tramPath: null, stopD: [], boxes: [],
+    };
+    let baked = 0;
+    for (const st of plan.stations) { this.bakeStation(B, st, r, ox, oz, inst); baked++; }
+    baked += this.bakeTrestles(B, route, river, ox, oz);
+    for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; }
+    if (plan.tram) { this.buildTram(B, plan.tram, ox, oz, inst); baked++; }
+    if (baked > 0) {
+      inst.mesh = B.build();
+      inst.mesh.receiveShadow = true;
+      this.scene.add(inst.mesh);
+    } else {
+      inst.mesh = new THREE.Mesh(); // nothing to draw in this city
+    }
+    this.scene.add(inst.dyn);
+    this.cities.set(key, inst);
+  }
+
   // ---- station platform beside a straight stretch of the line ----
-  private bakeStation(B: Baked, st: Station, r: () => number): void {
+  private bakeStation(B: Baked, st: Station, r: () => number, ox: number, oz: number, inst: CityInst): void {
     const side = r() < 0.5 ? 1 : -1;
     const nx = Math.cos(st.h), nz = -Math.sin(st.h);   // right of travel
-    const px = st.x + nx * 3.5 * side, pz = st.z + nz * 3.5 * side;
+    const px = ox + st.x + nx * 3.5 * side, pz = oz + st.z + nz * 3.5 * side;
     B.box(3.4, 0.36, 15, WOOD, px, 0.28, pz, 0, st.h, 0);
     B.box(0.55, 0.05, 15, CREAM, px - nx * 1.5 * side, 0.48, pz - nz * 1.5 * side, 0, st.h, 0);
     // canopy posts + roof
@@ -83,14 +129,14 @@ export class Transit {
     B.cyl(0.55, 0.55, 0.08, 12, 0x4a90d9, sx + Math.sin(st.h) * 6.8, 2.5, sz + Math.cos(st.h) * 6.8, Math.PI / 2, st.h, 0);
     // platform collision: approximate AABB of the rotated deck
     const alongZ = Math.abs(Math.sin(st.h)) > Math.abs(Math.cos(st.h));
-    this.boxes.push({
+    inst.boxes.push({
       x1: px - (alongZ ? 1.8 : 7.8), x2: px + (alongZ ? 1.8 : 7.8),
       z1: pz - (alongZ ? 7.8 : 1.8), z2: pz + (alongZ ? 7.8 : 1.8),
     });
   }
 
   // ---- wooden trestle decks where the line crosses the water ----
-  private bakeTrestles(B: Baked, route: RailRoute, river: RiverRoute): number {
+  private bakeTrestles(B: Baked, route: RailRoute, river: RiverRoute, ox: number, oz: number): number {
     let decks = 0;
     const pts = route.pts;
     let k = 0;
@@ -103,7 +149,7 @@ export class Transit {
         end++;
       }
       const n = end - k;
-      const mx = sx / n, mz = sz / n;
+      const mx = ox + sx / n, mz = oz + sz / n;
       const mh = sh / n;
       const a = pts[k], b = pts[Math.min(pts.length - 1, end - 1)];
       const len = Math.hypot(b.x - a.x, b.z - a.z) + 3;
@@ -118,7 +164,7 @@ export class Transit {
   }
 
   // ---- level crossing: twin poles with a crossbuck and flashing lamps ----
-  private makeCrossing(B: Baked, c: Crossing): void {
+  private makeCrossing(B: Baked, c: Crossing, ox: number, oz: number, inst: CityInst): void {
     const alongX = c.axis === 'h'; // the street runs along X
     const ry = alongX ? Math.PI / 2 : 0;
     const lamps: THREE.Mesh[][] = [[], []];
@@ -126,7 +172,7 @@ export class Transit {
       ? [[c.x + 8.8, c.z + 8.2], [c.x - 8.8, c.z - 8.2]]
       : [[c.x + 8.2, c.z + 8.8], [c.x - 8.2, c.z - 8.8]];
     for (let i = 0; i < 2; i++) {
-      const [px, pz] = spots[i];
+      const px = ox + spots[i][0], pz = oz + spots[i][1];
       B.cyl(0.07, 0.09, 2.9, 8, STEEL, px, 1.45, pz);
       // white crossbuck facing down the street
       B.box(1.5, 0.22, 0.09, 0xfaf7ef, px, 2.75, pz, 0, ry + Math.PI / 4, 0);
@@ -135,46 +181,47 @@ export class Transit {
       for (const s of [-0.34, 0.34]) {
         const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), DIM_RED);
         lamp.position.set(px + (alongX ? s : 0), 2.2, pz + (alongX ? 0 : s));
-        this.scene.add(lamp);
+        inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }
-      this.boxes.push({ x1: px - 0.35, x2: px + 0.35, z1: pz - 0.35, z2: pz + 0.35, small: 1 });
+      inst.boxes.push({ x1: px - 0.35, x2: px + 0.35, z1: pz - 0.35, z2: pz + 0.35, small: 1 });
     }
-    this.signals.push({ a: lamps[0], b: lamps[1], c });
+    inst.signals.push({ a: lamps[0], b: lamps[1], c });
   }
 
   // ---- the tram: inset track down the boulevard centre + stops + vehicles ----
-  private buildTram(B: Baked, tram: TramPlan): void {
+  private buildTram(B: Baked, tram: TramPlan, ox: number, oz: number, inst: CityInst): void {
     const path = makePath(tram.pts, true);
-    this.tramPath = path;
+    inst.tramPath = path;
     for (let k = 0; k < path.pts.length; k++) {
       const p = path.pts[k], q = path.pts[(k + 1) % path.pts.length];
       const len = Math.hypot(q.x - p.x, q.z - p.z) + 0.7;
       const ry = Math.atan2(q.x - p.x, q.z - p.z);
       const rx = Math.cos(ry), rz = -Math.sin(ry);
-      B.box(3.4, 0.045, len, 0xdfd8c8, p.x, 0.126, p.z, 0, ry, 0);   // inset paving
+      B.box(3.4, 0.045, len, 0xdfd8c8, ox + p.x, 0.126, oz + p.z, 0, ry, 0);   // inset paving
       for (const s of [-0.78, 0.78]) {
-        B.box(0.13, 0.05, len, 0x8d939e, p.x + rx * s, 0.16, p.z + rz * s, 0, ry, 0);
+        B.box(0.13, 0.05, len, 0x8d939e, ox + p.x + rx * s, 0.16, oz + p.z + rz * s, 0, ry, 0);
       }
     }
     // sheltered stops
     for (const st of tram.stops) {
+      const sx = ox + st.x, sz = oz + st.z;
       for (const s of [-1.6, 1.6]) {
-        const px = st.x + Math.cos(st.ry) * s, pz = st.z - Math.sin(st.ry) * s;
-        B.cyl(0.08, 0.1, 2.7, 8, STEEL, px, 1.35, pz);
+        const px2 = sx + Math.cos(st.ry) * s, pz2 = sz - Math.sin(st.ry) * s;
+        B.cyl(0.08, 0.1, 2.7, 8, STEEL, px2, 1.35, pz2);
       }
-      B.box(4.4, 0.16, 2.0, CREAM, st.x, 2.75, st.z, 0, st.ry, 0);
-      B.box(3.2, 0.09, 0.45, 0xa9805a, st.x, 0.62, st.z, 0, st.ry, 0);
+      B.box(4.4, 0.16, 2.0, CREAM, sx, 2.75, sz, 0, st.ry, 0);
+      B.box(3.2, 0.09, 0.45, 0xa9805a, sx, 0.62, sz, 0, st.ry, 0);
       // amber stop sign between the shelter and the track
       const n0 = path.nearest(st.x, st.z);
       const sdx = n0.p.x - st.x, sdz = n0.p.z - st.z;
       const sdl = Math.hypot(sdx, sdz) || 1;
-      B.cyl(0.05, 0.07, 2.4, 8, STEEL, st.x + sdx / sdl * 2.4, 1.2, st.z + sdz / sdl * 2.4);
-      B.cyl(0.42, 0.42, 0.07, 12, 0xf6c952, st.x + sdx / sdl * 2.4, 2.35, st.z + sdz / sdl * 2.4, Math.PI / 2, 0, 0);
-      this.boxes.push({ x1: st.x - 1.1, x2: st.x + 1.1, z1: st.z - 1.1, z2: st.z + 1.1, small: 1 });
+      B.cyl(0.05, 0.07, 2.4, 8, STEEL, sx + sdx / sdl * 2.4, 1.2, sz + sdz / sdl * 2.4);
+      B.cyl(0.42, 0.42, 0.07, 12, 0xf6c952, sx + sdx / sdl * 2.4, 2.35, sz + sdz / sdl * 2.4, Math.PI / 2, 0, 0);
+      inst.boxes.push({ x1: sx - 1.1, x2: sx + 1.1, z1: sz - 1.1, z2: sz + 1.1, small: 1 });
     }
     // arc distance of each stop along the loop
-    this.stopD = tram.stops.map(st => {
+    inst.stopD = tram.stops.map(st => {
       const n = path.nearest(st.x, st.z);
       return (n.i / path.pts.length) * path.total;
     }).sort((a, b) => a - b);
@@ -185,26 +232,26 @@ export class Transit {
       const tram0: Tram = { obj: null, s: (i * path.total) / 2, v: 0, next: 0, hold: 0 };
       if (tpl) {
         const m = templateToMesh(tpl);
-        const mat = (m.material as THREE.MeshLambertMaterial).clone();
-        mat.color.setRGB(...tints[i]);
-        m.material = mat;
+        const matr = (m.material as THREE.MeshLambertMaterial).clone();
+        matr.color.setRGB(...tints[i]);
+        m.material = matr;
         m.geometry.scale(0.78, 0.78, 0.78);
         m.castShadow = true;
         m.position.y = 0.17;
-        this.scene.add(m);
+        inst.dyn.add(m);
         tram0.obj = m;
       }
-      tram0.next = this.nextStop(tram0.s);
-      this.trams.push(tram0);
+      tram0.next = this.nextStop(inst, tram0.s);
+      inst.trams.push(tram0);
     }
   }
 
-  private nextStop(s: number): number {
-    const path = this.tramPath;
-    if (!path || !this.stopD.length) return 0;
+  private nextStop(inst: CityInst, s: number): number {
+    const path = inst.tramPath;
+    if (!path || !inst.stopD.length) return 0;
     let best = 0, bestGap = Infinity;
-    for (let i = 0; i < this.stopD.length; i++) {
-      const g = ((this.stopD[i] - s) % path.total + path.total) % path.total;
+    for (let i = 0; i < inst.stopD.length; i++) {
+      const g = ((inst.stopD[i] - s) % path.total + path.total) % path.total;
       if (g < bestGap) { bestGap = g; best = i; }
     }
     return best;
@@ -216,46 +263,56 @@ export class Transit {
   }
 
   update(dt: number, elapsed: number, trains: Trains): void {
-    // crossing lamps: alternate flash while a train is near, dim otherwise
-    for (const sig of this.signals) {
-      const warn = this.blocked(sig.c, trains);
-      const phase = Math.floor(elapsed * 2.6) % 2;
-      for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
-      for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;
-    }
-    // trams: amble around the loop, dwelling at each shelter
-    const path = this.tramPath;
-    if (!path) return;
-    for (const t of this.trams) {
-      if (!t.obj) continue;
-      if (this.stopD.length) {
-        const gap = ((this.stopD[t.next] - t.s) % path.total + path.total) % path.total;
-        if (gap < 1.4) {
-          t.v = 0;
-          t.hold += dt;
-          if (t.hold >= 2.6) {
-            t.hold = 0;
-            t.next = (t.next + 1) % this.stopD.length;
+    for (const inst of this.cities.values()) {
+      // crossing lamps: alternate flash while a train is near, dim otherwise
+      for (const sig of inst.signals) {
+        const warn = this.blocked(sig.c, trains);
+        const phase = Math.floor(elapsed * 2.6) % 2;
+        for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
+        for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;
+      }
+      // trams: amble around the loop, dwelling at each shelter
+      const path = inst.tramPath;
+      if (!path) continue;
+      for (const t of inst.trams) {
+        if (!t.obj) continue;
+        if (inst.stopD.length) {
+          const gap = ((inst.stopD[t.next] - t.s) % path.total + path.total) % path.total;
+          if (gap < 1.4) {
+            t.v = 0;
+            t.hold += dt;
+            if (t.hold >= 2.6) {
+              t.hold = 0;
+              t.next = (t.next + 1) % inst.stopD.length;
+            }
+          } else {
+            const target = gap < 18 ? Math.max(0.4, gap * 0.45) : 6.5;
+            t.v += Math.max(-5 * dt, Math.min(2.5 * dt, target - t.v));
           }
         } else {
-          const target = gap < 18 ? Math.max(0.4, gap * 0.45) : 6.5;
-          t.v += Math.max(-5 * dt, Math.min(2.5 * dt, target - t.v));
+          t.v = 6.5;
         }
-      } else {
-        t.v = 6.5;
+        t.s += t.v * dt;
+        const p = path.sample(t.s);
+        t.obj.position.set(inst.ox + p.x, 0.17, inst.oz + p.z);
+        t.obj.rotation.y = p.h;
       }
-      t.s += t.v * dt;
-      const p = path.sample(t.s);
-      t.obj.position.set(p.x, 0.17, p.z);
-      t.obj.rotation.y = p.h;
     }
   }
 
-  /** debug probe */
+  /** static collision from every built city (signal poles, tram shelters) */
+  boxesNear(): CollisionBox[] {
+    const out: CollisionBox[] = [];
+    for (const inst of this.cities.values()) out.push(...inst.boxes);
+    return out;
+  }
+
+  /** debug probe (current focus: every built city) */
   list(): unknown {
-    return {
-      crossings: this.signals.map(s => ({ x: +s.c.x.toFixed(1), z: +s.c.z.toFixed(1), axis: s.c.axis })),
-      trams: this.trams.filter(t => t.obj).map(t => ({ x: +t.obj!.position.x.toFixed(1), z: +t.obj!.position.z.toFixed(1) })),
-    };
+    return [...this.cities.entries()].map(([key, inst]) => ({
+      key,
+      crossings: inst.signals.map(s => ({ x: +s.c.x.toFixed(1), z: +s.c.z.toFixed(1), axis: s.c.axis })),
+      trams: inst.trams.filter(t => t.obj).map(t => ({ x: +t.obj!.position.x.toFixed(1), z: +t.obj!.position.z.toFixed(1) })),
+    }));
   }
 }

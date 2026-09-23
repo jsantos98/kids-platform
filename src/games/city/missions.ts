@@ -36,12 +36,21 @@ export class Missions {
   index = 0;
   sFires = 0;
   sCats = 0;
+  /** world offset of the current city (junctions are picked in city-local
+   * coordinates, then shifted back out to the world) */
+  private ox = 0;
+  private oz = 0;
 
-  constructor(private scene: THREE.Scene, private seed: number, private CH: number,
+  constructor(private scene: THREE.Scene, private CH: number,
               private grid: RoadGrid, private heliMode = false) {}
 
+  setCity(ox: number, oz: number): void {
+    this.ox = ox;
+    this.oz = oz;
+  }
+
   spawn(player: PlayerXZ, forceChunkAt: (x: number, z: number) => void, forcedType?: ObjectiveType | null): void {
-    const r: Rng = rng(chunkSeed(this.seed, 5000 + this.index, 91));
+    const r: Rng = rng(chunkSeed(this.ox, this.oz, 5000 + this.index));
     const qType = new URLSearchParams(location.search).get('type');
     let type: ObjectiveType;
     if (forcedType) type = forcedType;
@@ -51,18 +60,20 @@ export class Missions {
     const diff = Math.min(this.sFires + this.sCats, 10);
     const dist = this.index === 0 ? 26 + r() * 10 : Math.min(90 + diff * 10, 240) + r() * 60;
     const a = this.index === 0 ? player.heading + 0.5 : r() * Math.PI * 2;
-    // pick the corner of a REAL intersection (golden-angle resampling)
+    // pick the corner of a REAL intersection (golden-angle resampling),
+    // in the current city's local coordinates
+    const lx = player.x - this.ox, lz = player.z - this.oz;
     let gx = 0, gz = 0;
     for (let attempt = 0; attempt < 24; attempt++) {
       const aa = a + attempt * 2.39996;
-      const px = player.x + Math.sin(aa) * dist, pz = player.z + Math.cos(aa) * dist;
+      const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
       gx = Math.round(px / this.CH) * this.CH;
       gz = Math.round(pz / this.CH) * this.CH;
       if (this.grid.cross(Math.round(gx / this.CH), Math.round(gz / this.CH))) break;
     }
     const corner = (r() * 2) | 0; // corners without traffic lights
-    const ox = corner ? -8.9 : 8.9, oz = corner ? 8.9 : -8.9;
-    const pos = new THREE.Vector3(gx + ox, 0.15, gz + oz);
+    const ox2 = corner ? -8.9 : 8.9, oz2 = corner ? 8.9 : -8.9;
+    const pos = new THREE.Vector3(gx + ox2 + this.ox, 0.15, gz + oz2 + this.oz);
     forceChunkAt(pos.x, pos.z);
     const need = type === 'patient' ? Math.min(2.5 + diff * 0.15, 4)
       : type === 'fire' ? Math.min(5.5 + diff * 0.3, 9)

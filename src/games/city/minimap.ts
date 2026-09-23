@@ -2,25 +2,37 @@
 // circuit, traffic-light state, missions and the player arrow. Drawn on a 2D
 // canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
-import { RoadGrid } from '../../worlds/roadGrid.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { racePath } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { citySeed } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
+import { STRAIT } from '../../worlds/cityGrid.js';
 import { BRIDGE } from './bridge.js';
 import type { Missions } from './missions.js';
 
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
 
+const CH = 64;           // chunk size (world metres)
 const SIZE = 256;        // canvas backing-store pixels
 const VIEW = ISLAND + 170; // world metres across (island + sea + bridge island)
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
 
-  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH: number, private seed: number,
+  private bx = 0;
+  private by = 0;
+  private ox = 0;
+  private oz = 0;
+
+  /** point the map at another island of the archipelago */
+  setCity(bx: number, by: number, ox: number, oz: number): void {
+    this.bx = bx; this.by = by; this.ox = ox; this.oz = oz;
+  }
+
+  constructor(canvas: HTMLCanvasElement, private missions: Missions,
               private seaBoats: () => Array<{ x: number; z: number }> = () => []) {
     canvas.width = SIZE;
     canvas.height = SIZE;
@@ -28,6 +40,9 @@ export class Minimap {
   }
 
   update(playerX: number, playerZ: number, heading: number, elapsed: number): void {
+    const plan = cityPlanFor(this.bx, this.by);
+    const seed = citySeed(this.bx, this.by);
+    const px = playerX - this.ox, pz = playerZ - this.oz; // city-local
     const ctx = this.ctx;
     const s = SIZE;
     const scale = s / VIEW;
@@ -39,30 +54,29 @@ export class Minimap {
     ctx.fillRect(0, 0, s, s);
     for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
       for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
-        ctx.fillStyle = hex(chunkGroundColor(this.seed, cx, cz));
-        ctx.fillRect(tx(cx * this.CH), ty(cz * this.CH), this.CH * scale, this.CH * scale);
+        ctx.fillStyle = hex(chunkGroundColor(this.bx, this.by, cx, cz));
+        ctx.fillRect(tx(cx * CH), ty(cz * CH), CH * scale, CH * scale);
       }
     }
 
     // streets: only the segments the plan kept open
-    const plan = cityPlanFor(this.seed);
     ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 12 * scale;
     ctx.beginPath();
     for (let j = 0; j <= 5; j++) for (let i = 0; i <= 5; i++) {
       if (plan.segH(j, i)) {
-        ctx.moveTo(tx(i * this.CH), ty(j * this.CH));
-        ctx.lineTo(tx((i + 1) * this.CH), ty(j * this.CH));
+        ctx.moveTo(tx(i * CH), ty(j * CH));
+        ctx.lineTo(tx((i + 1) * CH), ty(j * CH));
       }
       if (plan.segV(i, j)) {
-        ctx.moveTo(tx(i * this.CH), ty(j * this.CH));
-        ctx.lineTo(tx(i * this.CH), ty((j + 1) * this.CH));
+        ctx.moveTo(tx(i * CH), ty(j * CH));
+        ctx.lineTo(tx(i * CH), ty((j + 1) * CH));
       }
     }
     ctx.stroke();
 
     // the river, ribbon-width
-    const river = riverFor(this.seed);
+    const river = riverFor(seed);
     ctx.strokeStyle = '#5fadc9';
     ctx.lineWidth = 11 * scale;
     ctx.lineCap = 'round';
@@ -78,7 +92,7 @@ export class Minimap {
     ctx.strokeStyle = '#7a6248';
     ctx.lineWidth = 3.4 * scale;
     ctx.beginPath();
-    routePts(this.seed).forEach((p, k) => {
+    routePts(seed).forEach((p, k) => {
       const x = tx(p.x), y = ty(p.z);
       if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -118,6 +132,14 @@ export class Minimap {
     ctx.fillStyle = '#8f97a3';
     ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * scale, 42 * scale);
 
+    // causeways heading out to the four neighbouring cities
+    ctx.fillStyle = '#a9b0ba';
+    const stub = 60;
+    ctx.fillRect(tx(plan.exits.s * CH - 5.5), ty(ISLAND), 11 * scale, stub * scale);
+    ctx.fillRect(tx(plan.exits.n * CH - 5.5), ty(-stub), 11 * scale, stub * scale);
+    ctx.fillRect(tx(ISLAND), ty(plan.exits.e * CH - 5.5), stub * scale, 11 * scale);
+    ctx.fillRect(tx(-stub), ty(plan.exits.w * CH - 5.5), stub * scale, 11 * scale);
+
     // race circuit outline (world-fixed)
     ctx.strokeStyle = '#5a6474';
     ctx.lineWidth = 2.5;
@@ -136,7 +158,7 @@ export class Minimap {
         if (plan.roundabout(i, j)) {
           ctx.fillStyle = '#a4cf85';
           ctx.beginPath();
-          ctx.arc(tx(i * this.CH), ty(j * this.CH), 4, 0, Math.PI * 2);
+          ctx.arc(tx(i * CH), ty(j * CH), 4, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#fffdf8';
           ctx.lineWidth = 1.5;
@@ -146,18 +168,18 @@ export class Minimap {
         if (plan.plaza(i, j)) {
           ctx.fillStyle = '#f6c952';
           ctx.beginPath();
-          ctx.arc(tx(i * this.CH), ty(j * this.CH), 4.5, 0, Math.PI * 2);
+          ctx.arc(tx(i * CH), ty(j * CH), 4.5, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#fffdf8';
           ctx.lineWidth = 1.5;
           ctx.stroke();
           continue;
         }
-        if (!this.grid.cross(i, j)) continue;
+        if (!plan.signalized(i, j)) continue;
         const st = lightState(i, j, elapsed);
         ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
         ctx.beginPath();
-        ctx.arc(tx(i * this.CH), ty(j * this.CH), 3, 0, Math.PI * 2);
+        ctx.arc(tx(i * CH), ty(j * CH), 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -197,7 +219,7 @@ export class Minimap {
 
     // player arrow
     ctx.save();
-    ctx.translate(tx(playerX), ty(playerZ));
+    ctx.translate(tx(px), ty(pz));
     ctx.rotate(heading);
     ctx.fillStyle = '#e25c5c';
     ctx.strokeStyle = '#fffdf8';

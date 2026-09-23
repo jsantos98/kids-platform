@@ -12,9 +12,16 @@ import { raceTiles, tileCenter } from './racetrack.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
+import { citySeed } from './cityGrid.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
+import { STRAIT } from './cityGrid.js';
 
 export { WORLD_CHUNKS }; // re-exported for the game layer
+
+const CAUSEWAY_ASPHALT = 0x5f6771;
+const CAUSEWAY_DASH = 0xe8e4d8;
+const CAUSEWAY_CURB = 0xcfc9ba;
+const CAUSEWAY_CAP = 0x9a948a;
 
 export interface CollisionBox {
   x1: number; x2: number; z1: number; z2: number;
@@ -97,18 +104,19 @@ export function slabColor(d: District): number {
 }
 
 /** ground colour of a chunk (ocean blue outside the island) — for the minimap */
-export function chunkGroundColor(seed: number, cx: number, cz: number): number {
+export function chunkGroundColor(bx: number, by: number, cx: number, cz: number): number {
   if (cx < 0 || cz < 0 || cx >= WORLD_CHUNKS || cz >= WORLD_CHUNKS) return 0x6fb7d9;
-  return slabColor(cityPlanFor(seed).district(cx, cz));
+  return slabColor(cityPlanFor(bx, by).district(cx, cz));
 }
 
-export function generateCityChunk(seed: number, cx: number, cz: number): CityChunkResult {
+export function generateCityChunk(bx: number, by: number, cx: number, cz: number): CityChunkResult {
+  const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, cx, cz));
   const CH = 64, X0 = cx * CH, Z0 = cz * CH;
   const B = new Baked();
   const boxes: CollisionBox[] = [];
   const TPL = kenneyTPL();
-  const plan = cityPlanFor(seed);
+  const plan = cityPlanFor(bx, by);
   const rail = railRouteFor(seed);
   const river = riverFor(seed);
   const district = plan.district(cx, cz);
@@ -179,6 +187,39 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       const ax = b.x + (alongX ? s * 10.2 : 0);
       const az = b.z + (alongX ? 0 : s * 10.2);
       B.box(alongX ? 1.3 : hw * 2 + 6, 0.55, alongX ? hw * 2 + 6 : 1.3, BRIDGE_STEEL, ax, 0.28, az);
+    }
+  }
+
+  // ---- causeways to the neighbouring cities: each city draws its own south
+  // and east decks; the neighbours' decks land on our north/west shores ----
+  if (cz === WORLD_CHUNKS - 1 && cx === plan.exits.s) bakeCauseway(plan.exits.s * CH, 'v');
+  if (cx === WORLD_CHUNKS - 1 && cz === plan.exits.e) bakeCauseway(plan.exits.e * CH, 'h');
+
+  /** flush deck across the strait — flat physics can't arch, so parapets,
+   * fender piles and dashes do the looking (collision-free like the picnic
+   * causeway: splashing into the shallows is half the fun) */
+  function bakeCauseway(at: number, dir: 'h' | 'v'): void {
+    const start = ISLAND - 2, len = STRAIT + 8, mid = start + len / 2;
+    if (dir === 'v') {
+      B.box(11, 0.7, len, CAUSEWAY_ASPHALT, at, -0.25, mid);
+      for (let z = start + 3; z < start + len - 2; z += 4) B.box(0.25, 0.02, 1.8, CAUSEWAY_DASH, at, 0.11, z);
+      for (const side of [-1, 1]) {
+        B.box(0.4, 0.55, len, CAUSEWAY_CURB, at + side * 5.3, 0.375, mid);
+        B.box(0.55, 0.12, len, CAUSEWAY_CAP, at + side * 5.3, 0.71, mid);
+      }
+      for (let z = start + 6; z < start + len; z += 12) {
+        for (const side of [-1, 1]) B.box(0.7, 2, 0.7, 0x8a6a4a, at + side * 6.3, -0.6, z);
+      }
+    } else {
+      B.box(len, 0.7, 11, CAUSEWAY_ASPHALT, mid, -0.25, at);
+      for (let x = start + 3; x < start + len - 2; x += 4) B.box(1.8, 0.02, 0.25, CAUSEWAY_DASH, x, 0.11, at);
+      for (const side of [-1, 1]) {
+        B.box(len, 0.55, 0.4, CAUSEWAY_CURB, mid, 0.375, at + side * 5.3);
+        B.box(len, 0.12, 0.55, CAUSEWAY_CAP, mid, 0.71, at + side * 5.3);
+      }
+      for (let x = start + 6; x < start + len; x += 12) {
+        for (const side of [-1, 1]) B.box(0.7, 2, 0.7, 0x8a6a4a, x, -0.6, at + side * 6.3);
+      }
     }
   }
 

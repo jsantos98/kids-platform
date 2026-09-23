@@ -8,14 +8,10 @@ import { C } from '../engine/palette.js';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
+import { RoadGrid } from './roadGrid.js';
 
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
-
-/** Rail lines replace every 4th road grid line — the train shuttles along them. */
-export function isRailLine(index: number): boolean {
-  return (((index % 4) + 4) % 4) === 0;
-}
 
 // ---- Kenney kit placement helpers (models baked into chunk vertex-color meshes) ----
 const _km = new THREE.Matrix4();
@@ -89,14 +85,21 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   // base slab (sidewalk-level concrete everywhere; roads sit on top)
   B.box(CH, 0.1, CH, C.sidewalk, X0 + CH / 2, 0.05, Z0 + CH / 2);
 
-  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines.
-  // every 4th line is a RAIL corridor instead (the train shuttles along it),
-  // with level crossings where side roads pass over the rails.
+  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines — but
+  // only where the seeded road grid keeps them: some lines are missing, which
+  // breaks the lattice into irregular blocks. Every 4th line is a RAIL
+  // corridor instead (the train shuttles along it), with level crossings
+  // where side roads pass over the rails.
   // tile: road surface at model y=0, raised sidewalk strips to y=0.02 — at 10 m
   // scale the curbs stand 0.2 proud; sit the surface just above the slab top
+  const grid = new RoadGrid(seed);
   const TS = 10, TY = 0.11;
-  const railZ = isRailLine(cz); // south edge is rail
-  const railX = isRailLine(cx); // west edge is rail
+  const railZ = RoadGrid.isRail(cz);       // south edge is rail
+  const railX = RoadGrid.isRail(cx);       // west edge is rail
+  const roadS = !railZ && grid.hasZ(cz);   // south edge is road
+  const roadW = !railX && grid.hasX(cx);   // west edge is road
+  const roadE2 = grid.hasX(cx + 1) && !RoadGrid.isRail(cx + 1); // N-S road east of us
+  const roadN2 = grid.hasZ(cz + 1) && !RoadGrid.isRail(cz + 1); // E-W road north of us
   if (railZ) {
     // rail corridor along the south edge; ballast/sleepers pause where the
     // N-S side roads cross (rails only there, like a level crossing)
@@ -111,36 +114,69 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
     B.box(0.14, 0.1, CH, 0x9aa5b5, X0 - 0.75, 0.26, Z0 + CH / 2);
     B.box(0.14, 0.1, CH, 0x9aa5b5, X0 + 0.75, 0.26, Z0 + CH / 2);
   }
-  if (TPL.roadStraight && TPL.roadCrossroad && !railZ && !railX) {
-    // straight tiles fill the edge between the corner crossroad (which covers
-    // TS/2 into this chunk) and the neighbour's crossroad; the first slot is a
-    // crosswalk tile as the approach to the SW intersection
-    const n = Math.round((CH - TS) / TS);
-    const L = (CH - TS) / n;
-    for (let k = 0; k < n; k++) {
-      const c = TS / 2 + L / 2 + k * L;
-      const first = k === 0;
-      bakeModel(B, first && TPL.roadCrossing ? TPL.roadCrossing : TPL.roadStraight,
-        X0 + c, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
-      bakeModel(B, first && TPL.roadCrossing ? TPL.roadCrossing : TPL.roadStraight,
-        X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
+  if (TPL.roadStraight && TPL.roadCrossroad) {
+    // SW corner: crossroad where both streets meet, otherwise the surviving
+    // street runs straight through the corner
+    const corner = roadS && roadW ? 'cross' : roadS ? 'ew' : roadW ? 'ns' : 'none';
+    if (corner === 'cross') bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+    else if (corner === 'ew') bakeModel(B, TPL.roadStraight, X0, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
+    else if (corner === 'ns') bakeModel(B, TPL.roadStraight, X0, TY, Z0, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
+    if (roadS) {
+      // E-W straight slots + crosswalk tiles facing the intersections at each end
+      const n = Math.round((CH - TS) / TS);
+      const L = (CH - TS) / n;
+      for (let k = 1; k < n; k++) {
+        const c = TS / 2 + L / 2 + k * L;
+        bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
+      }
+      if (roadW) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
+        X0 + TS / 2 + L / 2, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
+      if (roadE2) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
+        X0 + CH - TS / 2 - L / 2, TY, Z0, ROAD_DASH_X, 1, [L, TS, TS]);
     }
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+    if (roadW) {
+      // N-S straight slots + crosswalk tiles facing the intersections at each end
+      const n = Math.round((CH - TS) / TS);
+      const L = (CH - TS) / n;
+      for (let k = 1; k < n; k++) {
+        const c = TS / 2 + L / 2 + k * L;
+        bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
+      }
+      if (roadS) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
+        X0, TY, Z0 + TS / 2 + L / 2, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
+      if (roadN2) bakeModel(B, TPL.roadCrossing ?? TPL.roadStraight,
+        X0, TY, Z0 + CH - TS / 2 - L / 2, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
+    }
   } else if (!railZ && !railX) {
-    B.box(CH + 9, 0.06, 9, C.road, X0 + CH / 2, 0.09, Z0);
-    B.box(9, 0.06, CH + 9, C.road, X0, 0.09, Z0 + CH / 2);
+    if (roadS) B.box(CH + 9, 0.06, 9, C.road, X0 + CH / 2, 0.09, Z0);
+    if (roadW) B.box(9, 0.06, CH + 9, C.road, X0, 0.09, Z0 + CH / 2);
   }
   // curbs + markings: procedural look only (the tiles carry their own)
   if (!(TPL.roadStraight && TPL.roadCrossroad) && !railZ && !railX) {
-    for (const cz of [Z0 - 4.7, Z0 + 4.7]) B.box(CH + 9, 0.16, 0.4, 0xd8d2c2, X0 + CH / 2, 0.12, cz);
-    for (const cxx of [X0 - 4.7, X0 + 4.7]) B.box(0.4, 0.16, CH + 9, 0xd8d2c2, cxx, 0.12, Z0 + CH / 2);
-    for (let d = 3; d < CH - 2; d += 3.6) {
-      if (d > 6.5) B.box(1.7, 0.02, 0.16, C.roadLine, X0 + d, 0.14, Z0);
-      if (d > 6.5) B.box(0.16, 0.02, 1.7, C.roadLine, X0, 0.14, Z0 + d);
+    if (roadS) {
+      for (const cz of [Z0 - 4.7, Z0 + 4.7]) B.box(CH + 9, 0.16, 0.4, 0xd8d2c2, X0 + CH / 2, 0.12, cz);
+      for (let d = 3; d < CH - 2; d += 3.6) {
+        if (d > 6.5) B.box(1.7, 0.02, 0.16, C.roadLine, X0 + d, 0.14, Z0);
+      }
+      for (let i = 0; i < 7; i++) {
+        B.box(2.6, 0.02, 0.55, C.roadLine, X0 + 6.8, 0.15, Z0 - 3.45 + i * 1.15);
+      }
     }
-    for (let i = 0; i < 7; i++) {
-      B.box(2.6, 0.02, 0.55, C.roadLine, X0 + 6.8, 0.15, Z0 - 3.45 + i * 1.15);
-      B.box(0.55, 0.02, 2.6, C.roadLine, X0 - 3.45 + i * 1.15, 0.15, Z0 + 6.8);
+    if (roadW) {
+      for (const cxx of [X0 - 4.7, X0 + 4.7]) B.box(0.4, 0.16, CH + 9, 0xd8d2c2, cxx, 0.12, Z0 + CH / 2);
+      for (let d = 3; d < CH - 2; d += 3.6) {
+        if (d > 6.5) B.box(0.16, 0.02, 1.7, C.roadLine, X0, 0.14, Z0 + d);
+      }
+      for (let i = 0; i < 7; i++) {
+        B.box(0.55, 0.02, 2.6, C.roadLine, X0 - 3.45 + i * 1.15, 0.15, Z0 + 6.8);
+      }
+    }
+  }
+  // traffic-light corners: only at real intersections (the working lights are
+  // dynamic objects added by the game)
+  if (grid.cross(cx, cz)) {
+    for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
+      boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }
   // traffic-light corners: the working lights are dynamic objects added by the

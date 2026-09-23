@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { makeCar } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
-import { isRailLine } from '../../worlds/cityChunk.js';
+import { RoadGrid } from '../../worlds/roadGrid.js';
 import { lightState, STOP_LINE } from './lights.js';
 
 const MODELS = [
@@ -27,7 +27,7 @@ const j0 = (r: () => number, amp: number) => (r() - 0.5) * 2 * amp;
 export class Traffic {
   private cars: TrafficCar[] = [];
 
-  constructor(private scene: THREE.Scene, private CH: number, count = 8, extraModels: string[] = []) {
+  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8, extraModels: string[] = []) {
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
@@ -45,11 +45,16 @@ export class Traffic {
     this.cars.forEach(c => this.respawn(c, new THREE.Vector3()));
   }
 
-  /** Move a car onto a road lane near the player (never on a rail line). */
+  /** Move a car onto a road lane near the player (never rails or dropped lines). */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
+    const axis0 = c.userData.axis === 0;
     let g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
-    if (isRailLine(Math.round(g / this.CH))) g += this.CH;
-    if (c.userData.axis === 0) {
+    let idx = Math.round(g / this.CH);
+    for (let tries = 0; tries < 4 && (RoadGrid.isRail(idx) || !(axis0 ? this.grid.hasZ(idx) : this.grid.hasX(idx))); tries++) {
+      g += this.CH;
+      idx += 1;
+    }
+    if (axis0) {
       c.position.set(player.x + j0(Math.random, 70), 0, g + 2.3 * c.userData.sign);
       c.rotation.y = c.userData.sign > 0 ? Math.PI / 2 : -Math.PI / 2;
     } else {
@@ -61,19 +66,33 @@ export class Traffic {
   update(dt: number, elapsed: number, player: THREE.Vector3): void {
     for (const c of this.cars) {
       let v = c.userData.speed;
-      const along = c.userData.axis === 0 ? c.position.x : c.position.z;
-      const grid = c.userData.sign > 0
-        ? Math.ceil((along + 0.01) / this.CH) * this.CH
-        : Math.floor((along - 0.01) / this.CH) * this.CH;
-      const dist = (grid - along) * c.userData.sign; // metres to the crossing centre
-      const ix = c.userData.axis === 0 ? Math.round(grid / this.CH) : Math.round(c.position.z / this.CH);
-      const iz = c.userData.axis === 0 ? Math.round(c.position.x / this.CH) : Math.round(grid / this.CH);
-      const st = lightState(ix, iz, elapsed);
-      const green = c.userData.axis === 0 ? st === 'ew' : st === 'ns';
-      const stopLine = STOP_LINE; // just before the crosswalk tile
-      if (!green && dist >= stopLine) v = Math.min(v, Math.max(0, (dist - stopLine) * 1.2));
-      if (c.userData.axis === 0) c.position.x += c.userData.sign * v * dt;
-      else c.position.z += c.userData.sign * v * dt;
+      const axis0 = c.userData.axis === 0;
+      const along = axis0 ? c.position.x : c.position.z;
+      const dir = c.userData.sign;
+
+      // next real intersection ahead (skips dropped lines and rail corridors)
+      let k = dir > 0 ? Math.ceil((along + 0.01) / this.CH) : Math.floor((along - 0.01) / this.CH);
+      let ix = 0, iz = 0, has = false;
+      for (let n = 0; n < 6; n++) {
+        const lineIdx = k + n * dir;
+        const ci = axis0 ? lineIdx : Math.round(c.position.x / this.CH);
+        const cj = axis0 ? Math.round(c.position.x / this.CH) : lineIdx;
+        if (this.grid.cross(ci, cj)) {
+          ix = ci; iz = cj;
+          has = true;
+          break;
+        }
+      }
+      if (has) {
+        const lineWorld = (axis0 ? ix : iz) * this.CH;
+        const dist = (lineWorld - along) * dir;
+        const st = lightState(ix, iz, elapsed);
+        const green = axis0 ? st === 'ew' : st === 'ns';
+        if (!green && dist >= STOP_LINE) v = Math.min(v, Math.max(0, (dist - STOP_LINE) * 1.2));
+      }
+
+      if (axis0) c.position.x += dir * v * dt;
+      else c.position.z += dir * v * dt;
       for (const w of (c.userData.wheels ?? [])) (w as THREE.Object3D).rotation.x += (v * dt) / 0.42;
       if (c.position.distanceTo(player) > 150) this.respawn(c, player);
     }

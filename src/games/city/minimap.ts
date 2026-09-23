@@ -1,6 +1,7 @@
 // Minimap: a small north-up map in the corner showing the road grid, fires,
 // cats, traffic-light state and the player's heading. Drawn on a 2D canvas.
 import { lightState } from './lights.js';
+import { RoadGrid } from '../../worlds/roadGrid.js';
 import type { Missions, Objective } from './missions.js';
 
 const SIZE = 256;         // canvas backing-store pixels
@@ -9,7 +10,7 @@ const RANGE = 180;        // world metres shown across (radius*2 window)
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
 
-  constructor(canvas: HTMLCanvasElement, private missions: Missions, private CH = 64) {
+  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH = 64) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
@@ -26,27 +27,43 @@ export class Minimap {
     ctx.fillStyle = '#e9e1cf';
     ctx.fillRect(0, 0, s, s);
 
-    // roads: the chunk grid lines, one 10 m road per line
+    // roads: the surviving grid lines (rails drawn tan, missing lines skipped)
     const k0 = Math.floor((px - RANGE) / this.CH);
     const k1 = Math.ceil((px + RANGE) / this.CH);
     const j0 = Math.floor((pz - RANGE) / this.CH);
     const j1 = Math.ceil((pz + RANGE) / this.CH);
-    ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 10 * scale;
     ctx.beginPath();
+    ctx.strokeStyle = '#8f97a3';
     for (let k = k0; k <= k1; k++) {
+      if (!this.grid.hasX(k)) continue;
       const x = tx(k * this.CH);
       ctx.moveTo(x, 0); ctx.lineTo(x, s);
     }
     for (let j = j0; j <= j1; j++) {
+      if (!this.grid.hasZ(j)) continue;
+      const y = ty(j * this.CH);
+      ctx.moveTo(0, y); ctx.lineTo(s, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#cbb894';
+    ctx.beginPath();
+    for (let k = k0; k <= k1; k++) {
+      if (!RoadGrid.isRail(k)) continue;
+      const x = tx(k * this.CH);
+      ctx.moveTo(x, 0); ctx.lineTo(x, s);
+    }
+    for (let j = j0; j <= j1; j++) {
+      if (!RoadGrid.isRail(j)) continue;
       const y = ty(j * this.CH);
       ctx.moveTo(0, y); ctx.lineTo(s, y);
     }
     ctx.stroke();
 
-    // traffic lights: one dot per intersection in view
+    // traffic lights: one dot per real intersection in view
     for (let k = k0; k <= k1; k++) {
       for (let j2 = j0; j2 <= j1; j2++) {
+        if (!this.grid.cross(k, j2)) continue;
         const st = lightState(k, j2, elapsed);
         ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
         ctx.beginPath();

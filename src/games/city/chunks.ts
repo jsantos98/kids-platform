@@ -4,6 +4,7 @@
 // traffic-light props for the intersection in the chunk's SW corner.
 import * as THREE from 'three';
 import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js';
+import { RoadGrid } from '../../worlds/roadGrid.js';
 import { lightState } from './lights.js';
 import { LAMP_MATS, makeTrafficLights } from './lampProps.js';
 
@@ -12,7 +13,7 @@ export interface Chunk {
   boxes: CollisionBox[];
   cx: number;
   cz: number;
-  lights: { group: THREE.Group; ew: THREE.Mesh[]; ns: THREE.Mesh[] };
+  lights: { group: THREE.Group; ew: THREE.Mesh[]; ns: THREE.Mesh[] } | null;
 }
 
 export class ChunkManager {
@@ -20,15 +21,16 @@ export class ChunkManager {
   private pending = new Set<string>();
   private queue: Array<[number, number, string]> = [];
 
-  constructor(private scene: THREE.Scene, private seed: number, private CH = 64, private VIEW_R = 3) {}
+  constructor(private scene: THREE.Scene, private seed: number, private grid: RoadGrid, private CH = 64, private VIEW_R = 3) {}
 
   addChunk(cx: number, cz: number): void {
     const key = cx + ',' + cz;
     if (this.chunks.has(key)) return;
     const { mesh, boxes } = generateCityChunk(this.seed, cx, cz);
     this.scene.add(mesh);
-    const lights = makeTrafficLights(cx * this.CH, cz * this.CH);
-    this.scene.add(lights.group);
+    // working lights only at real intersections
+    const lights = this.grid.cross(cx, cz) ? makeTrafficLights(cx * this.CH, cz * this.CH) : null;
+    if (lights) this.scene.add(lights.group);
     this.chunks.set(key, { mesh, boxes, cx, cz, lights });
   }
 
@@ -63,7 +65,7 @@ export class ChunkManager {
       if (Math.max(Math.abs(ch.cx - ccx), Math.abs(ch.cz - ccz)) > VIEW_R + 1) {
         this.scene.remove(ch.mesh);
         ch.mesh.geometry.dispose();
-        this.scene.remove(ch.lights.group);
+        if (ch.lights) this.scene.remove(ch.lights.group);
         this.chunks.delete(key);
       }
     }
@@ -85,6 +87,7 @@ export class ChunkManager {
   /** Sync every visible traffic light to its intersection's phase. */
   updateLights(elapsed: number): void {
     for (const ch of this.chunks.values()) {
+      if (!ch.lights) continue;
       const st = lightState(ch.cx, ch.cz, elapsed);
       const ewMat = st === 'ew' ? LAMP_MATS.green : st === 'ewY' ? LAMP_MATS.yellow : LAMP_MATS.red;
       const nsMat = st === 'ns' ? LAMP_MATS.green : st === 'nsY' ? LAMP_MATS.yellow : LAMP_MATS.red;

@@ -10,6 +10,7 @@ import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Train } from './train.js';
 import { PatrolHeli } from './patrol.js';
+import { RoadGrid } from '../../worlds/roadGrid.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
@@ -83,7 +84,8 @@ Object.assign(KITDEFS, {
 await prepBakedModels(KITDEFS).catch(() => {});
 
 // ---- chunk streaming ----
-const chunks = new ChunkManager(scene, P.seed);
+const roadGrid = new RoadGrid(P.seed);
+const chunks = new ChunkManager(scene, P.seed, roadGrid);
 chunks.ensure(9, spawn.x, spawn.z); // small starting ring synchronously
 
 // ---- water jet + steam (spray mini-scene visuals) ----
@@ -103,7 +105,7 @@ scene.add(ladderMod.getLadderMesh());
 
 // ---- missions ----
 const heliMode = P.vehicle === 'heli';
-const missions = new Missions(scene, P.seed, 64, heliMode);
+const missions = new Missions(scene, P.seed, 64, roadGrid, heliMode);
 const MAX_ACTIVE = 3;
 for (let i = 0; i < 3; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
 
@@ -115,7 +117,7 @@ if (q.get('spraytest') === '1') {
 
 // ---- traffic ----
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : []);
+const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : []);
 
 // ---- ambient life: the train shuttles the rail line; a patrol heli circles
 // the neighbourhood while the kid plays the fire truck ----
@@ -136,7 +138,7 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions);
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid);
 const hud = makeHUD();
 
 // ---- camera modes ----

@@ -63,8 +63,6 @@ function kenneyTPL() {
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
-    roadStraight: bakedModel('road-straight') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
-    roadCrossroad: bakedModel('road-crossroad') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
     raceStraight: bakedModel('race-straight'),
     raceCorner: bakedModel('race-corner'),
     raceFinish: bakedModel('race-finish'),
@@ -85,9 +83,7 @@ const RIVER_PATH = 0xd9cdb4;
 const BRIDGE_STEEL = 0x8f97a3;
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
-const ROAD_DASH_X = 0;
 const ROAD_HALF = 7;      // 14 m carriageway — roomy for little drivers
-const ROAD_SCALE = 1.4;   // kit tiles are 10 m wide; stretch across
 
 export function slabColor(d: District): number {
   switch (d) {
@@ -223,37 +219,50 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  // ---- wide streets: this chunk's south (z=Z0) and west (x=X0) edges ----
-  const TS = 10, TY = 0.11;
+  // ---- wide streets: this chunk's south (z=Z0) and west (x=X0) edges.
+  // Roads are flat procedural slabs in the same style as the strait
+  // causeways: a 14 m asphalt strip with centre dashes and low kerbs, tiled
+  // cell by cell so no two road pieces ever overlap. Junction nodes claim
+  // one plain square pad two cells across, and the runs leave their end
+  // cells out where a pad sits — kerbs and dashes stop at every corner ----
+  const TS = 64 / 6, TY = 0.11;
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
+  // junctions, L-corners and plazas claim a pad; straight-through nodes don't
+  const patchNode = (i: number, j: number): boolean => {
+    const a = plan.arms(i, j); // [west, east, north, south]
+    const n = a.filter(Boolean).length;
+    if (plan.plaza(i, j) || n >= 3) return true;
+    return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
+  };
+  const jSW = patchNode(cx, cz);
+  const jS = patchNode(cx + 1, cz); // south run's far node
+  const jW = patchNode(cx, cz + 1); // west run's far node
   for (let k = 0; k < 6; k++) {
     const c = TS / 2 + k * TS;
-    if (roadS) bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS * ROAD_SCALE]);
-    if (roadW) bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS * ROAD_SCALE]);
+    if (roadS && !((k === 0 && jSW) || (k === 5 && jS))) {
+      B.box(TS + 0.02, 0.04, 14, CAUSEWAY_ASPHALT, X0 + c, TY, Z0);
+      for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
+      for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
+    }
+    if (roadW && !((k === 0 && jSW) || (k === 5 && jW))) {
+      B.box(14, 0.04, TS + 0.02, CAUSEWAY_ASPHALT, X0, TY, Z0 + c);
+      for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
+      for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
+    }
   }
 
-  // ---- node tile at the chunk's SW corner (X0, Z0) ----
-  const a = plan.arms(cx, cz); // [west, east, north, south]
-  const armCount = a.filter(Boolean).length;
-  if (plan.plaza(cx, cz)) {
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]);
-    bakePlaza(X0, Z0);
-  } else if (armCount >= 3) {
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]);
-    if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
-  } else if (armCount === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) {
-    // straight-through node
-    const alongX = !!(a[0] && a[1]);
-    bakeModel(B, TPL.roadStraight, X0, TY, Z0, alongX ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS * ROAD_SCALE]);
-  } else if (armCount === 2) {
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]); // L-corner
+  // ---- node pad at the chunk's SW corner (X0, Z0) ----
+  if (jSW) {
+    B.box(TS * 2, 0.04, TS * 2, CAUSEWAY_ASPHALT, X0, TY, Z0);
+    if (plan.plaza(cx, cz)) bakePlaza(X0, Z0);
+    else if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
   }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
   // chunks only keep their corner collision boxes
   if (plan.signalized(cx, cz)) {
-    for (const [tx, tz] of [[X0 + 8.4, Z0 + 8.4], [X0 - 8.4, Z0 - 8.4]]) {
+    for (const [tx, tz] of [[X0 + 12.5, Z0 + 12.5], [X0 - 12.5, Z0 - 12.5]]) {
       boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }

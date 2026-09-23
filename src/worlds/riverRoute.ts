@@ -33,6 +33,10 @@ export interface RiverRoute {
 // module-level cache per seed
 const cache = new Map<number, RiverRoute>();
 
+/** test/audit hook: rivers are cached per seed, so switching the city base
+ * seed requires a flush or stale rivers come back */
+export function clearRiverCache(): void { cache.clear(); }
+
 export function riverFor(seed: number): RiverRoute {
   let rv = cache.get(seed);
   if (!rv) {

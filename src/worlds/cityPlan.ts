@@ -142,6 +142,10 @@ const W = WORLD_CHUNKS;
 const key = (a: number, b: number) => `${a},${b}`;
 const cache = new Map<string, CityPlan>();
 
+/** test/audit hook: plans are cached per cell, so switching the city base
+ * seed requires a flush or stale cities come back */
+export function clearCityPlanCache(): void { cache.clear(); }
+
 export function cityPlanFor(bx: number, by: number): CityPlan {
   const k = `${bx},${by}`;
   let plan = cache.get(k);
@@ -231,12 +235,14 @@ function buildPlan(bx: number, by: number): CityPlan {
   // ---- 2. districts core: nature corners, park, downtown ----
   const grid: District[][] = Array.from({ length: W }, () => Array<District>(W).fill('urban'));
   for (const [cx, cz] of raceChunks()) grid[cx][cz] = 'race';
-  const kinds = [['forest', 'desert', 'meadow'], ['desert', 'meadow', 'forest'], ['meadow', 'forest', 'desert']][(r() * 3) | 0];
-  // three 3×3 nature corners (SW, NE, NW)
+  // each nature corner rolls its own biome (and occasionally stays city) —
+  // a forest-seeded city next to a desert-seeded one reads as a different world
+  const KINDS: District[] = ['forest', 'desert', 'meadow'];
   const corners: Array<[number, number]> = [[0, 0], [W - 3, 0], [0, W - 3]];
-  corners.forEach(([bx, bz], n) => {
+  corners.forEach(([bx, bz]) => {
+    const kind: District = r() < 0.18 ? 'urban' : KINDS[(r() * 3) | 0];
     for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) {
-      grid[bx + dx][bz + dz] = kinds[n] as District;
+      grid[bx + dx][bz + dz] = kind;
     }
   });
   // a park next to downtown, then downtown = the central chunk left over

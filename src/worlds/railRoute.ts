@@ -51,6 +51,10 @@ function inRaceZone(x: number, z: number): boolean {
 // baker, the city plan and the trains all ask for it
 const cache = new Map<string, RailRoute>();
 
+/** test/audit hook: routes are cached per cell, so switching the city base
+ * seed requires a flush or stale cities come back */
+export function clearRailCache(): void { cache.clear(); }
+
 export function railRouteFor(bx: number, by: number): RailRoute {
   const key = `${bx},${by}`;
   let route = cache.get(key);
@@ -278,14 +282,18 @@ function tryRoute(
 ): Attempt | null {
   const CX = CENTER, CZ = CENTER;
   const n = 10 + ((r() * 4) | 0);
-  const base = ISLAND * (0.32 + r() * 0.06);
+  const base = ISLAND * (0.3 + r() * 0.1);
+  // per-axis radii: some rings run oval, some near-circular — a visible
+  // silhouette difference between seeds on the minimap
+  const radX = base * (0.88 + 0.24 * r());
+  const radZ = base * (0.88 + 0.24 * r());
   const ph1 = r() * Math.PI * 2, ph2 = r() * Math.PI * 2;
   const control: Array<{ x: number; z: number }> = [];
   for (let k = 0; k < n; k++) {
     const th = (k / n) * Math.PI * 2;
-    const rad = base * (0.82 + 0.36 * r());
-    let x = CX + Math.cos(th) * rad * (1 + 0.24 * Math.sin(th + ph1));
-    let z = CZ + Math.sin(th) * rad * (1 + 0.24 * Math.sin(th + ph2));
+    const rad = 0.82 + 0.36 * r();
+    let x = CX + Math.cos(th) * radX * rad * (1 + 0.24 * Math.sin(th + ph1));
+    let z = CZ + Math.sin(th) * radZ * rad * (1 + 0.24 * Math.sin(th + ph2));
     x = Math.max(44, Math.min(ISLAND - 44, x));
     z = Math.max(44, Math.min(ISLAND - 44, z));
     // duck inside around the race corner: pull toward the centre while the

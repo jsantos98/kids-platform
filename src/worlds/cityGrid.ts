@@ -25,9 +25,12 @@ export function citySeed(bx: number, by: number): number {
 export function streetLinesFor(bx: number, by: number): { H: number[]; V: number[] } {
   const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, 0x511e, 0));
+  // per-city street density: sparse towns and dense grids are both valid
+  // rolls, so neighbouring seeds visibly differ in how built-up they read
+  const keep = 0.38 + 0.34 * r();
   const pick = (): number[] => {
     const out: number[] = [];
-    for (let l = 1; l < WORLD_CHUNKS; l++) if (r() < 0.55) out.push(l);
+    for (let l = 1; l < WORLD_CHUNKS; l++) if (r() < keep) out.push(l);
     return out;
   };
   const H = pick();

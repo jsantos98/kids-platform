@@ -2,10 +2,18 @@
 // Run: npx tsx tools/audit-world.ts [baseSeed]
 // Every check maps to a rule in AGENTS.md; a FAIL means the change that
 // caused it must be fixed before commit.
-import { setCityBase, citySeed } from '../src/worlds/cityGrid.js';
-import { cityPlanFor } from '../src/worlds/cityPlan.js';
-import { railRouteFor } from '../src/worlds/railRoute.js';
-import { occupancyFor, ROAD, RAIL, RIVER, LOT, PLAZA, TRAM } from '../src/worlds/grid.js';
+import { setCityBase, citySeed, streetLinesFor } from '../src/worlds/cityGrid.js';
+import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
+import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
+import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, TRAM } from '../src/worlds/grid.js';
+import { clearRiverCache } from '../src/worlds/riverRoute.js';
+
+const clearAllWorldCaches = (): void => {
+  clearCityPlanCache();
+  clearRailCache();
+  clearOccupancyCache();
+  clearRiverCache();
+};
 
 const W = 14;
 const baseSeed = Number(process.argv[2] ?? 4242) | 0;
@@ -167,6 +175,55 @@ if (worstLot < 15.5) fail('R9', `lot centre only ${worstLot.toFixed(1)} m from t
 if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road cells — a trestle shares the water with a road bridge`);
 if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
 if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
+
+// R25: neighbouring base seeds must produce significantly DIFFERENT cities.
+// The hash tail used to leave adjacent integers partially correlated, and
+// the fixed macro layout (same line odds, same corner biomes, same ring
+// band) made every roll read alike. Thresholds sit far above measured
+// cross-seed values (lineJ 0.29-0.81, segJ 0.18-0.63, districtJ 0.36-0.62,
+// railNN 33-88 m) and far below clone values (1/1/1/0 m).
+const jac = (a: Set<string>, b: Set<string>): number => {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter || 1);
+};
+const fingerprint = (bx: number, by: number) => {
+  const { H, V } = streetLinesFor(bx, by);
+  const plan = cityPlanFor(bx, by);
+  const route = railRouteFor(bx, by);
+  const segs = new Set<string>();
+  for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs.add(`h${j},${i}`);
+  for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs.add(`v${i},${j}`);
+  const dists = new Set<string>();
+  for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) dists.add(`${cx},${cz}:${plan.district(cx, cz)}`);
+  return { H: new Set(H.map(String)), V: new Set(V.map(String)), segs, dists, rail: route.pts };
+};
+for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] as Array<[number, number]>) {
+  for (const [bx, by] of [[0, 0], [1, 1]] as Array<[number, number]>) {
+    setCityBase(sa); clearAllWorldCaches();
+    const A = fingerprint(bx, by);
+    setCityBase(sb); clearAllWorldCaches();
+    const B = fingerprint(bx, by);
+    setCityBase(baseSeed); clearAllWorldCaches();
+    const lineJ = (jac(A.H, B.H) + jac(A.V, B.V)) / 2;
+    const segJ = jac(A.segs, B.segs);
+    const distJ = jac(A.dists, B.dists);
+    let nn = 0, cnt = 0;
+    for (let k = 0; k < A.rail.length; k += 5) {
+      const p = A.rail[k];
+      let best = Infinity;
+      for (const q of B.rail) {
+        const d = Math.hypot(p.x - q.x, p.z - q.z);
+        if (d < best) best = d;
+      }
+      nn += best; cnt++;
+    }
+    nn /= cnt;
+    if (lineJ > 0.88 || segJ > 0.75 || distJ > 0.8 || nn < 15) {
+      fail('R25', `seeds ${sa} and ${sb} look alike on city (${bx},${by}): lineJ ${lineJ.toFixed(2)}, segJ ${segJ.toFixed(2)}, districtJ ${distJ.toFixed(2)}, railNN ${nn.toFixed(1)} m`);
+    }
+  }
+}
 
 console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} crossings, ` +
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +

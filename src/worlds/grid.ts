@@ -108,6 +108,10 @@ export interface Occupancy extends CityGrid {
 }
 
 const cache = new Map<string, Occupancy>();
+
+/** test/audit hook: occupancy caches are keyed by cell only, so switching
+ * the city base seed requires a flush or stale cities come back */
+export function clearOccupancyCache(): void { cache.clear(); }
 const CACHE_MAX = 6;
 
 export function occupancyFor(bx: number, by: number): Occupancy {

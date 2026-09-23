@@ -17,12 +17,19 @@ export function rng(seed: number): Rng {
 // is folded in through its own imul avalanche: a plain XOR of multiplied
 // terms mapped opposite corners onto each other (imul(-1,A)^imul(-1,B)
 // equals imul(1,A)^imul(1,B) for those constants, so city (-1,-1) and city
-// (1,1) came out identical).
+// (1,1) came out identical). The tail is murmur3's fmix32: multiplication
+// alone keeps the low bits linear in the seed, so adjacent seeds (7 vs 8)
+// stayed partially correlated through the chain — the finaliser fully
+// avalanches, and neighbouring seeds hash independently.
 export function chunkSeed(seed: number, cx: number, cz: number): number {
   let h = Math.imul(seed | 0, 0x9e3779b1) ^ 0x85ebca6b;
   h = Math.imul(h ^ (cx | 0), 0xc2b2ae35);
   h ^= h >>> 13;
   h = Math.imul(h ^ (cz | 0), 0x27d4eb2f);
+  h ^= h >>> 16;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
   h ^= h >>> 16;
   return h >>> 0;
 }

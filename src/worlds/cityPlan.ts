@@ -12,16 +12,19 @@
 //      (and where the railway would run alongside them), anything disconnected
 //      is pruned. Streets the railway crosses head-on are pinned open: every
 //      seed gets level crossings with working signals
-//   4. districts finish: an industrial blob near the railway, streetless urban
-//      blocks become green
-//   5. the tram: a rectangle of streets ringing downtown is reserved, with a
+//   4. the tram: a rectangle of streets ringing downtown is reserved, with a
 //      stop on each of its four sides
-//   6. junctions: ≥3 street arms → traffic lights, unless the junction became
+//   5. no dead ends: every street tip that doesn't meet a cross street is
+//      trimmed back until it does — roads always connect to the network. The
+//      only sanctioned loose ends are the four causeway mouths on the shore
+//   6. districts finish: an industrial blob near the railway, streetless urban
+//      blocks become green
+//   7. junctions: ≥3 street arms → traffic lights, unless the junction became
 //      a roundabout or a paved plaza; road×rail crossings and road×river
 //      bridge spans are recorded where the corridors meet the streets
-//   7. lots: along every street segment, both sides, with proper setbacks;
+//   8. lots: along every street segment, both sides, with proper setbacks;
 //      anything too close to the railway or the river stays clear
-//   8. two train stations on straight, quiet stretches of the line
+//   9. two train stations on straight, quiet stretches of the line
 //
 // Consumers: cityChunk (roads, plazas, lamps, lots, nature, the river bed),
 // the traffic lights (via RoadGrid), traffic + pedestrians (street lines),
@@ -261,7 +264,47 @@ function buildPlan(bx: number, by: number): CityPlan {
   }
   const exits: CityExits = { n: exN, s: exS, w: exW, e: exE };
 
-  // ---- 4. districts finish: industrial near the railway, green fillers ----
+  // ---- 4. the tram: reserve a rectangle of streets around downtown.
+  // Score every candidate perimeter by how many of its segments are already
+  // open (and whether the railway shadows a side), pin the best one open.
+  // Its closed ring anchors every one of its corners, so it never dangles. ----
+  const tram = reserveTram(downtown[0], downtown[1], rail, segHSet, segVSet, r, railRunsAlong);
+
+  // ---- 5. no dead ends: a road may only stop where it meets a cross street.
+  // Any degree-1 node that isn't a causeway mouth gives up its street, which
+  // can expose a new tip further back — repeat until every street either
+  // reaches an intersection or is gone. Roads that ran onto the beach and the
+  // stubs left by the random drops all dissolve into the blocks around them. ----
+  {
+    const deg = (i: number, j: number): number =>
+      (segHSet.has(key(j, i - 1)) ? 1 : 0) + (segHSet.has(key(j, i)) ? 1 : 0) +
+      (segVSet.has(key(i, j - 1)) ? 1 : 0) + (segVSet.has(key(i, j)) ? 1 : 0);
+    const tip = new Set([key(exN, 0), key(exS, W), key(0, exW), key(W, exE)]);
+    const queue: Array<[number, number]> = [];
+    const seedNode = (i: number, j: number): void => {
+      if (!tip.has(key(i, j)) && deg(i, j) === 1) queue.push([i, j]);
+    };
+    for (const k of segHSet) {
+      const [j, i] = k.split(',').map(Number);
+      seedNode(i, j); seedNode(i + 1, j);
+    }
+    for (const k of segVSet) {
+      const [i, j] = k.split(',').map(Number);
+      seedNode(i, j); seedNode(i, j + 1);
+    }
+    while (queue.length) {
+      const [i, j] = queue.pop()!;
+      if (deg(i, j) !== 1 || tip.has(key(i, j))) continue;
+      if (segHSet.has(key(j, i - 1))) segHSet.delete(key(j, i - 1));
+      else if (segHSet.has(key(j, i))) segHSet.delete(key(j, i));
+      else if (segVSet.has(key(i, j - 1))) segVSet.delete(key(i, j - 1));
+      else segVSet.delete(key(i, j));
+      // whichever node lost a segment may now dangle itself — re-check it
+      queue.push([i - 1, j], [i + 1, j], [i, j - 1], [i, j + 1]);
+    }
+  }
+
+  // ---- 6. districts finish: industrial near the railway, green fillers ----
   const frontage = (cx: number, cz: number): boolean =>
     segH(cz, cx) || segH(cz + 1, cx) || segV(cx, cz) || segV(cx + 1, cz);
   const nearRail = (cx: number, cz: number): boolean =>
@@ -300,12 +343,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   const district = (cx: number, cz: number): District =>
     cx < 0 || cz < 0 || cx >= W || cz >= W ? 'urban' : grid[cx][cz];
 
-  // ---- 5. the tram: reserve a rectangle of streets around downtown.
-  // Score every candidate perimeter by how many of its segments are already
-  // open (and whether the railway shadows a side), pin the best one open. ----
-  const tram = reserveTram(downtown[0], downtown[1], rail, segHSet, segVSet, r, railRunsAlong);
-
-  // ---- 6. junction styles + corridor crossings ----
+  // ---- 7. junction styles + corridor crossings ----
   const arms = (i: number, j: number): boolean[] => {
     const w = segH(j, i - 1), e = segH(j, i), n = segV(i, j - 1), s = segV(i, j);
     return [w, e, n, s].filter(Boolean);
@@ -411,7 +449,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   const signalized = (i: number, j: number) =>
     armsCount(i, j) >= 3 && !roundabout(i, j) && !plaza(i, j);
 
-  // ---- 7. lots along every street segment, both sides ----
+  // ---- 8. lots along every street segment, both sides ----
   const lots: Lot[] = [];
   const lotsByChunk = new Map<string, Lot[]>();
   const addLot = (lot: Lot): void => {
@@ -483,7 +521,7 @@ function buildPlan(bx: number, by: number): CityPlan {
     }
   }
 
-  // ---- 8. train stations: straight, quiet stretches away from crossings
+  // ---- 9. train stations: straight, quiet stretches away from crossings
   // and the river ----
   const stations: Station[] = [];
   {

@@ -35,6 +35,8 @@ interface TrafficCar extends THREE.Group {
 /** right-hand perpendicular of the travel direction (screen coords: +z south) */
 const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz, z: hx });
 
+const camDir = new THREE.Vector3();
+
 export class Traffic {
   private cars: TrafficCar[] = [];
   /** segment key "fx,fz,tx,tz" → level crossings on it */
@@ -44,7 +46,8 @@ export class Traffic {
   private oz = 0;
 
   constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 12,
-              extraModels: string[] = [], private trains: Trains | null = null) {
+              extraModels: string[] = [], private trains: Trains | null = null,
+              private camera?: THREE.Camera) {
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
@@ -80,12 +83,31 @@ export class Traffic {
     for (const c of this.cars) this.respawn(c, player);
   }
 
-  /** Move a car onto an open street segment near the player (city-local). */
+  /** would a car at world (x, z) be on camera? Roughly the camera's forward
+   * hemisphere inside the fog line — anything behind it or beyond the fog is
+   * a safe place to appear. */
+  private inSight(x: number, z: number): boolean {
+    if (!this.camera) return false;
+    this.camera.getWorldDirection(camDir);
+    const dx = x - this.camera.position.x, dz = z - this.camera.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 30) return true;    // right on top of the camera
+    if (dist > 170) return false;  // beyond the fog line
+    const fl = Math.hypot(camDir.x, camDir.z) || 1;
+    const dot = (dx * camDir.x + dz * camDir.z) / (dist * fl);
+    return dot > -0.2;
+  }
+
+  /** Move a car onto an open street segment near the player (city-local),
+   * NEVER on camera: out-of-sight candidates win, and only when 24 draws
+   * produce none does the farthest in-fog candidate fall through. */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
     const ai = c.userData.ai;
     const lx = player.x - this.ox, lz = player.z - this.oz;
     const pi = Math.round(lx / this.CH), pj = Math.round(lz / this.CH);
-    for (let tries = 0; tries < 12; tries++) {
+    let best: [number, number, number, number, number] | null = null;
+    let bestDist = -1;
+    for (let tries = 0; tries < 24; tries++) {
       const i = Math.max(0, Math.min(WORLD_CHUNKS - 1, pi + ((Math.random() * 5) | 0) - 2));
       const j = Math.max(0, Math.min(WORLD_CHUNKS - 1, pj + ((Math.random() * 5) | 0) - 2));
       const opts: Array<[number, number]> = [];
@@ -95,11 +117,31 @@ export class Traffic {
       if (this.grid.segV(i, j - 1)) opts.push([i, j - 1]);
       if (!opts.length) continue;
       const [tx, tz] = opts[(Math.random() * opts.length) | 0];
-      ai.fx = i; ai.fz = j; ai.tx = tx; ai.tz = tz;
-      ai.t = Math.random() * 0.7;
+      const t = Math.random() * 0.7;
+      // world position this placement would put the car at (right lane)
+      const hx = Math.sign(tx - i), hz = Math.sign(tz - j);
+      const r = rightOf(hx, hz);
+      const wx = this.ox + i * this.CH + (tx - i) * this.CH * t + r.x * LANE;
+      const wz = this.oz + j * this.CH + (tz - j) * this.CH * t + r.z * LANE;
+      const dp = Math.hypot(wx - player.x, wz - player.z);
+      if (dp > 190 || dp < 25) continue; // keep the fleet in the active ring
+      // no ghost stacks: keep clear of the rest of the fleet
+      let crowded = false;
+      for (const o of this.cars) {
+        if (o !== c && Math.hypot(o.position.x - wx, o.position.z - wz) < 14) { crowded = true; break; }
+      }
+      if (crowded) continue;
+      if (!this.inSight(wx, wz)) {
+        ai.fx = i; ai.fz = j; ai.tx = tx; ai.tz = tz; ai.t = t; ai.v = ai.speed;
+        this.place(c, ai);
+        return;
+      }
+      if (dp > bestDist) { best = [i, j, tx, tz, t]; bestDist = dp; }
+    }
+    if (best) { // everything drawn was on camera — the fog covers the farthest
+      ai.fx = best[0]; ai.fz = best[1]; ai.tx = best[2]; ai.tz = best[3]; ai.t = best[4];
       ai.v = ai.speed;
       this.place(c, ai);
-      return;
     }
   }
 

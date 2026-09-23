@@ -220,7 +220,7 @@ if (q.get('spraytest') === '1') {
 const trains = new Trains(scene, 0, 0);
 const transit = new Transit(scene);
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains);
+const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -255,7 +255,8 @@ const pickTpl = (n: string) => {
 };
 const pedestrians = new Pedestrians(scene, roadGrid, 64, 14,
   PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
-  PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t));
+  PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
+  camera);
 // dev probe: current pedestrian spots (via console/window)
 (window as unknown as { __peds: () => unknown }).__peds = () => pedestrians.list();
 

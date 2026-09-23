@@ -26,6 +26,8 @@ interface Ped {
 /** kit characters are ~0.7 units tall; scale them to villager height (~1.6 m) */
 const PED_SCALE = 2.2;
 
+const camDir = new THREE.Vector3();
+
 export class Pedestrians {
   private peds: Ped[] = [];
   /** world offset of the city the locals are strolling in */
@@ -40,7 +42,8 @@ export class Pedestrians {
   }
 
   constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number,
-              count = 14, petTpls: BakedTemplate[] = [], peopleTpls: BakedTemplate[] = []) {
+              count = 14, petTpls: BakedTemplate[] = [], peopleTpls: BakedTemplate[] = [],
+              private camera?: THREE.Camera) {
     // distinct bodies shared across the pedestrians: Kenney mini-characters
     // when available, procedural villagers otherwise
     const variants: Array<{ geo: THREE.BufferGeometry; mat: THREE.Material }> = [];
@@ -77,10 +80,27 @@ export class Pedestrians {
     }
   }
 
-  /** Place a pedestrian or pet on a sidewalk of a real street near (px, pz). */
+  /** would a body at world (x, z) be on camera? Same rule as the traffic
+   * fleet: behind the camera's forward hemisphere or beyond the fog is safe. */
+  private inSight(x: number, z: number): boolean {
+    if (!this.camera) return false;
+    this.camera.getWorldDirection(camDir);
+    const dx = x - this.camera.position.x, dz = z - this.camera.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 25) return true;
+    if (dist > 140) return false;
+    const fl = Math.hypot(camDir.x, camDir.z) || 1;
+    const dot = (dx * camDir.x + dz * camDir.z) / (dist * fl);
+    return dot > -0.2;
+  }
+
+  /** Place a pedestrian or pet on a sidewalk of a real street near (px, pz),
+   * never on camera. */
   respawn(p: Ped, px: number, pz: number): void {
     const lx = px - this.ox, lz = pz - this.oz;
-    for (let tries = 0; tries < 12; tries++) {
+    let best: [boolean, number, number, number] | null = null;
+    let bestDist = -1;
+    for (let tries = 0; tries < 20; tries++) {
       const alongX = Math.random() < 0.5;
       const base = Math.round((alongX ? lz : lx) / this.CH);
       const idx = Math.min(WORLD_CHUNKS - 1, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
@@ -91,21 +111,32 @@ export class Pedestrians {
       // the line must actually have a street segment at this stretch
       const seg = Math.min(WORLD_CHUNKS - 2, Math.max(0, Math.floor(along / this.CH)));
       if (!(alongX ? this.grid.segH(idx, seg) : this.grid.segV(idx, seg))) continue;
-      p.alongX = alongX;
-      p.idx = idx;
-      p.dir = Math.random() < 0.5 ? -1 : 1;
-      p.speed = 0.8 + Math.random() * 0.6;
-      p.phase = Math.random() * 10;
       const sx = alongX ? along : idx * this.CH + offset;
       const sz = alongX ? idx * this.CH + offset : along;
       // sidewalks run right past building fronts — the occupancy grid says
       // whether this stretch of pavement is inside someone's front yard
       const city = cityAt(this.ox + sx + 0.5, this.oz + sz + 0.5);
       if (occupancyFor(city.bx, city.by).claims(sx, sz, 0.5, LOT)) continue;
-      p.mesh.position.set(this.ox + sx, 0.1, this.oz + sz);
-      p.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
-      return;
+      const dp = Math.hypot(sx + this.ox - px, sz + this.oz - pz);
+      if (dp > 130 || dp < 18) continue; // keep the crowd in the active ring
+      if (!this.inSight(this.ox + sx, this.oz + sz)) {
+        this.place(p, alongX, idx, sx, sz);
+        return;
+      }
+      if (dp > bestDist) { best = [alongX, idx, sx, sz]; bestDist = dp; }
     }
+    if (best) this.place(p, best[0], best[1], best[2], best[3]);
+  }
+
+  /** commit a candidate placement (position, stroll direction and pace) */
+  private place(p: Ped, alongX: boolean, idx: number, sx: number, sz: number): void {
+    p.alongX = alongX;
+    p.idx = idx;
+    p.dir = Math.random() < 0.5 ? -1 : 1;
+    p.speed = 0.8 + Math.random() * 0.6;
+    p.phase = Math.random() * 10;
+    p.mesh.position.set(this.ox + sx, 0.1, this.oz + sz);
+    p.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
   }
 
   update(dt: number, truckX: number, truckZ: number, px: number, pz: number): void {

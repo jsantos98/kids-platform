@@ -3,6 +3,7 @@
 import { lightState } from './lights.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { biomeAt, biomeMapColor, BIOME_CELL } from '../../worlds/biomes.js';
+import { racePath } from '../../worlds/racetrack.js';
 import type { Missions, Objective } from './missions.js';
 
 const SIZE = 256;         // canvas backing-store pixels
@@ -73,6 +74,17 @@ export class Minimap {
       const y = ty(j * this.CH);
       ctx.moveTo(0, y); ctx.lineTo(s, y);
     }
+    ctx.stroke();
+
+    // race circuit outline (world-fixed)
+    ctx.strokeStyle = '#5a6474';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    racePath().forEach((p, i) => {
+      const x = tx(p.x), y = ty(p.z);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
     ctx.stroke();
 
     // traffic lights: one dot per real intersection in view

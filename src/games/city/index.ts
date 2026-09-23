@@ -12,6 +12,8 @@ import { Trains } from './train.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
+import { spawnVehicle } from '../../engine/assets.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
@@ -21,9 +23,10 @@ import { loadTotals, saveTotals } from './state.js';
 
 // ---- params ----
 const q = new URLSearchParams(location.search);
+const raceMode = q.get('race') === '1';
 const P = {
   seed: Number(q.get('seed') ?? 11),
-  vehicle: q.get('vehicle') ?? 'truck',
+  vehicle: raceMode ? 'kart' : (q.get('vehicle') ?? 'truck'),
 };
 
 // ---- stage & world dressing ----
@@ -43,8 +46,10 @@ groundFollower.receiveShadow = true;
 scene.add(groundFollower);
 
 // ---- player vehicle ----
-const V = VEHICLES[P.vehicle] ?? VEHICLES.truck;
-const spawn = { x: 2.3, z: 34, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
+const V = raceMode ? VEHICLES.kart : (VEHICLES[P.vehicle] ?? VEHICLES.truck);
+const spawn = raceMode
+  ? { x: RACE_START.x, z: RACE_START.z, heading: RACE_START.heading }
+  : { x: 2.3, z: 34, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -63,6 +68,7 @@ addEventListener('pointerdown', () => audio.unlock());
 // road tiles, lamps, parked cars). Any failure leaves the registry empty and the
 // world falls back to the procedural pastel generator.
 const KIT = '/assets/kenney/city';
+const RACEKIT = '/assets/kenney/racing';
 const ROADTINT = { tint: [0.55, 0.57, 0.63] as [number, number, number] };
 const KITDEFS: Record<string, Parameters<typeof prepBakedModels>[0][string]> = {};
 for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`];
@@ -88,6 +94,10 @@ Object.assign(KITDEFS, {
   'car-suv': [`${KIT}/car-suv.glb`, `${KIT}/cmap-cars.png`],
   'car-taxi': [`${KIT}/car-taxi.glb`, `${KIT}/cmap-cars.png`],
   'car-hatch': [`${KIT}/car-hatchback-sports.glb`, `${KIT}/cmap-cars.png`],
+  'race-straight': [`${RACEKIT}/track-straight.glb`, `${RACEKIT}/Textures/colormap.png`],
+  'race-corner': [`${RACEKIT}/track-corner.glb`, `${RACEKIT}/Textures/colormap.png`],
+  'race-finish': [`${RACEKIT}/track-finish.glb`, `${RACEKIT}/Textures/colormap.png`],
+  'race-bump': [`${RACEKIT}/track-bump.glb`, `${RACEKIT}/Textures/colormap.png`],
 });
 await prepBakedModels(KITDEFS).catch(() => {});
 // dev probe: ?debugbake=1 exposes which templates registered
@@ -184,6 +194,51 @@ const totals = loadTotals();
 updateMissionPanel();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
+
+// ---- race mode state ----
+const raceGatePts = raceGates();
+let gateIdx = 0, lap = 1, lapStart = 0;
+let bestLap = Infinity;
+try {
+  const saved = Number(localStorage.getItem('kidsgames-race-best'));
+  if (saved > 0) bestLap = saved;
+} catch { /* ignore */ }
+function fmtTime(t: number): string {
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+// AI race trucks cruising the circuit
+const raceAI: Array<{ mesh: THREE.Object3D; t: number; speed: number }> = [];
+let raceAILen = 0;
+if (raceMode) {
+  for (let i = 0; i < racePathPts.length; i++) {
+    const a = racePathPts[i], b = racePathPts[(i + 1) % racePathPts.length];
+    raceAILen += Math.hypot(b.x - a.x, b.z - a.z);
+  }
+  const models = ['/assets/kenney/racing/vehicle-truck-yellow.glb', '/assets/kenney/racing/vehicle-truck-purple.glb'];
+  const speeds = [9.5, 8.5];
+  models.forEach((m, i) => {
+    spawnVehicle(m, { len: 3.2 }).then(g => {
+      g.traverse(o => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+      scene.add(g);
+      raceAI.push({ mesh: g, t: (i + 1) / 3, speed: speeds[i] });
+    }).catch(() => {});
+  });
+}
+
+function updateRaceAI(dt: number): void {
+  for (const r of raceAI) {
+    r.t = (r.t + (r.speed * dt) / raceAILen) % 1;
+    const f = r.t * racePathPts.length;
+    const i0 = Math.floor(f) % racePathPts.length;
+    const a = racePathPts[i0], b = racePathPts[(i0 + 1) % racePathPts.length];
+    const fr = f - i0;
+    r.mesh.position.set(a.x + (b.x - a.x) * fr, 0.15, a.z + (b.z - a.z) * fr);
+    r.mesh.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+  }
+}
 
 // ?livertest=1: teleport next to the first cat -> ladder scene
 if (q.get('livertest') === '1') {
@@ -302,9 +357,9 @@ const tick = (): void => {
   if (mode === 'spray') hoseAim += (Math.max(-1, Math.min(1, aimIn)) - hoseAim) * Math.min(1, dt * 4);
   if (mode === 'ladder') ladderAim += (Math.max(-1, Math.min(1, aimIn)) - ladderAim) * Math.min(1, dt * 5);
 
-  // missions: keep several calls alive; the arrow points at the nearest
+  // missions: keep several calls alive (suppressed in race mode)
   missions.cooldown -= dt;
-  while (missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
+  while (!raceMode && missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
     missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
     missions.cooldown = 0.5;
   }
@@ -318,8 +373,34 @@ const tick = (): void => {
     o.marker.rotation.y += dt * 1.2;
   }
 
-  if (mode === 'spray' && spraySession) {
-    // ---- hose mini-scene on the sprayed fire ----
+  if (raceMode) {
+    // ---- race mode: lap timing HUD ----
+    updateRaceAI(dt);
+    const g = raceGatePts[gateIdx];
+    if (Math.hypot(st.x - g.x, st.z - g.z) < 10) {
+      gateIdx++;
+      if (gateIdx >= raceGatePts.length) {
+        gateIdx = 0;
+        const lapTime = elapsed - lapStart;
+        lapStart = elapsed;
+        lap++;
+        toast = `LAP ${fmtTime(lapTime)}!`;
+        if (lapTime < bestLap) {
+          bestLap = lapTime;
+          try { localStorage.setItem('kidsgames-race-best', String(lapTime)); } catch { /* ignore */ }
+        }
+      }
+    }
+    promptEl.style.display = 'block';
+    promptText.textContent = `LAP ${lap} — ${fmtTime(elapsed - lapStart)}`;
+    promptFill.style.width = '0%';
+    missionEl.innerHTML = `best lap: ${bestLap === Infinity ? '—' : fmtTime(bestLap)}`;
+    guideEl.style.opacity = '1';
+    guideIcon.textContent = '🏁';
+    guideArrow.style.transform = '';
+    guideDist.textContent = '';
+    guideWait.textContent = '';
+  } else if (mode === 'spray' && spraySession) {
     guideEl.style.opacity = '0';
     promptEl.style.display = 'block';
     promptText.textContent = 'SPRAY LEFT / RIGHT!';

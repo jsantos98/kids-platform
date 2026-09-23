@@ -53,6 +53,13 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 4, steerMax: 1.0, cabF: 4.6, cabY: 3.4,
     front: 3, halfW: 2.2, frontR: 2,
   },
+  kart: {
+    make: makeCar, glb: '/assets/kenney/racing/vehicle-truck-red.glb', glbLen: 3.2, fly: false,
+    accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
+    camBack: 10, camUp: 4.6, highBack: 12, highUp: 11, highAhead: 6,
+    wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5,
+    front: 1.4, halfW: 0.9, frontR: 0.9,
+  },
 };
 
 export interface PlayerState {

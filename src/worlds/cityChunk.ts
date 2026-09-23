@@ -10,6 +10,7 @@ import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { RoadGrid } from './roadGrid.js';
 import { biomeAt, biomeGround } from './biomes.js';
+import { raceZoneChunk, raceTiles, tileCenter, RACE_TILE } from './racetrack.js';
 
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
@@ -75,6 +76,10 @@ function kenneyTPL() {
     roadCrossroad: bakedModel('road-crossroad'),
     roadCrossing: bakedModel('road-crossing'),
     lightCurved: bakedModel('light-curved'),
+    raceStraight: bakedModel('race-straight'),
+    raceCorner: bakedModel('race-corner'),
+    raceFinish: bakedModel('race-finish'),
+    raceBump: bakedModel('race-bump'),
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
   };
 }
@@ -87,9 +92,13 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const TPL = kenneyTPL();
   const biome = biomeAt(cx, cz, seed);
   const wild = biome !== 'city'; // nature biomes: no buildings, no street lamps
+  const inZone = raceZoneChunk(cx, cz); // raceway apron chunk
 
-  // base slab — concrete downtown, grass/sand out in the biomes
-  B.box(CH, 0.1, CH, biomeGround(biome), X0 + CH / 2, 0.05, Z0 + CH / 2);
+  // base slab — concrete downtown, grass/sand out in the biomes, raceway apron in the zone
+  const slab = inZone ? 0xa9c88b : biomeGround(biome);
+  B.box(CH, 0.1, CH, slab, X0 + CH / 2, 0.05, Z0 + CH / 2);
+
+  // race zone: a clear grass apron holding the racing circuit (tiles baked below)
 
   // roads along this chunk's south (z=Z0) and west (x=X0) grid lines — but
   // only where the seeded road grid keeps them: some lines are missing, which
@@ -102,8 +111,8 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const TS = 10, TY = 0.11;
   const railZ = RoadGrid.isRail(cz);       // south edge is rail
   const railX = RoadGrid.isRail(cx);       // west edge is rail
-  const roadS = !railZ && grid.hasZ(cz);   // south edge is road
-  const roadW = !railX && grid.hasX(cx);   // west edge is road
+  const roadS = !railZ && grid.hasZ(cz) && !(inZone && cz === 5); // interior zone roads suppressed
+  const roadW = !railX && grid.hasX(cx) && !(inZone && cx === 5);
   const roadE2 = grid.hasX(cx + 1) && !RoadGrid.isRail(cx + 1); // N-S road east of us
   const roadN2 = grid.hasZ(cz + 1) && !RoadGrid.isRail(cz + 1); // E-W road north of us
   if (railZ) {
@@ -178,6 +187,22 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       }
     }
   }
+  // race circuit: bake the tiles whose centre falls inside this chunk
+  if (inZone && TPL.raceStraight && TPL.raceCorner) {
+    for (const t of raceTiles()) {
+      const c = tileCenter(t.col, t.row);
+      if (c.x < X0 || c.x >= X0 + CH || c.z < Z0 || c.z >= Z0 + CH) continue;
+      const tpl = t.kind === 'straight' ? TPL.raceStraight
+        : t.kind === 'corner' ? TPL.raceCorner
+        : t.kind === 'finish' ? TPL.raceFinish : TPL.raceStraight;
+      if (!tpl) continue;
+      bakeModel(B, tpl, c.x, TY, c.z, t.rot, 1, [RACE_TILE, RACE_TILE, RACE_TILE]);
+      if (t.kind === 'bump') {
+        const bump = TPL.raceBump;
+        if (bump) bakeModel(B, bump, c.x, TY + 0.2, c.z, t.rot, RACE_TILE / 2.6);
+      }
+    }
+  }
   // traffic-light corners: only at real intersections (the working lights are
   // dynamic objects added by the game)
   if (grid.cross(cx, cz)) {
@@ -185,13 +210,8 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }
-  // traffic-light corners: the working lights are dynamic objects added by the
-  // game (traffic.ts); chunks only keep their collision boxes
-  for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
-    boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
-  }
   // street lamps (city streets only)
-  if (!wild) {
+  if (!wild && !inZone) {
     for (let d = 10; d < CH; d += 18) {
       if (TPL.lightCurved) {
         bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
@@ -374,7 +394,9 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
     }
   }
-  if (wild) {
+  if (inZone) {
+    // raceway apron: the circuit tiles are baked above, keep the rest clear
+  } else if (wild) {
     scatterNature();
   } else {
     edge(Math.PI, 'x', Z0 + 7.6);          // south edge, fronts face -Z toward the road

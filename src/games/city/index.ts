@@ -8,7 +8,7 @@ import { setupDevCapture } from '../../engine/capture.js';
 import { VEHICLES, createPlayer, physicsStep } from './player.js';
 import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
-import { Train } from './train.js';
+import { Trains } from './train.js';
 import { PatrolHeli } from './patrol.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
 import { Missions } from './missions.js';
@@ -131,9 +131,9 @@ if (q.get('spraytest') === '1') {
 // in heli mode one of the AI vehicles is the fire truck, driving itself
 const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : []);
 
-// ---- ambient life: the train shuttles the rail line; a patrol heli circles
-// the neighbourhood while the kid plays the fire truck ----
-const train = new Train(scene, 64);
+// ---- ambient life: several trains on the rail corridors; a patrol heli
+// circles the neighbourhood while the kid plays the fire truck ----
+const trains = new Trains(scene, 64);
 const patrol = V.fly ? null : new PatrolHeli(scene);
 
 // ---- particles ----
@@ -276,8 +276,8 @@ const tick = (): void => {
 
   chunks.ensure(2, st.x, st.z);
 
-  // ambient life: the train and the patrol helicopter
-  train.update(elapsed, st.x, st.z);
+  // ambient life: the trains and the patrol helicopter
+  trains.update(elapsed, st.x, st.z);
   patrol?.update(dt, elapsed, st.x, st.z);
 
   // ambient life

@@ -9,6 +9,7 @@ import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { RoadGrid } from './roadGrid.js';
+import { biomeAt, biomeGround } from './biomes.js';
 
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
@@ -62,11 +63,14 @@ export interface CityChunkResult {
 
 function kenneyTPL() {
   const names = ['bldg-a', 'bldg-b', 'bldg-c', 'bldg-d', 'bldg-e', 'bldg-f', 'bldg-g',
-    'bldg-h', 'bldg-i', 'bldg-j', 'bldg-k', 'bldg-l', 'bldg-m', 'bldg-n'];
+    'bldg-h', 'bldg-i', 'bldg-j', 'bldg-k', 'bldg-l', 'bldg-m', 'bldg-n'].map(bakedModel).filter((t): t is BakedTemplate => !!t);
   return {
-    buildings: names.map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    buildings: names,
     trees: ['tree-default', 'tree-oak', 'tree-detailed', 'tree-fat', 'tree-thin', 'tree-small']
       .map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    pines: ['pine-a', 'pine-b', 'pine-c'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     roadStraight: bakedModel('road-straight'),
     roadCrossroad: bakedModel('road-crossroad'),
     roadCrossing: bakedModel('road-crossing'),
@@ -81,9 +85,11 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const B = new Baked();
   const boxes: CollisionBox[] = [];
   const TPL = kenneyTPL();
+  const biome = biomeAt(cx, cz, seed);
+  const wild = biome !== 'city'; // nature biomes: no buildings, no street lamps
 
-  // base slab (sidewalk-level concrete everywhere; roads sit on top)
-  B.box(CH, 0.1, CH, C.sidewalk, X0 + CH / 2, 0.05, Z0 + CH / 2);
+  // base slab — concrete downtown, grass/sand out in the biomes
+  B.box(CH, 0.1, CH, biomeGround(biome), X0 + CH / 2, 0.05, Z0 + CH / 2);
 
   // roads along this chunk's south (z=Z0) and west (x=X0) grid lines — but
   // only where the seeded road grid keeps them: some lines are missing, which
@@ -184,21 +190,23 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
     boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
   }
-  // street lamps
-  for (let d = 10; d < CH; d += 18) {
-    if (TPL.lightCurved) {
-      bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
-      bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
-    } else {
-      B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + d, 1.8, Z0 + 5.4);
-      B.box(1.0, 0.1, 0.1, C.dark, X0 + d - 0.5, 3.5, Z0 + 5.4);
-      B.sphere(0.17, 0xfff6cf, X0 + d - 1.0, 3.42, Z0 + 5.4);
-      B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + 5.4, 1.8, Z0 + d);
-      B.box(0.1, 0.1, 1.0, C.dark, X0 + 5.4, 3.5, Z0 + d - 0.5);
-      B.sphere(0.17, 0xfff6cf, X0 + 5.4, 3.42, Z0 + d - 1.0);
+  // street lamps (city streets only)
+  if (!wild) {
+    for (let d = 10; d < CH; d += 18) {
+      if (TPL.lightCurved) {
+        bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
+        bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
+      } else {
+        B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + d, 1.8, Z0 + 5.4);
+        B.box(1.0, 0.1, 0.1, C.dark, X0 + d - 0.5, 3.5, Z0 + 5.4);
+        B.sphere(0.17, 0xfff6cf, X0 + d - 1.0, 3.42, Z0 + 5.4);
+        B.cyl(0.08, 0.1, 3.6, 7, C.dark, X0 + 5.4, 1.8, Z0 + d);
+        B.box(0.1, 0.1, 1.0, C.dark, X0 + 5.4, 3.5, Z0 + d - 0.5);
+        B.sphere(0.17, 0xfff6cf, X0 + 5.4, 3.42, Z0 + d - 1.0);
+      }
+      boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
+      boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
     }
-    boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
-    boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
   }
 
   // building lots along the four edges (fronts toward the roads)
@@ -346,10 +354,34 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
       s += w + 0.8 + r() * 2;
     }
   }
-  edge(Math.PI, 'x', Z0 + 7.6);          // south edge, fronts face -Z toward the road
-  edge(0, 'x', Z0 + CH - 7.6);           // north edge
-  edge(-Math.PI / 2, 'z', X0 + 7.6);     // west edge
-  edge(Math.PI / 2, 'z', X0 + CH - 7.6); // east edge
+  // wild biomes: scatter nature instead of buildings
+  function scatterNature(): void {
+    const tries = biome === 'forest' ? 30 : biome === 'desert' ? 14 : 18;
+    for (let i = 0; i < tries; i++) {
+      const x = X0 + 7 + r() * (CH - 14);
+      const z = Z0 + 7 + r() * (CH - 14);
+      // keep clear of the road corridors on the grid lines
+      const gx = Math.abs(x - Math.round(x / CH) * CH);
+      const gz = Math.abs(z - Math.round(z / CH) * CH);
+      if (gx < 6.5 || gz < 6.5) continue;
+      let tpl: BakedTemplate | null = null;
+      const s = 3.5 + r() * 2.5;
+      if (biome === 'forest') tpl = pick(r, [...TPL.pines, ...TPL.trees]);
+      else if (biome === 'desert') tpl = pick(r, [...TPL.cacti, ...TPL.rocks]);
+      else tpl = pick(r, TPL.trees);
+      if (!tpl) continue;
+      bakeModel(B, tpl, x, 0.08, z, r() * Math.PI * 2, s);
+      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
+    }
+  }
+  if (wild) {
+    scatterNature();
+  } else {
+    edge(Math.PI, 'x', Z0 + 7.6);          // south edge, fronts face -Z toward the road
+    edge(0, 'x', Z0 + CH - 7.6);           // north edge
+    edge(-Math.PI / 2, 'z', X0 + 7.6);     // west edge
+    edge(Math.PI / 2, 'z', X0 + CH - 7.6); // east edge
+  }
 
   return { mesh: B.build(), boxes };
 }

@@ -82,6 +82,8 @@ export interface Stage {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   sun: THREE.DirectionalLight;
+  /** the sky dome + sun disc follow the player across the infinite city */
+  followSky(x: number, z: number): void;
 }
 
 export function createStage({
@@ -138,8 +140,10 @@ export function createStage({
   sun.shadow.normalBias = 0.04;
   scene.add(sun);
 
+  let disc: THREE.Mesh | null = null;
+  const sunDiscOffset = new THREE.Vector3().copy(sun.position).normalize().multiplyScalar(420);
   if (showSun) {
-    const disc = new THREE.Mesh(
+    disc = new THREE.Mesh(
       new THREE.SphereGeometry(14, 16, 12),
       new THREE.MeshBasicMaterial({ color: C.sun, fog: false }),
     );
@@ -162,7 +166,13 @@ export function createStage({
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  return { renderer, scene, camera, sun };
+  // keep the sky dome and the sun disc centred on the player
+  const followSky = (x: number, z: number) => {
+    sky.position.set(x, 0, z);
+    disc?.position.set(x + sunDiscOffset.x, sunDiscOffset.y, z + sunDiscOffset.z);
+  };
+
+  return { renderer, scene, camera, sun, followSky };
 }
 
 // HUD stats chip (proves the real-time cost of each scene)

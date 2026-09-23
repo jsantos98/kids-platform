@@ -1,7 +1,7 @@
 // The Endless City fire-truck game: boot, frame loop and mode orchestration.
 import * as THREE from 'three';
 import { createStage, makeHUD } from '../../engine/stage.js';
-import { prepBakedModels } from '../../engine/assets.js';
+import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
@@ -30,7 +30,7 @@ const stage = createStage({
   sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: 70, fogFar: 260,
   ground: false, groundColor: 0xa9c88b,
 });
-const { scene, camera, renderer, sun } = stage;
+const { scene, camera, renderer, sun, followSky } = stage;
 
 // ground follower (hides the edge of the generated area)
 const groundFollower = new THREE.Mesh(
@@ -76,12 +76,24 @@ Object.assign(KITDEFS, {
   'tree-fat': [`${KIT}/nature/tree_fat.glb`, null],
   'tree-thin': [`${KIT}/nature/tree_thin.glb`, null],
   'tree-small': [`${KIT}/nature/tree_small.glb`, null],
+  'pine-a': [`${KIT}/nature/tree_pineRoundA.glb`, null],
+  'pine-b': [`${KIT}/nature/tree_pineRoundB.glb`, null],
+  'pine-c': [`${KIT}/nature/tree_pineRoundC.glb`, null],
+  'cactus-short': [`${KIT}/nature/cactus_short.glb`, null],
+  'cactus-tall': [`${KIT}/nature/cactus_tall.glb`, null],
+  'rock-a': [`${KIT}/nature/stone_largeA.glb`, null],
+  'rock-b': [`${KIT}/nature/stone_largeB.glb`, null],
   'car-sedan': [`${KIT}/car-sedan.glb`, `${KIT}/cmap-cars.png`],
   'car-suv': [`${KIT}/car-suv.glb`, `${KIT}/cmap-cars.png`],
   'car-taxi': [`${KIT}/car-taxi.glb`, `${KIT}/cmap-cars.png`],
   'car-hatch': [`${KIT}/car-hatchback-sports.glb`, `${KIT}/cmap-cars.png`],
 });
 await prepBakedModels(KITDEFS).catch(() => {});
+// dev probe: ?debugbake=1 exposes which templates registered
+if (q.get('debugbake') === '1') {
+  (window as unknown as { __bake: Record<string, boolean> }).__bake =
+    Object.fromEntries(Object.keys(KITDEFS).map(k => [k, !!bakedModel(k)]));
+}
 
 // ---- chunk streaming ----
 const roadGrid = new RoadGrid(P.seed);
@@ -138,8 +150,11 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid);
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, roadGrid, 64, P.seed);
 const hud = makeHUD();
+function updateMissionPanel(): void {
+  missionEl.innerHTML = `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`;
+}
 
 // ---- camera modes ----
 const CAM_MODES = ['chase', 'high', 'cab'];
@@ -162,6 +177,7 @@ let spraySession: sprayMod.SpraySession | null = null;
 let ladderSession: ladderMod.LadderSession | null = null;
 let toast = '';
 const totals = loadTotals();
+updateMissionPanel();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
 
@@ -174,6 +190,13 @@ if (q.get('livertest') === '1') {
     ladderSession = ladderMod.beginLadder(scene, cp, player.car);
     mode = 'ladder';
   }
+}
+
+// ?tp=x,z: teleport (debug/verification)
+const tp = q.get('tp');
+if (tp) {
+  const [txs, tzs] = tp.split(',').map(Number);
+  if (Number.isFinite(txs) && Number.isFinite(tzs)) { player.state.x = txs; player.state.z = tzs; }
 }
 
 // ---- main loop ----
@@ -244,11 +267,12 @@ const tick = (): void => {
   }
   camera.position.y = Math.max(camera.position.y, 1.2);
 
-  // sun + shadow camera follow the car
+  // sun + shadow camera follow the car, and the sky dome travels with it
   sun.position.set(st.x - 40, 90, st.z - 55);
   sun.target.position.set(st.x, 0, st.z);
   sun.target.updateMatrixWorld();
   groundFollower.position.set(st.x, -0.02, st.z);
+  followSky(st.x, st.z);
 
   chunks.ensure(2, st.x, st.z);
 
@@ -374,7 +398,7 @@ const tick = (): void => {
     guideIcon.textContent = '🚨';
     guideArrow.style.transform = '';
     guideDist.textContent = '';
-    missionEl.innerHTML = `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} cats</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`;
+    updateMissionPanel();
   }
 
   audio.setSiren(missions.objectives.length > 0);

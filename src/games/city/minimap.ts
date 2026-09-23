@@ -2,6 +2,7 @@
 // cats, traffic-light state and the player's heading. Drawn on a 2D canvas.
 import { lightState } from './lights.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { biomeAt, biomeMapColor, BIOME_CELL } from '../../worlds/biomes.js';
 import type { Missions, Objective } from './missions.js';
 
 const SIZE = 256;         // canvas backing-store pixels
@@ -10,7 +11,8 @@ const RANGE = 180;        // world metres shown across (radius*2 window)
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
 
-  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid, private CH = 64) {
+  constructor(canvas: HTMLCanvasElement, private missions: Missions, private grid: RoadGrid,
+              private CH = 64, private seed = 0) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
@@ -23,9 +25,22 @@ export class Minimap {
     const tx = (x: number) => s / 2 + (x - px) * scale;
     const ty = (z: number) => s / 2 + (pz - z) * scale; // world +Z points up
 
-    // ground
-    ctx.fillStyle = '#e9e1cf';
-    ctx.fillRect(0, 0, s, s);
+    // ground tinted by biome (forest green, desert sand, city cream)
+    const cellW = BIOME_CELL * this.CH;
+    const c0 = Math.floor((px - RANGE) / cellW);
+    const c1 = Math.ceil((px + RANGE) / cellW);
+    const d0 = Math.floor((pz - RANGE) / cellW);
+    const d1 = Math.ceil((pz + RANGE) / cellW);
+    for (let a = c0; a <= c1; a++) {
+      for (let b = d0; b <= d1; b++) {
+        ctx.fillStyle = biomeMapColor(biomeAt(a * BIOME_CELL, b * BIOME_CELL, this.seed));
+        const x0 = Math.max(0, tx(a * cellW));
+        const y0 = Math.max(0, ty((b + 1) * cellW));
+        const x1 = Math.min(s, tx((a + 1) * cellW));
+        const y1 = Math.min(s, ty(b * cellW));
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      }
+    }
 
     // roads: the surviving grid lines (rails drawn tan, missing lines skipped)
     const k0 = Math.floor((px - RANGE) / this.CH);

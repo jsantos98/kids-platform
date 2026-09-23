@@ -32,7 +32,7 @@
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 import { citySeed, southExit, eastExit, streetLinesFor } from './cityGrid.js';
-import { railRouteFor, type RailRoute } from './railRoute.js';
+import { railRouteFor, resquareRail, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
 
@@ -86,6 +86,9 @@ export interface TramPlan {
   /** loop control points (chamfered rectangle through downtown) */
   pts: Array<{ x: number; z: number }>;
   stops: TramStop[];
+  /** lattice lines the rectangle rides — streets the rail must respect */
+  linesH: number[];
+  linesV: number[];
 }
 
 export interface CityExits {
@@ -182,7 +185,8 @@ function buildPlan(bx: number, by: number): CityPlan {
       const z = horiz ? line * CH : t;
       if (rail.distTo(x, z) < 9) {
         const h = rail.headingAt(x, z);
-        const dev = Math.abs(h - (horiz ? Math.PI / 2 : 0));
+        let dev = Math.abs(h - (horiz ? Math.PI / 2 : 0));
+        if (dev > Math.PI) dev = Math.PI * 2 - dev;
         const parallel = Math.min(dev, Math.PI - dev) < Math.PI / 4;
         if (parallel && ++run >= 3) return true;
         if (!parallel) run = 0;
@@ -259,6 +263,15 @@ function buildPlan(bx: number, by: number): CityPlan {
   // open (and whether the railway shadows a side), pin the best one open.
   // Its closed ring anchors every one of its corners, so it never dangles. ----
   const tram = reserveTram(downtown[0], downtown[1], rail, segHSet, segVSet, r, railRunsAlong);
+  // the tram's sides are streets the rail could not know when it shaped
+  // itself — re-square crossings and clearance against the complete set now
+  if (tram) {
+    resquareRail(
+      rail,
+      [...H, ...tram.linesH.filter(j => !H.includes(j))],
+      [...V, ...tram.linesV.filter(i => !V.includes(i))],
+    );
+  }
 
   // ---- 5. no dead ends: a road may only stop where it meets a cross street.
   // Any degree-1 node that isn't a causeway mouth gives up its street, which
@@ -692,7 +705,12 @@ function reserveTram(
       ry: horiz ? Math.PI / 2 : 0,
     });
   }
-  return { pts, stops };
+  return {
+    pts,
+    stops,
+    linesH: [win.j0, j1],
+    linesV: [win.i0, i1],
+  };
 }
 
 function raceChunks(): Array<[number, number]> {

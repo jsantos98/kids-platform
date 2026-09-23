@@ -31,6 +31,9 @@ export interface RailRoute {
    * parallel run (bad, shadows streets) from a square crossing (fine) */
   headingAt(x: number, z: number): number;
   control: Array<{ x: number; z: number }>;
+  /** dense samples of the pristine spline, before crossing deformation —
+   * lets the plan re-square the rail once the tram rectangle is known */
+  basePts: Array<{ x: number; z: number; h: number }>;
 }
 
 // the open race-corner zone: nothing rail-ish on its SE diagonal
@@ -207,7 +210,26 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
     near(x, z, r) { return p2.nearest(x, z).d2 < r * r; },
     headingAt(x, z) { return p2.nearest(x, z).p.h; },
     control,
+    basePts: path.pts,
   };
+}
+
+/**
+ * Re-run the crossing deformation once the plan knows streets the rail could
+ * not (the tram rectangle is reserved after this route is built). Re-squares
+ * crossings and re-applies clearance against the COMPLETE street set, then
+ * rewrites the cached route in place — every consumer reads the same object.
+ */
+export function resquareRail(route: RailRoute, H: number[], V: number[]): void {
+  const shaped = clearancePush(perpendicularCrossings(polyPath(route.basePts), H, V), H, V);
+  const p2 = polyPath(shaped);
+  route.path = p2;
+  route.total = p2.total;
+  route.pts = p2.pts;
+  route.sample = d => p2.sample(d);
+  route.distTo = (x, z) => Math.sqrt(p2.nearest(x, z).d2);
+  route.near = (x, z, r) => p2.nearest(x, z).d2 < r * r;
+  route.headingAt = (x, z) => p2.nearest(x, z).p.h;
 }
 
 /** half-length of the straightened approach either side of a crossing (m) */
@@ -220,7 +242,7 @@ const CROSS_ZONE = 24;
  * untouched — there the rail heads square across the line, not along it.
  * Pushes are box-smoothed so the swerve in and out is gentle.
  */
-function clearancePush(
+export function clearancePush(
   pts: Array<{ x: number; z: number }>,
   H: number[], V: number[],
 ): Array<{ x: number; z: number }> {
@@ -234,12 +256,12 @@ function clearancePush(
     const alongX = Math.abs(Math.abs(h) - Math.PI / 2) < Math.PI / 4;
     for (const line of H) {
       const d = p.z - line * 64;
-      if (Math.abs(d) < 9 && alongX) pushZ[k] = (10.5 - Math.abs(d)) * Math.sign(d || 1);
+      if (Math.abs(d) < 10 && alongX) pushZ[k] = (11.5 - Math.abs(d)) * Math.sign(d || 1);
     }
     for (const line of V) {
       const d = p.x - line * 64;
       const dev = Math.min(Math.abs(h), Math.PI - Math.abs(h));
-      if (Math.abs(d) < 9 && dev < Math.PI / 4) pushX[k] = (10.5 - Math.abs(d)) * Math.sign(d || 1);
+      if (Math.abs(d) < 10 && dev < Math.PI / 4) pushX[k] = (11.5 - Math.abs(d)) * Math.sign(d || 1);
     }
   }
   const blur = (arr: number[]): number[] => arr.map((_, k) => {
@@ -251,7 +273,7 @@ function clearancePush(
   return pts.map((p, k) => ({ x: p.x + sx[k], z: p.z + sz[k] }));
 }
 
-function perpendicularCrossings(
+export function perpendicularCrossings(
   path: WorldPath,
   H: number[], V: number[],
 ): Array<{ x: number; z: number }> {
@@ -304,7 +326,7 @@ function perpendicularCrossings(
       if (ds < -total / 2) ds += total;
       const ad = Math.abs(ds);
       if (ad >= CROSS_ZONE) continue;
-      const w = ad <= 7 ? 1 : 0.5 * (1 + Math.cos((Math.PI * (ad - 7)) / (CROSS_ZONE - 7)));
+      const w = ad <= 10 ? 1 : 0.5 * (1 + Math.cos((Math.PI * (ad - 10)) / (CROSS_ZONE - 10)));
       if (hit.horiz) out[k].x += (hit.x - out[k].x) * w;
       else out[k].z += (hit.z - out[k].z) * w;
     }

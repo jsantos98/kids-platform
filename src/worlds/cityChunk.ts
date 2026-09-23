@@ -220,44 +220,36 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
 
   // ---- wide streets: this chunk's south (z=Z0) and west (x=X0) edges.
-  // Roads are flat procedural slabs in the same style as the strait
-  // causeways: a 14 m asphalt strip with centre dashes and low kerbs, tiled
-  // cell by cell so no two road pieces ever overlap. Junction nodes claim
-  // one plain square pad two cells across, and the runs leave their end
-  // cells out where a pad sits — kerbs and dashes stop at every corner ----
+  // Six cells per 64 m edge, each a plain 14 m asphalt slab. Intersections
+  // are the UNION of the corner cells meeting at a node — a plus, a T or an
+  // L exactly as wide as the roads — so there is no wider pad jutting past
+  // the kerb lines. Kerbs and centre dashes run on the mid-block cells only,
+  // leaving the junction opening clean. ----
   const TS = 64 / 6, TY = 0.11;
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
-  // junctions, L-corners and plazas claim a pad; straight-through nodes don't
-  const patchNode = (i: number, j: number): boolean => {
-    const a = plan.arms(i, j); // [west, east, north, south]
-    const n = a.filter(Boolean).length;
-    if (plan.plaza(i, j) || n >= 3) return true;
-    return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
-  };
-  const jSW = patchNode(cx, cz);
-  const jS = patchNode(cx + 1, cz); // south run's far node
-  const jW = patchNode(cx, cz + 1); // west run's far node
   for (let k = 0; k < 6; k++) {
     const c = TS / 2 + k * TS;
-    if (roadS && !((k === 0 && jSW) || (k === 5 && jS))) {
+    const mid = k > 0 && k < 5;
+    if (roadS) {
       B.box(TS + 0.02, 0.04, 14, CAUSEWAY_ASPHALT, X0 + c, TY, Z0);
-      for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
-      for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
+      if (mid) {
+        for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
+        for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
+      }
     }
-    if (roadW && !((k === 0 && jSW) || (k === 5 && jW))) {
+    if (roadW) {
       B.box(14, 0.04, TS + 0.02, CAUSEWAY_ASPHALT, X0, TY, Z0 + c);
-      for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
-      for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
+      if (mid) {
+        for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
+        for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
+      }
     }
   }
 
-  // ---- node pad at the chunk's SW corner (X0, Z0) ----
-  if (jSW) {
-    B.box(TS * 2, 0.04, TS * 2, CAUSEWAY_ASPHALT, X0, TY, Z0);
-    if (plan.plaza(cx, cz)) bakePlaza(X0, Z0);
-    else if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
-  }
+  // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
+  if (plan.plaza(cx, cz)) bakePlaza(X0, Z0);
+  else if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
   // chunks only keep their corner collision boxes

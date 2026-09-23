@@ -33,6 +33,7 @@ let railOnRoadSegs = 0;
 let worstRide = 0;
 let railRiverRoadTotal = 0;
 let lotClashTotal = 0;
+let foldTotal = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
@@ -104,7 +105,7 @@ for (const [bx, by] of cells) {
         if (run >= 8) {
           railOnRoadSegs++;
           worstRide = Math.max(worstRide, run);
-          console.log(`  R8 detail: city ${bx},${by} ${horiz ? 'h' : 'v'} line at ${c0}, ride from t=${t - run} (run ${run} m)`);
+          console.log(`  R8 detail: city ${bx},${by} ${horiz ? 'h' : 'v'} line at ${c0}, ride from x=${horiz ? a + (t - run) : c0} z=${horiz ? c0 : a + (t - run)} (run ${run} m)`);
           return;
         }
       } else run = 0;
@@ -118,6 +119,28 @@ for (const [bx, by] of cells) {
     for (const lot of plan.lots(cx, cz)) {
       worstLot = Math.min(worstLot, route.distTo(lot.x, lot.z));
     }
+  }
+
+  // R24: the railway is one continuous welded loop — no hairpin folds where
+  // the shipped path doubles straight back on itself (deformation's worst
+  // mode; the tiles mitre vertex-to-vertex, so a fold is the one way the
+  // track can stop reading as connected). A ~150-degree U-turn smeared over
+  // 3-4 vertices turns <90 degrees per vertex, so also fail any >120-degree
+  // heading swing across a tight window — square crossing walls never do it.
+  const rpts = route.pts, RN = rpts.length;
+  for (let k = 0; k < RN; k++) {
+    const a = rpts[(k - 1 + RN) % RN], b = rpts[k], c = rpts[(k + 1) % RN];
+    const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+    if (l1 < 0.5 || l2 < 0.5) continue;
+    if ((c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) foldTotal++;
+  }
+  for (let k = 0; k < RN; k++) {
+    const a = rpts[k], b = rpts[(k + 3) % RN];
+    if (Math.hypot(b.x - a.x, b.z - a.z) > 12) continue;
+    let dh = b.h - a.h;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    if (Math.abs(dh) > (120 * Math.PI) / 180) foldTotal++;
   }
 
   // R22/R23: occupancy-grid combination invariants. The grid paints every
@@ -143,11 +166,12 @@ if (railOnRoadSegs > 0) fail('R8', `rail rides the road on ${railOnRoadSegs} seg
 if (worstLot < 15.5) fail('R9', `lot centre only ${worstLot.toFixed(1)} m from the rail`);
 if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road cells — a trestle shares the water with a road bridge`);
 if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
+if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
 
 console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} crossings, ` +
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
-  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}`);
+  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

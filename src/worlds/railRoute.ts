@@ -118,6 +118,19 @@ function shapeQuality(
     const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
     if (l1 > 0.5 && l2 > 0.5 && (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) folds++;
   }
+  // distributed hairpins: a ~150-degree U-turn smeared over 3-4 vertices
+  // turns < 90 degrees at each one and dodges the reversal test above while
+  // still folding the track back on itself (and skimming asphalt at the
+  // apex). Square crossing walls turn ~90 degrees per wall, so a >120
+  // degree swing across a tight window is never legitimate track.
+  for (let k = 0; k < N; k++) {
+    const a = pts[k], b = pts[(k + 3) % N];
+    if (Math.hypot(b.x - a.x, b.z - a.z) > 12) continue;
+    let dh = b.h - a.h;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    if (Math.abs(dh) > (120 * Math.PI) / 180) folds++;
+  }
   for (let k = 0; k < D; k++) {
     const b = dense[k], nxt = dense[(k + 1) % D];
     const h = b.h;
@@ -188,7 +201,7 @@ function shapeQuality(
         const d = Math.hypot(pt.x - zn.x, pt.z - zn.z);
         if (d < dmin) dmin = d;
       }
-      if (dmin >= 12) { inRun = false; continue; }
+      if (dmin >= 9) { inRun = false; continue; }
       if (!inRun) { bridge++; inRun = true; }
     }
   }
@@ -225,11 +238,11 @@ function buildRoute(bx: number, by: number): RailRoute {
     const offer = (a: Attempt): void => {
       let i = 0;
       while (i < ranked.length && ranked[i].score <= a.score) i++;
-      if (i >= 12) return;
+      if (i >= 16) return;
       ranked.splice(i, 0, a);
-      if (ranked.length > 12) ranked.pop();
+      if (ranked.length > 16) ranked.pop();
     };
-    for (let attempt = 0; attempt < 45; attempt++) {
+    for (let attempt = 0; attempt < 80; attempt++) {
       const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt + round * 1000));
       const a = tryRoute(r, H, V, river, zones, mul);
       if (!a) continue;
@@ -241,7 +254,7 @@ function buildRoute(bx: number, by: number): RailRoute {
       const route = finalize(bx, by, a.control, a.path);
       route.candidates = ranked.map(t => t.control);
       const q = shapeQuality(route.path, H, V, river, zones);
-      if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) return route;
+      if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
     }
   }
@@ -251,7 +264,7 @@ function buildRoute(bx: number, by: number): RailRoute {
     const route = finalize(bx, by, a.control, a.path);
     route.candidates = [a.control];
     const q = shapeQuality(route.path, H, V, river, zones);
-    if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) return route;
+    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) return route;
     if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
   }
   return fallback!.route;
@@ -448,7 +461,75 @@ function deform(
   // street approach the slide drags, so no skew survives
   const swung = riverSwing(pts, river, zones);
   const lifted = clearancePush(swung, H, V);
-  return ironSpikes(clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V));
+  const pushed = clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V);
+  const cleaned = deSpikes(ironSpikes(pushed));
+  if (cleaned.length === pushed.length) return cleaned;
+  // a fold was spliced out: its chord can cut a street approach askew or
+  // ride the asphalt the fold used to skirt, so re-run the crossing tail
+  // once on the cleaned shape. The splice leaves locally SPARSE vertices
+  // (a 30 m+ chord straddling a street sits beyond every pin's 12 m
+  // across-street reach), so re-densify to ~2 m first — then the pins can
+  // grip the chord's middle and bend it square. (Rare — fold-free cities
+  // skip this pass.)
+  const repinned = perpendicularCrossings(polyPath(subdivide(cleaned)), H, V);
+  return deSpikes(ironSpikes(clearancePush(repinned, H, V)));
+}
+
+/** insert points along every segment so none exceeds ~maxLen m */
+function subdivide(
+  pts: Array<{ x: number; z: number }>, maxLen = 2,
+): Array<{ x: number; z: number }> {
+  const out: Array<{ x: number; z: number }> = [];
+  const N = pts.length;
+  for (let k = 0; k < N; k++) {
+    const a = pts[k], b = pts[(k + 1) % N];
+    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / maxLen));
+    for (let q = 0; q < steps; q++) {
+      out.push({ x: a.x + (b.x - a.x) * q / steps, z: a.z + (b.z - a.z) * q / steps });
+    }
+  }
+  return out;
+}
+
+/** repair hairpins in the deformed path. Two modes, both iterated:
+ *  - exact REVERSALS (path doubles straight back, dot < 0): the apex vertex
+ *    goes and the run chords straight across the fold;
+ *  - DISTRIBUTED U-turns: a >120-degree heading swing across three short
+ *    segments (chord <= 12 m) folds the track back without any single
+ *    reversal — splice out the two middle vertices instead. Square crossing
+ *    walls turn ~90 degrees per wall and are untouched; after a splice the
+ *    caller re-runs the crossing tail so the shortcut re-squares its
+ *    approaches. */
+function deSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let pass = 0; pass < 4; pass++) {
+    const N = cur.length;
+    const drop: boolean[] = new Array(N).fill(false);
+    let any = false;
+    for (let k = 0; k < N; k++) {
+      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      if (l1 < 0.5 || l2 < 0.5) continue;
+      if ((c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) { drop[k] = true; any = true; }
+    }
+    for (let k = 0; k < N; k++) {
+      const a = cur[k], b = cur[(k + 1) % N], c = cur[(k + 2) % N], d = cur[(k + 3) % N];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      const l3 = Math.hypot(d.x - c.x, d.z - c.z);
+      if (l1 > 12 || l2 < 0.5 || l2 > 12 || l3 > 12) continue;
+      const t1 = Math.atan2(b.x - a.x, b.z - a.z), t2 = Math.atan2(d.x - c.x, d.z - c.z);
+      let dh = Math.abs(t2 - t1);
+      if (dh > Math.PI) dh = Math.PI * 2 - dh;
+      if (dh <= (120 * Math.PI) / 180) continue;
+      if (Math.hypot(d.x - a.x, d.z - a.z) > 12) continue;
+      drop[(k + 1) % N] = true;
+      drop[(k + 2) % N] = true;
+      any = true;
+    }
+    if (!any) break;
+    cur = cur.filter((_, k) => !drop[k]);
+  }
+  return cur;
 }
 
 /** iron out sub-metre spikes left where pin cores collapsed samples onto a
@@ -563,7 +644,7 @@ export function resquareRail(route: RailRoute, bx: number, by: number, H: number
   for (const c of cands) {
     const p2 = polyPath(deform(makePath(c, true).pts, H, V, river, zones));
     const q = shapeQuality(p2, H, V, river, zones);
-    if (q.folds === 0 && q.bridge === 0 && q.ride < 7 && q.skew < 24) {
+    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24) {
       best = { p2, q };
       break;
     }
@@ -889,24 +970,62 @@ export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Me
       B.box(0.12, 0.12, len + 0.3, 0x8d939e, x - rx, RAIL_Y + 0.14, z - rz, 0, h, 0);
     }
   };
-  // walk the polyline, merging consecutive samples into pieces (~14 m on
-  // straights, ~5 m where the path curves)
-  let runLen = 0;
-  let sx = route.pts[0].x, sz = route.pts[0].z, sh = route.pts[0].h;
-  for (let k = 0; k < route.pts.length; k++) {
-    const a = route.pts[k], b = route.pts[(k + 1) % route.pts.length];
-    runLen += Math.hypot(b.x - a.x, b.z - a.z);
-    const curved = Math.abs(b.h - sh) > 0.06;
-    if (runLen >= (curved ? 5 : 14)) {
-      piece((sx + b.x) / 2, (sz + b.z) / 2, sh, runLen);
-      runLen = 0;
-      sx = b.x; sz = b.z; sh = b.h;
+  // walk the polyline, emitting each piece as the exact CHORD from the
+  // previous piece's end vertex to a shared end vertex — a straight tile
+  // oriented by its run's start heading misses the next joint by metres at
+  // the square corners the crossing pins bend into the path, so the tiles
+  // pieces mitre corner-to-corner instead (straights still merge into ~14 m
+  // pieces; a turn over ~20 deg or a >0.2 m bow off the chord ends the run).
+  const N = route.pts.length;
+  // the deformation leaves 10 m+ segments where pushes spread differentially;
+  // subdivide to <=2 m so the bow test below can fire between their ends
+  // (a subdivided polyline interpolates identically — same rail, same ride)
+  const dense: Array<{ x: number; z: number }> = [];
+  for (let k = 0; k < N; k++) {
+    const a = route.pts[k], b = route.pts[(k + 1) % N];
+    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2));
+    for (let q = 0; q < steps; q++) {
+      dense.push({ x: a.x + (b.x - a.x) * q / steps, z: a.z + (b.z - a.z) * q / steps });
     }
   }
-  if (runLen > 0.5) {
-    const last = route.pts[route.pts.length - 1];
-    piece((sx + last.x) / 2, (sz + last.z) / 2, sh, runLen);
+  const M = dense.length;
+  let ix = 0;     // vertex the open run starts from
+  let runLen = 0; // arc length since that vertex
+  const emitChord = (end: number): void => {
+    const s = dense[ix], e = dense[end];
+    piece((s.x + e.x) / 2, (s.z + e.z) / 2,
+      Math.atan2(e.x - s.x, e.z - s.z), Math.hypot(e.x - s.x, e.z - s.z));
+  };
+  for (let k = 0; k < M; k++) {
+    const a = dense[k], b = dense[(k + 1) % M], c = dense[(k + 2) % M];
+    runLen += Math.hypot(b.x - a.x, b.z - a.z);
+    const t1 = Math.atan2(b.x - a.x, b.z - a.z), t2 = Math.atan2(c.x - b.x, c.z - b.z);
+    let turn = Math.abs(t2 - t1);
+    if (turn > Math.PI) turn = Math.PI * 2 - turn;
+    // worst bow of ANY interior vertex off the run's chord. On a smooth arc
+    // the deviation peaks mid-chord while the newest vertex sits at ~zero,
+    // so a newest-only check sails straight through 0.8 m bows.
+    let dev = 0;
+    if (runLen >= 1.5) {
+      const s = dense[ix];
+      const ex = b.x - s.x, ez = b.z - s.z, L2 = ex * ex + ez * ez;
+      if (L2 > 1e-6) {
+        const cnt = (k - ix + M) % M;
+        for (let m = 1; m <= cnt; m++) {
+          const p = dense[(ix + m) % M];
+          const t = Math.max(0, Math.min(1, ((p.x - s.x) * ex + (p.z - s.z) * ez) / L2));
+          const d = Math.hypot(s.x + ex * t - p.x, s.z + ez * t - p.z);
+          if (d > dev) dev = d;
+        }
+      }
+    }
+    if ((turn > 0.3 && runLen >= 0.5) || (dev > 0.15 && runLen >= 1.5) || runLen >= 14) {
+      emitChord((k + 1) % M);
+      ix = (k + 1) % M;
+      runLen = 0;
+    }
   }
+  if (runLen > 0.5) emitChord(0);
   const mesh = B.build();
   mesh.receiveShadow = true;
   return mesh;

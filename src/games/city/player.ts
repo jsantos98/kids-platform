@@ -178,13 +178,13 @@ export function physicsStep(
       if (Math.abs(c) >= Math.abs(s2)) {
         // travel mostly along Z -> use the N-S road through the crash point
         const vx = Math.round(st.x / 64) * 64;
-        rx = vx + (c >= 0 ? -2.3 : 2.3);
+        rx = vx + (c >= 0 ? -3.5 : 3.5);
         rz = st.z - c * 6;
         rh = c >= 0 ? 0 : Math.PI;
       } else {
         // travel mostly along X -> use the E-W road through the crash point
         const hz = Math.round(st.z / 64) * 64;
-        rz = hz + (s2 >= 0 ? 2.3 : -2.3);
+        rz = hz + (s2 >= 0 ? 3.5 : -3.5);
         rx = st.x - s2 * 6;
         rh = s2 >= 0 ? Math.PI / 2 : -Math.PI / 2;
       }

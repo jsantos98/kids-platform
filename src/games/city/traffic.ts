@@ -1,11 +1,13 @@
 // Ambient traffic: AI cars driving the road grid, obeying the traffic lights
-// and never using the rail corridors.
+// AND the level crossings (they queue up when a train is passing). Lanes sit
+// at ±3.5 m — the boulevards are wide and forgiving.
 import * as THREE from 'three';
 import { makeCar } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
-import { railRouteFor } from '../../worlds/railRoute.js';
+import type { Crossing } from '../../worlds/cityPlan.js';
 import { lightState, STOP_LINE } from './lights.js';
+import type { Trains } from './train.js';
 
 const MODELS = [
   '/assets/kenney/sedan.glb', '/assets/kenney/taxi.glb', '/assets/kenney/suv.glb',
@@ -13,6 +15,7 @@ const MODELS = [
   '/assets/kenney/hatchback-sports.glb',
 ];
 const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
+const LANE = 3.5;   // lane centre offset from the road centreline
 
 interface TrafficCar extends THREE.Group {
   userData: {
@@ -28,8 +31,8 @@ const j0 = (r: () => number, amp: number) => (r() - 0.5) * 2 * amp;
 export class Traffic {
   private cars: TrafficCar[] = [];
 
-  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8, extraModels: string[] = [],
-              private seed = 0) {
+  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 8,
+              extraModels: string[] = [], private crossings: Crossing[] = [], private trains: Trains | null = null) {
     const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
@@ -53,26 +56,19 @@ export class Traffic {
     let g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
     g = Math.min(320, Math.max(64, g));
     if (axis0) {
-      c.position.set(player.x + j0(Math.random, 70), 0, g + 2.3 * c.userData.sign);
+      c.position.set(player.x + j0(Math.random, 70), 0, g + LANE * c.userData.sign);
       c.rotation.y = c.userData.sign > 0 ? Math.PI / 2 : -Math.PI / 2;
     } else {
-      c.position.set(g - 2.3 * c.userData.sign, 0, player.z + j0(Math.random, 70));
+      c.position.set(g - LANE * c.userData.sign, 0, player.z + j0(Math.random, 70));
       c.rotation.y = c.userData.sign > 0 ? 0 : Math.PI;
     }
-    // keep cars off rail corridors and streetless stretches (a nudge is enough)
-    if (this.seed) {
-      const route = railRouteFor(this.seed);
-      if (axis0) {
-        const row = Math.round(c.position.z / this.CH), col = Math.floor(c.position.x / this.CH);
-        if (route.edgeH(row, col) || !this.grid.segH(row, col)) {
-          c.position.x += this.CH / 2;
-        }
-      } else {
-        const col = Math.round(c.position.x / this.CH), row = Math.floor(c.position.z / this.CH);
-        if (route.edgeV(col, row) || !this.grid.segV(col, row)) {
-          c.position.z += this.CH / 2;
-        }
-      }
+    // keep cars off streetless stretches (a nudge is enough)
+    if (axis0) {
+      const row = Math.round(c.position.z / this.CH), col = Math.floor(c.position.x / this.CH);
+      if (!this.grid.segH(row, col)) c.position.x += this.CH / 2;
+    } else {
+      const col = Math.round(c.position.x / this.CH), row = Math.floor(c.position.z / this.CH);
+      if (!this.grid.segV(col, row)) c.position.z += this.CH / 2;
     }
   }
 
@@ -83,7 +79,7 @@ export class Traffic {
       const along = axis0 ? c.position.x : c.position.z;
       const dir = c.userData.sign;
 
-      // next real intersection ahead (skips dropped lines and rail corridors)
+      // next real intersection ahead (skips dropped lines)
       let k = dir > 0 ? Math.ceil((along + 0.01) / this.CH) : Math.floor((along - 0.01) / this.CH);
       let ix = 0, iz = 0, has = false;
       for (let n = 0; n < 6; n++) {
@@ -102,6 +98,19 @@ export class Traffic {
         const st = lightState(ix, iz, elapsed);
         const green = axis0 ? st === 'ew' : st === 'ns';
         if (!green && dist >= STOP_LINE) v = Math.min(v, Math.max(0, (dist - STOP_LINE) * 1.2));
+      }
+
+      // level crossings: hold back while a train is passing
+      if (this.trains) {
+        for (const cr of this.crossings) {
+          if (cr.axis !== (axis0 ? 'h' : 'v')) continue;
+          const across = axis0 ? cr.z - c.position.z : cr.x - c.position.x;
+          if (Math.abs(across) > 4.5) continue;
+          const dist = (axis0 ? cr.x - along : cr.z - along) * dir;
+          if (dist > 0.5 && dist < 34 && this.trains.distTo(cr.d) < 42) {
+            v = Math.min(v, Math.max(0, (dist - 10.5) * 1.2));
+          }
+        }
       }
 
       if (axis0) c.position.x += dir * v * dt;

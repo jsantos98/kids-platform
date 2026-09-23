@@ -6,6 +6,7 @@ import { RoadGrid } from '../../worlds/roadGrid.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { racePath } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
+import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import type { Missions } from './missions.js';
 
@@ -45,7 +46,7 @@ export class Minimap {
     // streets: only the segments the plan kept open
     const plan = cityPlanFor(this.seed);
     ctx.strokeStyle = '#8f97a3';
-    ctx.lineWidth = 10 * scale;
+    ctx.lineWidth = 12 * scale;
     ctx.beginPath();
     for (let j = 0; j <= 5; j++) for (let i = 0; i <= 5; i++) {
       if (plan.segH(j, i)) {
@@ -59,6 +60,19 @@ export class Minimap {
     }
     ctx.stroke();
 
+    // the river, ribbon-width
+    const river = riverFor(this.seed);
+    ctx.strokeStyle = '#5fadc9';
+    ctx.lineWidth = 11 * scale;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    river.pts.forEach((p, k) => {
+      const x = tx(p.x), y = ty(p.z);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
     // the railway: the seeded procedural loop
     ctx.strokeStyle = '#7a6248';
     ctx.lineWidth = 3.4 * scale;
@@ -69,6 +83,31 @@ export class Minimap {
     });
     ctx.closePath();
     ctx.stroke();
+
+    // the downtown tram loop + its stops
+    if (plan.tram) {
+      ctx.strokeStyle = '#e8b23c';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      plan.tram.pts.forEach((p, k) => {
+        const x = tx(p.x), y = ty(p.z);
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#e8b23c';
+      for (const st of plan.tram.stops) {
+        ctx.fillRect(tx(st.x) - 2.5, ty(st.z) - 2.5, 5, 5);
+      }
+    }
+
+    // train stations: blue platforms
+    ctx.fillStyle = '#4a90d9';
+    for (const st of plan.stations) {
+      ctx.fillRect(tx(st.x) - 3, ty(st.z) - 3, 6, 6);
+    }
 
     // the bridge + picnic island off the south shore
     ctx.fillStyle = '#c8b98e';
@@ -89,13 +128,24 @@ export class Minimap {
     ctx.closePath();
     ctx.stroke();
 
-    // traffic lights: one dot per real intersection (roundabouts get a ring)
+    // traffic lights: one dot per real intersection (roundabouts get a ring,
+    // plazas an amber one); level crossings get a white ×
     for (let i = 1; i <= 5; i++) {
       for (let j = 1; j <= 5; j++) {
         if (plan.roundabout(i, j)) {
           ctx.fillStyle = '#a4cf85';
           ctx.beginPath();
           ctx.arc(tx(i * this.CH), ty(j * this.CH), 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fffdf8';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          continue;
+        }
+        if (plan.plaza(i, j)) {
+          ctx.fillStyle = '#f6c952';
+          ctx.beginPath();
+          ctx.arc(tx(i * this.CH), ty(j * this.CH), 4.5, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#fffdf8';
           ctx.lineWidth = 1.5;
@@ -109,6 +159,17 @@ export class Minimap {
         ctx.arc(tx(i * this.CH), ty(j * this.CH), 3, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+
+    // level crossings: a small white × on the street
+    ctx.strokeStyle = '#fffdf8';
+    ctx.lineWidth = 2;
+    for (const c of plan.crossings) {
+      const x = tx(c.x), y = ty(c.z);
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
+      ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4);
+      ctx.stroke();
     }
 
     // objectives: fires orange, cats pink, patients blue

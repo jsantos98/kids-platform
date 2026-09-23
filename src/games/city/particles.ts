@@ -13,6 +13,7 @@ const CONFETTI_COLORS = [0xe25c5c, 0xf6c952, 0x63b0a8, 0x7fb2d9, 0xa794cc, 0xf0b
 export class Particles {
   private dust: Particle[] = [];
   private confetti: Particle[] = [];
+  private splashes: Particle[] = [];
   private dustTimer = 0;
 
   constructor(scene: THREE.Scene) {
@@ -32,6 +33,13 @@ export class Particles {
       scene.add(m);
       this.confetti.push({ m, t: 1, v: new THREE.Vector3() });
     }
+    const sg = new THREE.SphereGeometry(0.26, 8, 6);
+    for (let i = 0; i < 10; i++) {
+      const m = new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ color: 0xbfe3ff, transparent: true, opacity: 0 }));
+      m.visible = false;
+      scene.add(m);
+      this.splashes.push({ m, t: 1, v: new THREE.Vector3() });
+    }
   }
 
   burstConfetti(pos: THREE.Vector3): void {
@@ -41,6 +49,17 @@ export class Particles {
       c.m.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 1.2, (Math.random() - 0.5) * 0.8));
       c.v!.set((Math.random() - 0.5) * 5, 3.5 + Math.random() * 3, (Math.random() - 0.5) * 5);
       c.m.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+    }
+  }
+
+  /** water droplets kicked up fording the river */
+  splash(pos: THREE.Vector3): void {
+    for (const s of this.splashes) {
+      s.t = 0;
+      s.m.visible = true;
+      s.m.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6));
+      s.m.scale.setScalar(0.6 + Math.random() * 0.5);
+      s.v!.set((Math.random() - 0.5) * 4, 2.4 + Math.random() * 2.6, (Math.random() - 0.5) * 4);
     }
   }
 
@@ -75,6 +94,14 @@ export class Particles {
       c.m.rotation.y += dt * 3;
       (c.m.material as THREE.MeshBasicMaterial).opacity = 1 - c.t;
       if (c.t >= 1) c.m.visible = false;
+    }
+    for (const s of this.splashes) {
+      if (s.t >= 1) continue;
+      s.t += dt / 0.6;
+      s.v!.y -= 9 * dt;
+      s.m.position.addScaledVector(s.v!, dt);
+      (s.m.material as THREE.MeshLambertMaterial).opacity = 0.85 * (1 - s.t);
+      if (s.t >= 1) s.m.visible = false;
     }
   }
 }

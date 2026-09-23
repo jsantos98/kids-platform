@@ -61,7 +61,7 @@ export class Missions {
       if (this.grid.cross(Math.round(gx / this.CH), Math.round(gz / this.CH))) break;
     }
     const corner = (r() * 2) | 0; // corners without traffic lights
-    const ox = corner ? -5.9 : 5.9, oz = corner ? 5.9 : -5.9;
+    const ox = corner ? -8.9 : 8.9, oz = corner ? 8.9 : -8.9;
     const pos = new THREE.Vector3(gx + ox, 0.15, gz + oz);
     forceChunkAt(pos.x, pos.z);
     const need = type === 'patient' ? Math.min(2.5 + diff * 0.15, 4)

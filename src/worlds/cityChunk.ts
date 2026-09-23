@@ -1,15 +1,17 @@
 // The little island city — chunk baker. All design decisions live in the city
 // plan (cityPlan.ts, seeded per world); this file just renders one 64 m chunk
-// of that plan into a vertex-colored mesh: streets, node tiles, level
-// crossings, lamps, building lots, park ponds, nature scatter, the beach ring
-// and the race circuit. The whole island is built once at boot.
+// of that plan into a vertex-colored mesh: wide streets, node tiles, round-
+// abouts and plazas, lamps, building lots, park ponds, the river with its
+// banks, fords and street bridges, nature scatter, the beach ring and the
+// race circuit. The whole island is built once at boot.
 import * as THREE from 'three';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { raceZoneChunk, raceTiles, tileCenter } from './racetrack.js';
+import { raceTiles, tileCenter } from './racetrack.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
+import { riverFor } from './riverRoute.js';
 
 export const WORLD_CHUNKS = 6; // island is 6×6 chunks = 384 × 384 m
 
@@ -55,7 +57,6 @@ function kenneyTPL() {
     lightCurved: bakedModel('light-curved'),
     roadStraight: bakedModel('road-straight') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
     roadCrossroad: bakedModel('road-crossroad') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
-    roadCrossing: bakedModel('road-crossing') ?? { geos: [], size: { x: 1, y: 1, z: 1 }, center: { x: 0, z: 0 } },
     raceStraight: bakedModel('race-straight'),
     raceCorner: bakedModel('race-corner'),
     raceFinish: bakedModel('race-finish'),
@@ -70,9 +71,15 @@ function kenneyTPL() {
 }
 
 const BEACH = 0xf0e2c0;
+const RIVER_WATER = 0x5fadc9;
+const RIVER_BANK = 0xdfd3b4;
+const RIVER_PATH = 0xd9cdb4;
+const BRIDGE_STEEL = 0x8f97a3;
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
 const ROAD_DASH_X = 0;
+const ROAD_HALF = 7;      // 14 m carriageway — roomy for little drivers
+const ROAD_SCALE = 1.4;   // kit tiles are 10 m wide; stretch across
 
 export function slabColor(d: District): number {
   switch (d) {
@@ -102,6 +109,7 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   const TPL = kenneyTPL();
   const plan = cityPlanFor(seed);
   const rail = railRouteFor(seed);
+  const river = riverFor(seed);
   const district = plan.district(cx, cz);
 
   // base slab — district ground, sand beach ring at the border
@@ -111,40 +119,99 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   if (cz === 0) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + 3);
   if (cz === WORLD_CHUNKS - 1) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + CH - 3);
 
-  // ---- streets: this chunk's south (z=Z0) and west (x=X0) edges ----
+  // ---- the river: water ribbon, sandy banks and a footpath, interrupted
+  // where a street bridges it ----
+  const bridges = plan.riverBridges.filter(b => b.x > X0 - 30 && b.x < X0 + CH + 30 && b.z > Z0 - 30 && b.z < Z0 + CH + 30);
+  const nearBridge = (x: number, z: number): boolean =>
+    bridges.some(b => Math.hypot(b.x - x, b.z - z) < 11);
+  {
+    const rp = river.pts;
+    for (let k = 0; k + 1 < rp.length; k++) {
+      const a = rp[k], b = rp[k + 1];
+      const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+      if (mx < X0 - 10 || mx > X0 + CH + 10 || mz < Z0 - 10 || mz > Z0 + CH + 10) continue;
+      const len = Math.hypot(b.x - a.x, b.z - a.z) + 1.4;
+      const ry = Math.atan2(b.x - a.x, b.z - a.z);
+      if (nearBridge(mx, mz)) continue; // the street bridge owns this stretch
+      const w = (a.w + b.w) / 2;
+      B.box(w, 0.09, len, RIVER_WATER, mx, 0.105, mz, 0, ry, 0);
+      // sandy banks + a footpath on one side
+      const rx = Math.cos(ry), rz = -Math.sin(ry);
+      for (const s of [-1, 1]) {
+        B.box(2.8, 0.05, len, RIVER_BANK, mx + rx * s * (w / 2 + 1.4), 0.1, mz + rz * s * (w / 2 + 1.4), 0, ry, 0);
+      }
+      B.box(1.9, 0.045, len, RIVER_PATH, mx + rx * (w / 2 + 3.4), 0.1, mz + rz * (w / 2 + 3.4), 0, ry, 0);
+    }
+    // greenway: trees and benches along the banks that pass through this chunk
+    for (let k = 2; k + 2 < rp.length; k += 5) {
+      const p = rp[k];
+      if (p.x < X0 + 4 || p.x > X0 + CH - 4 || p.z < Z0 + 4 || p.z > Z0 + CH - 4) continue;
+      if (nearBridge(p.x, p.z) || nearStreet(p.x, p.z)) continue;
+      const side = (k % 2) * 2 - 1;
+      const rx = Math.cos(p.h), rz = -Math.sin(p.h);
+      const tx = p.x + rx * side * (p.w / 2 + 5 + r() * 4);
+      const tz = p.z + rz * side * (p.w / 2 + 5 + r() * 4);
+      const bankTpl = district === 'desert' ? pick(r, [...TPL.cacti, ...TPL.rocks])
+        : district === 'forest' ? pick(r, TPL.pines) : pick(r, TPL.trees);
+      if (bankTpl) {
+        bakeModel(B, bankTpl, tx, 0.08, tz, r() * Math.PI * 2, 4 + r() * 3);
+        boxes.push({ x1: tx - 0.6, x2: tx + 0.6, z1: tz - 0.6, z2: tz + 0.6, small: 1 });
+      }
+      if (r() < 0.4) {
+        const bx2 = p.x + rx * side * (p.w / 2 + 2.9), bz2 = p.z + rz * side * (p.w / 2 + 2.9);
+        B.box(1.6, 0.08, 0.45, 0xa9805a, bx2, 0.55, bz2, 0, p.h, 0);
+      }
+    }
+  }
+  // street bridges over the river: steel girders + cream rail caps + abutments
+  for (const b of bridges) {
+    const alongX = b.axis === 'h';
+    const hw = river.halfAt(b.x, b.z) + 5.5; // span past the water
+    for (const s of [-1, 1]) {
+      const off = ROAD_HALF + 0.9;
+      const gx = b.x + (alongX ? 0 : s * off);
+      const gz = b.z + (alongX ? s * off : 0);
+      B.box(alongX ? 20 : 0.55, 0.62, alongX ? 0.55 : 20, BRIDGE_STEEL, gx, 0.4, gz);
+      B.box(alongX ? 20 : 0.34, 0.14, alongX ? 0.34 : 20, 0xe8e4d8, gx, 0.78, gz);
+    }
+    for (const s of [-1, 1]) {
+      const ax = b.x + (alongX ? s * 10.2 : 0);
+      const az = b.z + (alongX ? 0 : s * 10.2);
+      B.box(alongX ? 1.3 : hw * 2 + 6, 0.55, alongX ? hw * 2 + 6 : 1.3, BRIDGE_STEEL, ax, 0.28, az);
+    }
+  }
+
+  // ---- wide streets: this chunk's south (z=Z0) and west (x=X0) edges ----
   const TS = 10, TY = 0.11;
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
   for (let k = 0; k < 6; k++) {
     const c = TS / 2 + k * TS;
-    if (roadS) bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS]);
-    if (roadW) bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
+    if (roadS) bakeModel(B, TPL.roadStraight, X0 + c, TY, Z0, ROAD_DASH_X, 1, [TS, TS, TS * ROAD_SCALE]);
+    if (roadW) bakeModel(B, TPL.roadStraight, X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS * ROAD_SCALE]);
   }
 
   // ---- node tile at the chunk's SW corner (X0, Z0) ----
   const a = plan.arms(cx, cz); // [west, east, north, south]
   const armCount = a.filter(Boolean).length;
-  const railHere = rail.nodeOnRoute(cx, cz);
-  if (railHere && armCount >= 2) {
-    // level crossing: rails run one way, the road crosses them
-    const railVertical = rail.edgeV(cx, cz) || rail.edgeV(cx, cz - 1);
-    bakeModel(B, TPL.roadCrossing, X0, TY, Z0,
-      railVertical ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
+  if (plan.plaza(cx, cz)) {
+    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]);
+    bakePlaza(X0, Z0);
   } else if (armCount >= 3) {
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
+    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]);
     if (plan.roundabout(cx, cz)) bakeRoundabout(X0, Z0);
   } else if (armCount === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) {
     // straight-through node
     const alongX = !!(a[0] && a[1]);
-    bakeModel(B, TPL.roadStraight, X0, TY, Z0, alongX ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS]);
-  } else if (armCount === 2 || (armCount === 1 && railHere)) {
-    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS); // L-corner or stub by a crossing
+    bakeModel(B, TPL.roadStraight, X0, TY, Z0, alongX ? ROAD_DASH_X : ROAD_DASH_X + Math.PI / 2, 1, [TS, TS, TS * ROAD_SCALE]);
+  } else if (armCount === 2) {
+    bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS, [TS * ROAD_SCALE, TS, TS * ROAD_SCALE]); // L-corner
   }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
   // chunks only keep their corner collision boxes
   if (plan.signalized(cx, cz)) {
-    for (const [tx, tz] of [[X0 + 5.8, Z0 + 5.8], [X0 - 5.8, Z0 - 5.8]]) {
+    for (const [tx, tz] of [[X0 + 8.4, Z0 + 8.4], [X0 - 8.4, Z0 - 8.4]]) {
       boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }
@@ -152,13 +219,13 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   // street lamps along surviving streets (urban fabric + industry)
   const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
   if (lampDistrict) {
-    for (let d = 10; d < CH; d += 18) {
+    for (let d = 11; d < CH; d += 18) {
       if (TPL.lightCurved) {
-        if (roadS) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 5.4, 0, 5.5);
-        if (roadW) bakeModel(B, TPL.lightCurved, X0 + 5.4, 0.1, Z0 + d, Math.PI / 2, 5.5);
+        if (roadS) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
+        if (roadW) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
       }
-      if (roadS) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 5.1, z2: Z0 + 5.7, small: 1 });
-      if (roadW) boxes.push({ x1: X0 + 5.1, x2: X0 + 5.7, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
+      if (roadS) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
+      if (roadW) boxes.push({ x1: X0 + 7.5, x2: X0 + 8.1, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
     }
   }
 
@@ -223,15 +290,40 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   /** traffic circle: lighter circular carriageway with a painted ring,
    * kerbed grass island with a tree, pole collision */
   function bakeRoundabout(x: number, z: number): void {
-    B.cyl(4.6, 4.6, 0.06, 20, 0x9aa1ab, x, 0.14, z);       // circular carriageway
-    B.cyl(4.34, 4.34, 0.065, 20, 0xe8e4d8, x, 0.1425, z);  // painted ring
-    B.cyl(4.1, 4.1, 0.07, 20, 0x9aa1ab, x, 0.145, z);
-    B.cyl(1.4, 1.6, 0.22, 14, 0x8f97a3, x, 0.21, z);       // kerb
-    B.cyl(1.3, 1.3, 0.24, 14, 0xa4cf85, x, 0.29, z);       // grass island
+    B.cyl(6.4, 6.4, 0.06, 22, 0x9aa1ab, x, 0.14, z);       // circular carriageway
+    B.cyl(6.0, 6.0, 0.065, 22, 0xe8e4d8, x, 0.1425, z);    // painted ring
+    B.cyl(5.6, 5.6, 0.07, 22, 0x9aa1ab, x, 0.145, z);
+    B.cyl(2.4, 2.6, 0.22, 14, 0x8f97a3, x, 0.21, z);       // kerb
+    B.cyl(2.1, 2.1, 0.24, 14, 0xa4cf85, x, 0.29, z);       // grass island
     if (TPL.trees.length) {
-      bakeModel(B, pick(r, TPL.trees), x, 0.41, z, r() * Math.PI * 2, 2.8 + r() * 0.8);
+      bakeModel(B, pick(r, TPL.trees), x, 0.41, z, r() * Math.PI * 2, 2.0 + r() * 0.6);
     }
-    boxes.push({ x1: x - 1.4, x2: x + 1.4, z1: z - 1.4, z2: z + 1.4, small: 1 });
+    boxes.push({ x1: x - 2.1, x2: x + 2.1, z1: z - 2.1, z2: z + 2.1, small: 1 });
+  }
+
+  /** paved plaza with a fountain, benches and planters — the meeting place */
+  function bakePlaza(x: number, z: number): void {
+    B.cyl(9.4, 9.4, 0.055, 26, 0xcfc6b0, x, 0.14, z);    // apron
+    B.cyl(9.0, 9.0, 0.07, 26, 0xd8d0bc, x, 0.145, z);    // paved circle
+    B.cyl(6.4, 6.4, 0.06, 26, 0xcfc6b0, x, 0.1475, z);   // ring pattern
+    B.cyl(5.9, 5.9, 0.065, 26, 0xd8d0bc, x, 0.15, z);
+    // the fountain
+    B.cyl(2.9, 3.1, 0.5, 16, 0x9aa1ab, x, 0.35, z);      // basin wall
+    B.cyl(2.6, 2.6, 0.44, 16, 0x6fb7d9, x, 0.4, z);      // water
+    B.cyl(0.9, 1.15, 1.4, 12, 0xcfccc2, x, 0.8, z);      // pedestal
+    B.cyl(1.55, 1.55, 0.18, 12, 0x9fd8ef, x, 1.55, z);   // upper dish
+    B.sphere(0.3, 0xbfe3ff, x, 1.8, z);                  // finial
+    boxes.push({ x1: x - 2.2, x2: x + 2.2, z1: z - 2.2, z2: z + 2.2, small: 1 });
+    // benches + planter pots around the circle
+    for (let k = 0; k < 4; k++) {
+      const ang = k * Math.PI / 2 + Math.PI / 4;
+      const bx = x + Math.cos(ang) * 4.9, bz = z + Math.sin(ang) * 4.9;
+      B.box(1.7, 0.1, 0.5, 0xa9805a, bx, 0.55, bz, 0, -ang, 0);
+      const px = x + Math.cos(ang + Math.PI / 4) * 7.6, pz = z + Math.sin(ang + Math.PI / 4) * 7.6;
+      B.cyl(0.55, 0.7, 0.5, 10, 0xb5651d, px, 0.35, pz); // terracotta pot
+      B.cyl(0.4, 0.4, 0.45, 8, 0xa4cf85, px, 0.72, pz);  // shrub
+      boxes.push({ x1: px - 0.7, x2: px + 0.7, z1: pz - 0.7, z2: pz + 0.7, small: 1 });
+    }
   }
 
   function bakeParkedCar(x: number, z: number, ry: number): void {
@@ -298,12 +390,14 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   }
 
   function nearStreet(x: number, z: number): boolean {
-    // keep scatter clear of street/rail corridors through this chunk
+    // keep scatter clear of street corridors, the railway and the river
     const lx = Math.round(x / CH), lz = Math.round(z / CH);
-    if (Math.abs(x - lx * CH) < 7 &&
-        (plan.segV(lx, cz) || plan.segV(lx, cz - 1) || rail.edgeV(lx, cz) || rail.edgeV(lx, cz - 1))) return true;
-    if (Math.abs(z - lz * CH) < 7 &&
-        (plan.segH(lz, cx) || plan.segH(lz, cx - 1) || rail.edgeH(lz, cx) || rail.edgeH(lz, cx - 1))) return true;
+    if (Math.abs(x - lx * CH) < 8.6 &&
+        (plan.segV(lx, cz) || plan.segV(lx, cz - 1))) return true;
+    if (Math.abs(z - lz * CH) < 8.6 &&
+        (plan.segH(lz, cx) || plan.segH(lz, cx - 1))) return true;
+    if (rail.near(x, z, 9.5)) return true;
+    if (river.near(x, z, river.halfAt(x, z) + 2.5)) return true;
     return false;
   }
 

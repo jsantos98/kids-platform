@@ -43,7 +43,7 @@ export function makeTrafficLights(x0: number, z0: number): TrafficLightProps {
     group.add(g);
     return lamps;
   };
-  const ew = make(x0 + 5.8, z0 + 5.8); // NE corner: controls the E-W road
-  const ns = make(x0 - 5.8, z0 - 5.8); // SW corner: controls the N-S road
+  const ew = make(x0 + 8.4, z0 + 8.4); // NE corner: controls the E-W road
+  const ns = make(x0 - 8.4, z0 - 8.4); // SW corner: controls the N-S road
   return { group, ew, ns };
 }

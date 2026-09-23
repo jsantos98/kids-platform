@@ -72,7 +72,7 @@ export class Pedestrians {
       const idx = Math.min(5, Math.max(1, base + ((Math.random() * 3) | 0) - 1));
       if (!(alongX ? this.grid.hasZ(idx) : this.grid.hasX(idx))) continue;
       const side = Math.random() < 0.5 ? -1 : 1;
-      const offset = side * (5.8 + Math.random() * 1.4);
+      const offset = side * (8.2 + Math.random() * 1.4);
       const along = Math.min(360, Math.max(24, (alongX ? px : pz) + (Math.random() - 0.5) * 140));
       // the line must actually have a street segment at this stretch
       const seg = Math.min(4, Math.max(0, Math.floor(along / this.CH)));

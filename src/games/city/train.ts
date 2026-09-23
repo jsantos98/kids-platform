@@ -1,16 +1,21 @@
-// The island railway: Kenney train-kit consists riding the seeded procedural
-// rail loop (railRoute.ts). Every vehicle gets its own path distance so the
-// consist articulates around corners like a real train. The rails mesh is
-// built here too — track pieces from the kit baked into one island-wide mesh.
+// The island railway: Kenney train-kit consists riding the seeded spline loop
+// (railRoute.ts). Every vehicle gets its own path distance so the consist
+// articulates through the curves like a real train. Trains slow down and pause
+// at the plan's stations; the rails mesh is built here too.
 import * as THREE from 'three';
 import { spawnVehicle, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { railRouteFor, bakeRails, RAIL_TOP, type RailRoute } from '../../worlds/railRoute.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { arcGap } from '../../worlds/spline.js';
 
-const SPEED = 9; // m/s
+const SPEED = 9;    // m/s cruising
+const BRAKE = 5.5;  // m/s^2 approaching a station
+const ACCEL = 2.2;  // m/s^2 leaving one
 const LOCO_LEN = 9;
 const CAR_LEN = 7.5;
-const GAP = 1.1; // coupling distance (m)
+const GAP = 1.1;    // coupling distance (m)
+const HOLD = 3.6;   // seconds paused at a platform
 
 const LOCOS = ['/assets/kenney/train/train-diesel-a.glb', '/assets/kenney/train/train-locomotive-b.glb'];
 const CARS = [
@@ -27,23 +32,29 @@ interface Unit {
 }
 
 interface Consist {
-  start: number;              // head distance at elapsed = 0
+  s: number;                  // head distance along the loop
+  v: number;                  // current speed
+  hold: number;               // seconds spent at the current station stop
+  next: number;               // index into the sorted station list
   units: Unit[];
 }
 
 export class Trains {
   private route: RailRoute;
+  private stations: number[] = []; // arc distances, ascending
   private consists: Consist[] = [];
 
   constructor(scene: THREE.Scene, seed: number) {
     this.route = railRouteFor(seed);
+    this.stations = cityPlanFor(seed).stations.map(s => s.d).sort((a, b) => a - b);
     // the rails: one baked mesh for the whole island
     scene.add(bakeRails(this.route, bakedModel('rail-straight')));
 
     // three consists, evenly spaced around the loop, random loco + wagons
     const r = rng(chunkSeed(seed, 0x7a1, 2));
     for (let t = 0; t < 3; t++) {
-      const consist: Consist = { start: (t * this.route.total) / 3, units: [] };
+      const consist: Consist = { s: (t * this.route.total) / 3, v: SPEED, hold: 0, next: 0, units: [] };
+      consist.next = this.nextStation(consist.s);
       const loco = LOCOS[(r() * LOCOS.length) | 0];
       consist.units.push(this.makeUnit(scene, loco, LOCO_LEN, 0));
       const nCars = 2 + ((r() * 2) | 0); // 2..3 wagons
@@ -54,6 +65,17 @@ export class Trains {
       }
       this.consists.push(consist);
     }
+  }
+
+  /** wrapped arc distance from `s` to the next station ahead */
+  private nextStation(s: number): number {
+    if (!this.stations.length) return 0;
+    let best = 0, bestGap = Infinity;
+    for (let i = 0; i < this.stations.length; i++) {
+      const g = ((this.stations[i] - s) % this.route.total + this.route.total) % this.route.total;
+      if (g < bestGap) { bestGap = g; best = i; }
+    }
+    return best;
   }
 
   private makeUnit(scene: THREE.Scene, url: string, len: number, back: number): Unit {
@@ -67,13 +89,43 @@ export class Trains {
     return unit;
   }
 
-  update(elapsed: number): void {
-    const total = this.route.total;
+  /** shortest wrapped distance from any train unit to arc position d —
+   * the level-crossing signals and the traffic AI both ask this */
+  distTo(d: number): number {
+    let best = Infinity;
     for (const c of this.consists) {
-      const head = c.start + elapsed * SPEED;
       for (const u of c.units) {
         if (!u.obj) continue;
-        const p = this.route.sample(head - u.back);
+        const g = arcGap(c.s - u.back, d, this.route.total);
+        if (g < best) best = g;
+      }
+    }
+    return best;
+  }
+
+  update(dt: number): void {
+    const total = this.route.total;
+    for (const c of this.consists) {
+      if (this.stations.length) {
+        const gap = ((this.stations[c.next] - c.s) % total + total) % total;
+        if (gap < 1.6) {
+          // dwelling at the platform
+          c.v = 0;
+          c.hold += dt;
+          if (c.hold >= HOLD) {
+            c.hold = 0;
+            c.next = (c.next + 1) % this.stations.length;
+          }
+        } else {
+          const target = gap < 34 ? Math.max(0.35, gap * 0.42) : SPEED;
+          const dv = target - c.v;
+          c.v += Math.max(-BRAKE * dt, Math.min(ACCEL * dt, dv));
+        }
+      }
+      c.s += c.v * dt;
+      for (const u of c.units) {
+        if (!u.obj) continue;
+        const p = this.route.sample(c.s - u.back);
         u.obj.position.set(p.x, RAIL_TOP, p.z);
         u.obj.rotation.y = p.h;
       }

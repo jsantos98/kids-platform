@@ -15,6 +15,7 @@ import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { RACE_START, raceGates, racePath, racePathPts } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
@@ -22,6 +23,8 @@ import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
 import { Particles } from './particles.js';
+import { Transit } from './transit.js';
+import { riverFor } from '../../worlds/riverRoute.js';
 import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 
@@ -104,6 +107,7 @@ Object.assign(KITDEFS, {
   'race-finish': [`${RACEKIT}/track-finish.glb`, `${RACEKIT}/Textures/colormap.png`],
   'race-bump': [`${RACEKIT}/track-bump.glb`, `${RACEKIT}/Textures/colormap.png`],
   'rail-straight': [`${TRAINKIT}/railroad-straight.glb`, `${TRAINKIT}/Textures/colormap.png`],
+  'tram-car': [`${TRAINKIT}/train-carriage-box.glb`, `${TRAINKIT}/Textures/colormap.png`],
 });
 const PETKIT = '/assets/kenney/pets';
 const PEDKIT = '/assets/kenney/mini-chars';
@@ -140,6 +144,7 @@ if (q.get('debugbake') === '1') {
 // ---- chunk streaming ----
 const roadGrid = new RoadGrid(P.seed);
 const chunks = new ChunkManager(scene, P.seed, roadGrid);
+const river = riverFor(P.seed);
 // the island is small: build every chunk once at boot
 for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
   for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(cx, cz);
@@ -177,13 +182,14 @@ if (q.get('spraytest') === '1') {
   if (fp) { player.state.x = fp.pos.x + 6; player.state.z = fp.pos.z + 4; }
 }
 
-// ---- traffic ----
-// in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : [], P.seed);
-
-// ---- ambient life: several trains on the rail corridors; a patrol heli
-// circles the neighbourhood while the kid plays the fire truck ----
+// ---- ambient life: trains on the smooth main line (with station stops),
+// the tram circling downtown, level crossings that hold the cars, a patrol
+// heli circling the neighbourhood while the kid plays the fire truck ----
 const trains = new Trains(scene, P.seed);
+const transit = new Transit(scene, P.seed);
+// in heli mode one of the AI vehicles is the fire truck, driving itself
+const traffic = new Traffic(scene, roadGrid, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : [],
+  cityPlanFor(P.seed).crossings, trains);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -194,6 +200,10 @@ if (q.get('debugsea') === '1') {
     camera,
     renderer,
     trains,
+    traffic,
+    transit,
+    tram: () => transit.list(),
+    river,
     route: railRouteFor(P.seed),
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
@@ -257,6 +267,7 @@ let hoseAim = 0;
 let spraySession: sprayMod.SpraySession | null = null;
 let ladderSession: ladderMod.LadderSession | null = null;
 let toast = '';
+let splashTimer = 0;
 const totals = loadTotals();
 updateMissionPanel();
 const clock = new THREE.Clock();
@@ -404,11 +415,21 @@ const tick = (): void => {
   st.x = Math.min(381, Math.max(3, st.x));
   st.z = Math.min(381, Math.max(3, st.z));
 
-  // ambient life: the trains, the sea with its boats and the patrol helicopter
-  trains.update(elapsed);
+  // ambient life: the trains, the tram, the sea with its boats and the patrol
+  // helicopter; the river is a shallow ford — splash through it slowly
+  trains.update(dt);
+  transit.update(dt, elapsed, trains);
   sea.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
   pedestrians.update(dt, st.x, st.z, st.x, st.z);
+  if (!V.fly && river.inWater(st.x, st.z)) {
+    st.v *= 1 - Math.min(0.5, dt * 1.6);
+    splashTimer -= dt;
+    if (Math.abs(st.v) > 1.5 && splashTimer <= 0) {
+      splashTimer = 0.1;
+      particles.splash(new THREE.Vector3(st.x, 0.25, st.z));
+    }
+  }
 
   // ambient life
   traffic.update(dt, elapsed, player.car.position);

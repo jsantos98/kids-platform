@@ -16,4 +16,4 @@ export function lightState(ix: number, iz: number, t: number): LightState {
 }
 
 /** metres from the intersection centre where cars stop (before the crosswalk) */
-export const STOP_LINE = 16.5;
+export const STOP_LINE = 18.5;

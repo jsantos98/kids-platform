@@ -2,6 +2,7 @@
 // Every geometry gets a per-vertex color so a single Lambert material covers all.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import type { BakedTemplate } from './assets.js';
 
 const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -122,5 +123,12 @@ export function bakeObjectToMesh(g: THREE.Object3D): THREE.Mesh {
     geo.applyMatrix4(node.matrixWorld);
     b.raw(geo);
   });
+  return b.build();
+}
+
+/** Convert a baked template (already-normalized geos) into one mesh. */
+export function templateToMesh(tpl: BakedTemplate): THREE.Mesh {
+  const b = new Baked();
+  for (const g of tpl.geos) b.raw(g.clone());
   return b.build();
 }

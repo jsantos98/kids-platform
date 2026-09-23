@@ -1,10 +1,12 @@
-// Pedestrians: villagers walking the sidewalks near the player. They flee the
-// truck when it gets close (they can never be run over — no collision, they
-// just panic and scatter). Each villager is merged into one mesh at creation.
+// Pedestrians and pets: villagers stroll the sidewalks and cube pets wander
+// with them — everyone flees the truck when it gets close (they can never be
+// run over — no collision, they just panic and scatter). Each body is merged
+// into one mesh at creation.
 import * as THREE from 'three';
 import { makeVillager } from '../../kit/index.js';
-import { bakeObjectToMesh } from '../../engine/baked.js';
+import { Baked, bakeObjectToMesh, templateToMesh } from '../../engine/baked.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import type { BakedTemplate } from '../../engine/assets.js';
 
 interface Ped {
   mesh: THREE.Mesh;
@@ -14,12 +16,15 @@ interface Ped {
   dir: number;
   speed: number;
   phase: number;
+  /** pets hop while moving */
+  pet: boolean;
 }
 
 export class Pedestrians {
   private peds: Ped[] = [];
 
-  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number, count = 14) {
+  constructor(private scene: THREE.Scene, private grid: RoadGrid, private CH: number,
+              count = 14, petTpls: BakedTemplate[] = []) {
     // a few distinct merged villager bodies, shared across the pedestrians
     const variants: Array<{ geo: THREE.BufferGeometry; mat: THREE.Material }> = [];
     for (let i = 0; i < 4; i++) {
@@ -31,13 +36,23 @@ export class Pedestrians {
       const mesh = new THREE.Mesh(v.geo, v.mat);
       mesh.castShadow = true;
       scene.add(mesh);
-      const p: Ped = { mesh, alongX: true, idx: 0, dir: 1, speed: 1, phase: Math.random() * 10 };
+      const p: Ped = { mesh, alongX: true, idx: 0, dir: 1, speed: 1, phase: Math.random() * 10, pet: false };
+      this.peds.push(p);
+      this.respawn(p, 0, 0);
+    }
+    // cube pets: same wandering + fleeing, with a hop in their step
+    for (const tpl of petTpls) {
+      const mesh = templateToMesh(tpl);
+      mesh.scale.setScalar(0.9 + Math.random() * 0.3);
+      mesh.castShadow = true;
+      scene.add(mesh);
+      const p: Ped = { mesh, alongX: true, idx: 0, dir: 1, speed: 1.2, phase: Math.random() * 10, pet: true };
       this.peds.push(p);
       this.respawn(p, 0, 0);
     }
   }
 
-  /** Place a pedestrian on a sidewalk of a real street near (px, pz). */
+  /** Place a pedestrian or pet on a sidewalk of a real street near (px, pz). */
   respawn(p: Ped, px: number, pz: number): void {
     for (let tries = 0; tries < 12; tries++) {
       const alongX = Math.random() < 0.5;
@@ -72,8 +87,8 @@ export class Pedestrians {
         pos.x += runX;
         pos.z += runZ;
         p.mesh.rotation.y = Math.atan2(runX, runZ);
-        p.mesh.rotation.x = 0.18;
-        pos.y = 0.1 + Math.abs(Math.sin((p.phase += dt * 14))) * 0.16;
+        p.mesh.rotation.x = p.pet ? 0.1 : 0.18;
+        pos.y = 0.1 + Math.abs(Math.sin((p.phase += dt * (p.pet ? 16 : 14)))) * 0.16;
       } else {
         // stroll along the sidewalk
         p.mesh.rotation.x = 0;
@@ -85,7 +100,7 @@ export class Pedestrians {
           pos.z += move;
           p.mesh.rotation.y = p.dir > 0 ? 0 : Math.PI;
         }
-        pos.y = 0.1 + Math.abs(Math.sin((p.phase += dt * 6))) * 0.04;
+        pos.y = 0.1 + Math.abs(Math.sin((p.phase += dt * 6))) * (p.pet ? 0.06 : 0.04);
         if (d > 130) this.respawn(p, px, pz);
       }
     }

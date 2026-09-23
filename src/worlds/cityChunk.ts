@@ -12,6 +12,11 @@ import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
 
+/** Rail lines replace every 4th road grid line — the train shuttles along them. */
+export function isRailLine(index: number): boolean {
+  return (((index % 4) + 4) % 4) === 0;
+}
+
 // ---- Kenney kit placement helpers (models baked into chunk vertex-color meshes) ----
 const _km = new THREE.Matrix4();
 const _kq = new THREE.Quaternion();
@@ -84,11 +89,29 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
   // base slab (sidewalk-level concrete everywhere; roads sit on top)
   B.box(CH, 0.1, CH, C.sidewalk, X0 + CH / 2, 0.05, Z0 + CH / 2);
 
-  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines
+  // roads along this chunk's south (z=Z0) and west (x=X0) grid lines.
+  // every 4th line is a RAIL corridor instead (the train shuttles along it),
+  // with level crossings where side roads pass over the rails.
   // tile: road surface at model y=0, raised sidewalk strips to y=0.02 — at 10 m
   // scale the curbs stand 0.2 proud; sit the surface just above the slab top
   const TS = 10, TY = 0.11;
-  if (TPL.roadStraight && TPL.roadCrossroad) {
+  const railZ = isRailLine(cz); // south edge is rail
+  const railX = isRailLine(cx); // west edge is rail
+  if (railZ) {
+    // rail corridor along the south edge; ballast/sleepers pause where the
+    // N-S side roads cross (rails only there, like a level crossing)
+    B.box(CH, 0.06, 5, 0xcbb894, X0 + CH / 2, 0.1, Z0);
+    for (let d = 5; d < CH - 5; d += 0.75) B.box(0.24, 0.1, 2.0, C.brownDark, X0 + d, 0.17, Z0);
+    B.box(CH, 0.1, 0.14, 0x9aa5b5, X0 + CH / 2, 0.26, Z0 - 0.75);
+    B.box(CH, 0.1, 0.14, 0x9aa5b5, X0 + CH / 2, 0.26, Z0 + 0.75);
+  }
+  if (railX) {
+    B.box(5, 0.06, CH, 0xcbb894, X0, 0.1, Z0 + CH / 2);
+    for (let d = 5; d < CH - 5; d += 0.75) B.box(2.0, 0.1, 0.24, C.brownDark, X0, 0.17, Z0 + d);
+    B.box(0.14, 0.1, CH, 0x9aa5b5, X0 - 0.75, 0.26, Z0 + CH / 2);
+    B.box(0.14, 0.1, CH, 0x9aa5b5, X0 + 0.75, 0.26, Z0 + CH / 2);
+  }
+  if (TPL.roadStraight && TPL.roadCrossroad && !railZ && !railX) {
     // straight tiles fill the edge between the corner crossroad (which covers
     // TS/2 into this chunk) and the neighbour's crossroad; the first slot is a
     // crosswalk tile as the approach to the SW intersection
@@ -103,12 +126,12 @@ export function generateCityChunk(seed: number, cx: number, cz: number): CityChu
         X0, TY, Z0 + c, ROAD_DASH_X + Math.PI / 2, 1, [L, TS, TS]);
     }
     bakeModel(B, TPL.roadCrossroad, X0, TY, Z0, 0, TS);
-  } else {
+  } else if (!railZ && !railX) {
     B.box(CH + 9, 0.06, 9, C.road, X0 + CH / 2, 0.09, Z0);
     B.box(9, 0.06, CH + 9, C.road, X0, 0.09, Z0 + CH / 2);
   }
   // curbs + markings: procedural look only (the tiles carry their own)
-  if (!(TPL.roadStraight && TPL.roadCrossroad)) {
+  if (!(TPL.roadStraight && TPL.roadCrossroad) && !railZ && !railX) {
     for (const cz of [Z0 - 4.7, Z0 + 4.7]) B.box(CH + 9, 0.16, 0.4, 0xd8d2c2, X0 + CH / 2, 0.12, cz);
     for (const cxx of [X0 - 4.7, X0 + 4.7]) B.box(0.4, 0.16, CH + 9, 0xd8d2c2, cxx, 0.12, Z0 + CH / 2);
     for (let d = 3; d < CH - 2; d += 3.6) {

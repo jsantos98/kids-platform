@@ -1,7 +1,9 @@
-// Ambient traffic: AI cars driving the road grid, obeying the traffic lights.
+// Ambient traffic: AI cars driving the road grid, obeying the traffic lights
+// and never using the rail corridors.
 import * as THREE from 'three';
 import { makeCar } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
+import { isRailLine } from '../../worlds/cityChunk.js';
 import { lightState, STOP_LINE } from './lights.js';
 
 const MODELS = [
@@ -25,7 +27,8 @@ const j0 = (r: () => number, amp: number) => (r() - 0.5) * 2 * amp;
 export class Traffic {
   private cars: TrafficCar[] = [];
 
-  constructor(private scene: THREE.Scene, private CH: number, count = 8) {
+  constructor(private scene: THREE.Scene, private CH: number, count = 8, extraModels: string[] = []) {
+    const models = [...MODELS, ...extraModels];
     for (let i = 0; i < count; i++) {
       const c = makeCar({ body: FALLBACK_COLORS[i % 4] }) as TrafficCar;
       c.userData.axis = (i % 2) as 0 | 1;
@@ -33,7 +36,7 @@ export class Traffic {
       c.userData.speed = 6 + Math.random() * 4;
       scene.add(c);
       this.cars.push(c);
-      spawnVehicle(MODELS[i % MODELS.length], { len: 4.4 }).then(g => {
+      spawnVehicle(models[i % models.length], { len: 4.4 }).then(g => {
         c.clear();
         c.add(g);
         c.userData.wheels = wheelNodes(g);
@@ -42,9 +45,10 @@ export class Traffic {
     this.cars.forEach(c => this.respawn(c, new THREE.Vector3()));
   }
 
-  /** Move a car onto a road lane near the player, heading along its axis. */
+  /** Move a car onto a road lane near the player (never on a rail line). */
   respawn(c: TrafficCar, player: THREE.Vector3): void {
-    const g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
+    let g = Math.round((Math.random() < 0.5 ? player.x : player.z) / this.CH) * this.CH;
+    if (isRailLine(Math.round(g / this.CH))) g += this.CH;
     if (c.userData.axis === 0) {
       c.position.set(player.x + j0(Math.random, 70), 0, g + 2.3 * c.userData.sign);
       c.rotation.y = c.userData.sign > 0 ? Math.PI / 2 : -Math.PI / 2;

@@ -1,14 +1,17 @@
 // Player vehicle: configs, arcade physics, collision and crash-resume.
 import * as THREE from 'three';
-import { makeCar, makeFireTruck } from '../../kit/index.js';
+import { makeCar, makeFireTruck, makeHelicopter } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 export interface VehicleConfig {
   /** procedural fallback model (shown until the GLB streams in) */
   make: () => THREE.Group;
+  /** GLB swapped in when loaded ('' = procedural only) */
   glb: string;
   glbLen: number;
+  /** flying vehicles hover at a fixed altitude and ignore collisions */
+  fly: boolean;
   accel: number;
   brake: number;
   maxF: number;
@@ -30,18 +33,25 @@ export interface VehicleConfig {
 
 export const VEHICLES: Record<string, VehicleConfig> = {
   truck: {
-    make: makeFireTruck, glb: '/assets/kenney/firetruck.glb', glbLen: 6.6,
+    make: makeFireTruck, glb: '/assets/kenney/firetruck.glb', glbLen: 6.6, fly: false,
     accel: 5, brake: 13, maxF: 9.5, maxR: 3, radius: 1.35,
     camBack: 12.5, camUp: 5.6, highBack: 14, highUp: 13, highAhead: 6,
     wheelbase: 3.6, steerMax: 0.46, cabF: 3.0, cabY: 2.9,
     front: 1.95, halfW: 1.15, frontR: 1.05,
   },
   car: {
-    make: () => makeCar({ body: 0x7fb2d9 }), glb: '/assets/kenney/hatchback-sports.glb', glbLen: 4.2,
+    make: () => makeCar({ body: 0x7fb2d9 }), glb: '/assets/kenney/hatchback-sports.glb', glbLen: 4.2, fly: false,
     accel: 6.5, brake: 15, maxF: 12, maxR: 3, radius: 1.0,
     camBack: 11, camUp: 5.2, highBack: 12, highUp: 11.5, highAhead: 6,
     wheelbase: 2.7, steerMax: 0.5, cabF: 1.8, cabY: 1.6,
     front: 1.5, halfW: 0.95, frontR: 0.95,
+  },
+  heli: {
+    make: makeHelicopter, glb: '', glbLen: 7.8, fly: true,
+    accel: 9, brake: 12, maxF: 13, maxR: 6, radius: 2.6,
+    camBack: 17, camUp: 8.5, highBack: 20, highUp: 15, highAhead: 8,
+    wheelbase: 4, steerMax: 1.0, cabF: 4.6, cabY: 3.4,
+    front: 3, halfW: 2.2, frontR: 2,
   },
 };
 
@@ -73,6 +83,7 @@ const CRASH_FLASH = 1.6;
 
 export function createPlayer(V: VehicleConfig, x: number, z: number, heading: number): Player {
   const car = V.make();
+  car.scale.setScalar(V.fly ? 1.5 : 1);
   const p: Player = {
     car, V,
     state: { x, z, heading, v: 0 },
@@ -80,13 +91,15 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
     crashT: 0,
     crash: { x: 0, z: 0, heading: 0 },
   };
-  // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
-  // (Kenney vehicles already face +Z — our forward — no flip needed)
-  spawnVehicle(V.glb, { len: V.glbLen }).then(g => {
-    car.clear();
-    car.add(g);
-    p.wheels = wheelNodes(g) as THREE.Object3D[];
-  }).catch(() => {});
+  if (V.glb) {
+    // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
+    // (Kenney vehicles already face +Z — our forward — no flip needed)
+    spawnVehicle(V.glb, { len: V.glbLen }).then(g => {
+      car.clear();
+      car.add(g);
+      p.wheels = wheelNodes(g) as THREE.Object3D[];
+    }).catch(() => {});
+  }
   return p;
 }
 
@@ -99,6 +112,18 @@ export function physicsStep(
   p: Player, input: PhysicsInput, dt: number, boxes: CollisionBox[],
 ): PhysicsStep {
   const { state: st, V } = p;
+
+  if (V.fly) {
+    // simplified helicopter: hover-drive at a fixed altitude, above it all
+    if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
+    if (input.brake) st.v = Math.max(-V.maxF * 0.5, st.v - V.brake * dt);
+    st.v -= st.v * 0.5 * dt;
+    st.heading += input.steer * 1.0 * dt * (0.35 + Math.abs(st.v) / V.maxF);
+    st.x += Math.sin(st.heading) * st.v * dt;
+    st.z += Math.cos(st.heading) * st.v * dt;
+    return { crashed: false };
+  }
+
   // arcade physics (heavier for the truck)
   if (input.gas) st.v += V.accel * dt;
   if (input.brake) st.v -= (st.v > 0 ? V.brake : 7) * dt;

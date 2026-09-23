@@ -17,6 +17,13 @@ export const GAMES: GameEntry[] = [
     url: 'play/city.html',
   },
   {
+    id: 'heli-city',
+    title: 'Endless City — Helicopter',
+    icon: '🚁',
+    blurb: 'Fly the same city! Hover over people to winch them up.',
+    url: 'play/city.html?vehicle=heli',
+  },
+  {
     id: 'firetruck',
     title: 'Fire Truck — City Rescue',
     icon: '🔥',

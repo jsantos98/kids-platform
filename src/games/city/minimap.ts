@@ -55,13 +55,13 @@ export class Minimap {
       }
     }
 
-    // objectives: fires orange, cats pink — clamped to the map edge if far away
+    // objectives: fires orange, cats pink, patients blue — clamped to the edge
     for (const o of this.missions.objectives) {
       let x = tx(o.pos.x), y = ty(o.pos.z);
       const m = 10;
       const cx = Math.max(m, Math.min(s - m, x));
       const cy = Math.max(m, Math.min(s - m, y));
-      ctx.fillStyle = o.type === 'fire' ? '#f4661f' : '#f06292';
+      ctx.fillStyle = o.type === 'fire' ? '#f4661f' : o.type === 'patient' ? '#4a90d9' : '#f06292';
       ctx.strokeStyle = '#fffdf8';
       ctx.lineWidth = 1.5;
       ctx.beginPath();

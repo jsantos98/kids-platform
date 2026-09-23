@@ -15,6 +15,12 @@ npm run dev          # → http://localhost:8321
 The garage at the root is the launcher — big buttons, no reading required.
 `npm run build` produces a minified `dist/`; `npm run preview` serves it.
 
+**Endless City** is one shared world with two playable vehicles: the fire truck
+(default) and the helicopter (`?vehicle=heli` or straight from the garage).
+While you play one, the others stay alive — a train shuttles the rail corridor
+that crosses the city every 256 m (level crossings included), an EMS helicopter
+patrols the sky, and in the helicopter the fire truck drives itself.
+
 ## Controls (Endless City)
 
 WASD / arrow keys or the USB wheel (steering axis + triggers, A = action).
@@ -29,6 +35,7 @@ Drive to the 🔥 / 🐱 marker, stop, then sweep the hose or slide the ladder.
 | `src/kit/` | procedural model kit by family (nature, people, buildings, vehicles, animals, props) |
 | `src/worlds/` | parametric generators: city street, valley, railroad, and the endless-city **chunk generator** |
 | `src/games/city/` | the playable game, one module per concern: player physics, chunk streaming, traffic + working traffic lights, missions, spray + ladder mini-scenes, particles, save state |
+| `src/games/city/train.ts`, `patrol.ts` | ambient life: the train shuttles the rail corridor; a helicopter circles the neighbourhood |
 | `src/games/registry.ts` | the list of games the launcher renders |
 | `src/games/diorama/` | the three concept dioramas, now proper modules |
 | `public/assets/kenney/` | CC0 Kenney models (Car Kit, City Kit, Nature Kit) + licenses |

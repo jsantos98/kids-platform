@@ -8,6 +8,8 @@ import { setupDevCapture } from '../../engine/capture.js';
 import { VEHICLES, createPlayer, physicsStep } from './player.js';
 import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
+import { Train } from './train.js';
+import { PatrolHeli } from './patrol.js';
 import { Missions } from './missions.js';
 import * as sprayMod from './spray.js';
 import * as ladderMod from './ladder.js';
@@ -40,7 +42,7 @@ scene.add(groundFollower);
 
 // ---- player vehicle ----
 const V = VEHICLES[P.vehicle] ?? VEHICLES.truck;
-const spawn = { x: 2.3, z: 34, heading: 0 };
+const spawn = { x: 2.3, z: 34, heading: Number(q.get('heading') ?? 0) * Math.PI / 180 };
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -100,7 +102,8 @@ scene.add(steamPuff);
 scene.add(ladderMod.getLadderMesh());
 
 // ---- missions ----
-const missions = new Missions(scene, P.seed, 64);
+const heliMode = P.vehicle === 'heli';
+const missions = new Missions(scene, P.seed, 64, heliMode);
 const MAX_ACTIVE = 3;
 for (let i = 0; i < 3; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
 
@@ -111,7 +114,13 @@ if (q.get('spraytest') === '1') {
 }
 
 // ---- traffic ----
-const traffic = new Traffic(scene, 64);
+// in heli mode one of the AI vehicles is the fire truck, driving itself
+const traffic = new Traffic(scene, 64, 8, V.fly ? ['/assets/kenney/firetruck.glb'] : []);
+
+// ---- ambient life: the train shuttles the rail line; a patrol heli circles
+// the neighbourhood while the kid plays the fire truck ----
+const train = new Train(scene, 64);
+const patrol = V.fly ? null : new PatrolHeli(scene);
 
 // ---- particles ----
 const particles = new Particles(scene);
@@ -185,12 +194,21 @@ const tick = (): void => {
     st.v = 0;
   }
 
-  player.car.position.set(st.x, 0, st.z);
+  player.car.position.set(st.x, V.fly ? 16 + Math.sin(elapsed * 1.3) * 0.7 : 0, st.z);
   player.car.rotation.y = st.heading;
-  player.car.rotation.z = -input.steer * Math.min(Math.abs(st.v) / 16, 1) * 0.04;
-  for (const w of player.wheels) (w as THREE.Object3D).rotation.x += (st.v * dt) / 0.42;
+  if (V.fly) {
+    // hover-flight life: nose dips with speed, banks into turns, rotors spin
+    player.car.rotation.x = -(st.v / V.maxF) * 0.16;
+    player.car.rotation.z = input.steer * 0.12 * Math.min(1, Math.abs(st.v) / V.maxF);
+    (player.car.userData.mainRotor as THREE.Object3D | undefined)!.rotation.y = elapsed * 22;
+    (player.car.userData.tailRotor as THREE.Object3D | undefined)!.rotation.x = elapsed * 30;
+  } else {
+    player.car.rotation.z = -input.steer * Math.min(Math.abs(st.v) / 16, 1) * 0.04;
+    for (const w of player.wheels) (w as THREE.Object3D).rotation.x += (st.v * dt) / 0.42;
+  }
 
-  // camera
+  // camera (flying vehicles keep the camera near their altitude)
+  const flyY = V.fly ? 16 : 0;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
   if (mode === 'spray' && spraySession) {
     const fp = spraySession.obj.pos;
@@ -210,17 +228,17 @@ const tick = (): void => {
     camera.position.lerp(camT, Math.min(1, dt * 3));
     camera.lookAt(fp.x, 2.1, fp.z);
   } else if (camMode === 'cab') {
-    camera.position.set(st.x + fwd.x * V.cabF, V.cabY, st.z + fwd.z * V.cabF);
-    camera.lookAt(st.x + fwd.x * 25, 1.4, st.z + fwd.z * 25);
+    camera.position.set(st.x + fwd.x * V.cabF, flyY + V.cabY, st.z + fwd.z * V.cabF);
+    camera.lookAt(st.x + fwd.x * 25, flyY + 1.4, st.z + fwd.z * 25);
   } else if (camMode === 'high') {
     // higher chase angle: the whole truck plus more of the street around it
-    const desired = new THREE.Vector3(st.x - fwd.x * V.highBack, V.highUp, st.z - fwd.z * V.highBack);
+    const desired = new THREE.Vector3(st.x - fwd.x * V.highBack, flyY + V.highUp, st.z - fwd.z * V.highBack);
     camera.position.lerp(desired, Math.min(1, dt * 4));
-    camera.lookAt(st.x + fwd.x * V.highAhead, 0.9, st.z + fwd.z * V.highAhead);
+    camera.lookAt(st.x + fwd.x * V.highAhead, flyY + 0.9, st.z + fwd.z * V.highAhead);
   } else {
-    const desired = new THREE.Vector3(st.x - fwd.x * V.camBack, V.camUp, st.z - fwd.z * V.camBack);
+    const desired = new THREE.Vector3(st.x - fwd.x * V.camBack, flyY + V.camUp, st.z - fwd.z * V.camBack);
     camera.position.lerp(desired, Math.min(1, dt * 4));
-    camera.lookAt(st.x + fwd.x * 6, 1.3, st.z + fwd.z * 6);
+    camera.lookAt(st.x + fwd.x * 6, flyY + 1.3, st.z + fwd.z * 6);
   }
   camera.position.y = Math.max(camera.position.y, 1.2);
 
@@ -231,6 +249,10 @@ const tick = (): void => {
   groundFollower.position.set(st.x, -0.02, st.z);
 
   chunks.ensure(2, st.x, st.z);
+
+  // ambient life: the train and the patrol helicopter
+  train.update(elapsed, st.x, st.z);
+  patrol?.update(dt, elapsed, st.x, st.z);
 
   // ambient life
   traffic.update(dt, elapsed, player.car.position);
@@ -301,9 +323,9 @@ const tick = (): void => {
       mode = 'drive';
     }
   } else if (near) {
-    // ---- driving guidance to the nearest call ----
+    // ---- driving/flying guidance to the nearest call ----
     guideEl.style.opacity = '1';
-    guideIcon.textContent = near.type === 'fire' ? '🔥' : '🐱';
+    guideIcon.textContent = near.type === 'fire' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱';
     const rel = Math.atan2(near.pos.z - st.z, near.pos.x - st.x);
     const deg = (-rel * 180 / Math.PI).toFixed(0);
     guideArrow.style.transform = `rotate(${deg}deg)`;
@@ -318,6 +340,21 @@ const tick = (): void => {
         spraySession = sprayMod.beginSpray(near, player.car);
         mode = 'spray';
         promptText.textContent = 'SPRAY LEFT / RIGHT!';
+      }
+    } else if (near.type === 'patient') {
+      // helicopter: hover over the person to winch them up
+      const hovering = nd < 9 && Math.abs(st.v) < 4;
+      if (hovering) near.progress += dt / near.need;
+      promptFill.style.width = `${Math.min(100, near.progress / near.need * 100)}%`;
+      promptText.textContent = hovering ? 'WINCHING…'
+        : (nd < 9 ? 'HOVER HERE!' : 'FLY TO THE PERSON');
+      if (near.progress >= near.need) {
+        particles.burstConfetti(near.pos);
+        missions.remove(near);
+        missions.sCats++;
+        totals.cats++;
+        saveTotals(totals);
+        toast = '🆘 PERSON RESCUED!';
       }
     } else {
       promptText.textContent = nd < 11 ? 'STOP HERE!' : 'DRIVE TO THE CAT';

@@ -1,11 +1,14 @@
 // Missions: fire & cat-rescue objectives spawning around the player, nearest
 // selection for the guidance arrow, and the hovering markers above each call.
 import * as THREE from 'three';
-import { makeCatTree, makeFire, makeMarker } from '../../kit/index.js';
+import { C } from '../../engine/palette.js';
+import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 
+export type ObjectiveType = 'fire' | 'cat' | 'patient';
+
 export interface Objective {
-  type: 'fire' | 'cat';
+  type: ObjectiveType;
   group: THREE.Group;
   flames?: THREE.Mesh[];
   smoke?: THREE.Mesh[];
@@ -33,12 +36,16 @@ export class Missions {
   sFires = 0;
   sCats = 0;
 
-  constructor(private scene: THREE.Scene, private seed: number, private CH: number) {}
+  constructor(private scene: THREE.Scene, private seed: number, private CH: number, private heliMode = false) {}
 
-  spawn(player: PlayerXZ, forceChunkAt: (x: number, z: number) => void, forcedType?: 'fire' | 'cat' | null): void {
+  spawn(player: PlayerXZ, forceChunkAt: (x: number, z: number) => void, forcedType?: ObjectiveType | null): void {
     const r: Rng = rng(chunkSeed(this.seed, 5000 + this.index, 91));
     const qType = new URLSearchParams(location.search).get('type');
-    const type = (forcedType ?? (qType as 'fire' | 'cat' | null)) ?? (this.index % 3 === 2 ? 'cat' : 'fire');
+    let type: ObjectiveType;
+    if (forcedType) type = forcedType;
+    else if (qType === 'fire' || qType === 'cat') type = qType;
+    else if (this.heliMode) type = this.index % 3 === 2 ? 'cat' : 'patient';
+    else type = this.index % 3 === 2 ? 'cat' : 'fire';
     const diff = Math.min(this.sFires + this.sCats, 10);
     const dist = this.index === 0 ? 26 + r() * 10 : Math.min(90 + diff * 10, 240) + r() * 60;
     const a = this.index === 0 ? player.heading + 0.5 : r() * Math.PI * 2;
@@ -48,7 +55,9 @@ export class Missions {
     const ox = corner ? -5.9 : 5.9, oz = corner ? 5.9 : -5.9;
     const pos = new THREE.Vector3(gx + ox, 0.15, gz + oz);
     forceChunkAt(pos.x, pos.z);
-    const need = type === 'fire' ? Math.min(5.5 + diff * 0.3, 9) : Math.min(3 + diff * 0.2, 5);
+    const need = type === 'patient' ? Math.min(2.5 + diff * 0.15, 4)
+      : type === 'fire' ? Math.min(5.5 + diff * 0.3, 9)
+      : Math.min(3 + diff * 0.2, 5);
     let group: THREE.Group;
     let flames: THREE.Mesh[] | undefined;
     let smoke: THREE.Mesh[] | undefined;
@@ -57,12 +66,19 @@ export class Missions {
       group = f.group;
       flames = f.flames;
       smoke = f.smoke;
+    } else if (type === 'patient') {
+      // a person waving for help on the ground (winched up by the helicopter)
+      group = makePerson({ shirt: C.orange, pants: C.dark, cap: C.white });
+      group.position.set(0, 0.15, 0);
+      group.rotation.y = r() * Math.PI * 2;
     } else {
       group = makeCatTree(r);
     }
     group.position.copy(pos);
+    group.position.y = pos.y;
     this.scene.add(group);
-    const marker = makeMarker(type === 'fire' ? 0xffc93c : 0xff8ad1);
+    const markerColor = type === 'fire' ? 0xffc93c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1;
+    const marker = makeMarker(markerColor);
     marker.position.set(pos.x, 6.4, pos.z);
     this.scene.add(marker);
     this.objectives.push({ type, group, flames, smoke, pos, progress: 0, need, gx, gz, marker, index: this.index, d: 1e9 });

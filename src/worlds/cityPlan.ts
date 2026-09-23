@@ -172,13 +172,20 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   // the railway would run alongside this segment for a long stretch?
   // (head-on passes stay — they become level crossings)
+  // the railway runs PARALLEL alongside this segment for a long stretch?
+  // (head-on passes stay — they are square level crossings). A shallow graze
+  // still shadows: the rail may not ride the road asphalt anywhere.
   const railRunsAlong = (horiz: boolean, line: number, a: number, b: number): boolean => {
     let run = 0;
     for (let t = a + 4; t <= b - 3; t += 4) {
       const x = horiz ? t : line * CH;
       const z = horiz ? line * CH : t;
       if (rail.distTo(x, z) < 9) {
-        if (++run >= 6) return true;
+        const h = rail.headingAt(x, z);
+        const dev = Math.abs(h - (horiz ? Math.PI / 2 : 0));
+        const parallel = Math.min(dev, Math.PI - dev) < Math.PI / 4;
+        if (parallel && ++run >= 3) return true;
+        if (!parallel) run = 0;
       } else run = 0;
     }
     return false;

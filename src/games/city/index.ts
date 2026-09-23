@@ -112,7 +112,7 @@ if (q.get('debugbake') === '1') {
 }
 
 // ---- chunk streaming ----
-const roadGrid = new RoadGrid();
+const roadGrid = new RoadGrid(P.seed);
 const chunks = new ChunkManager(scene, P.seed, roadGrid);
 // the island is small: build every chunk once at boot
 for (let cx = 0; cx < WORLD_CHUNKS; cx++) {

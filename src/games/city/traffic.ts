@@ -59,15 +59,19 @@ export class Traffic {
       c.position.set(g - 2.3 * c.userData.sign, 0, player.z + j0(Math.random, 70));
       c.rotation.y = c.userData.sign > 0 ? 0 : Math.PI;
     }
-    // keep cars off the rail corridors (a nudge along the line is enough)
+    // keep cars off rail corridors and streetless stretches (a nudge is enough)
     if (this.seed) {
       const route = railRouteFor(this.seed);
       if (axis0) {
-        if (route.edgeH(Math.round(c.position.z / this.CH), Math.floor(c.position.x / this.CH))) {
+        const row = Math.round(c.position.z / this.CH), col = Math.floor(c.position.x / this.CH);
+        if (route.edgeH(row, col) || !this.grid.segH(row, col)) {
           c.position.x += this.CH / 2;
         }
-      } else if (route.edgeV(Math.round(c.position.x / this.CH), Math.floor(c.position.z / this.CH))) {
-        c.position.z += this.CH / 2;
+      } else {
+        const col = Math.round(c.position.x / this.CH), row = Math.floor(c.position.z / this.CH);
+        if (route.edgeV(col, row) || !this.grid.segV(col, row)) {
+          c.position.z += this.CH / 2;
+        }
       }
     }
   }

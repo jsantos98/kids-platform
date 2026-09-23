@@ -6,7 +6,10 @@ import { RoadGrid } from '../../worlds/roadGrid.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { racePath } from '../../worlds/racetrack.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
 import type { Missions } from './missions.js';
+
+const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
 
 const SIZE = 256;        // canvas backing-store pixels
 const VIEW = 440;        // world metres across (whole island + sea margin)
@@ -29,25 +32,30 @@ export class Minimap {
     const tx = (x: number) => (x - (CENTER - VIEW / 2)) * scale;
     const ty = (z: number) => (z - (CENTER - VIEW / 2)) * scale;
 
-    // the sea, then the island on top of it
+    // the island, district-tinted per chunk, on the sea
     ctx.fillStyle = '#72c3de';
     ctx.fillRect(0, 0, s, s);
     for (let cx = 0; cx < 6; cx++) {
       for (let cz = 0; cz < 6; cz++) {
-        ctx.fillStyle = chunkGroundColorHex(cx, cz, this.seed);
+        ctx.fillStyle = hex(chunkGroundColor(this.seed, cx, cz));
         ctx.fillRect(tx(cx * this.CH), ty(cz * this.CH), this.CH * scale, this.CH * scale);
       }
     }
 
-    // roads: the interior grid lines
+    // streets: only the segments the plan kept open
+    const plan = cityPlanFor(this.seed);
     ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 10 * scale;
     ctx.beginPath();
-    for (let i = 1; i <= 5; i++) {
-      const c = i * this.CH;
-      const m = tx(c);
-      ctx.moveTo(m, ty(0)); ctx.lineTo(m, ty(384));
-      ctx.moveTo(tx(0), ty(c)); ctx.lineTo(tx(384), ty(c));
+    for (let j = 0; j <= 5; j++) for (let i = 0; i <= 5; i++) {
+      if (plan.segH(j, i)) {
+        ctx.moveTo(tx(i * this.CH), ty(j * this.CH));
+        ctx.lineTo(tx((i + 1) * this.CH), ty(j * this.CH));
+      }
+      if (plan.segV(i, j)) {
+        ctx.moveTo(tx(i * this.CH), ty(j * this.CH));
+        ctx.lineTo(tx(i * this.CH), ty((j + 1) * this.CH));
+      }
     }
     ctx.stroke();
 
@@ -130,13 +138,4 @@ export class Minimap {
 function routePts(seed: number): Array<{ x: number; z: number }> {
   const pts = railRouteFor(seed).pts;
   return pts.filter((_, k) => k % 3 === 0);
-}
-
-function chunkGroundColorHex(cx: number, cz: number, seed: number): string {
-  void seed;
-  if (cx >= 4 && cz >= 4) return '#c9ccd6';   // race zone (2×2 apron)
-  if (cx <= 1 && cz <= 1) return '#8fba74';   // forest pocket
-  if (cx >= 4 && cz <= 1) return '#b5d194';   // meadow pocket
-  if (cx <= 1 && cz >= 4) return '#eedaa4';   // desert pocket
-  return '#e9e1cf';                           // city
 }

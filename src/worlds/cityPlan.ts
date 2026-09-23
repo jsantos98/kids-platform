@@ -328,8 +328,12 @@ function buildPlan(bx: number, by: number): CityPlan {
       const pts = rail.pts;
       for (let k = 0; k < pts.length; k++) {
         const p = pts[k], q = pts[(k + 1) % pts.length];
-        const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
-        if ((pa - c) * (qa - c) >= 0) continue;
+      const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
+      if (pa === qa) continue; // runs parallel to the street line
+      // a vertex pinned exactly ON the line still crosses (see
+      // collectCrossings) — tangential grazes against a junction street
+      // must veto the segment just like full crossings do
+      if ((pa - c) * (qa - c) > 0) continue;
         const t = (c - pa) / (qa - pa);
         const along = horiz ? p.x + (q.x - p.x) * t : p.z + (q.z - p.z) * t;
         if (along >= a + 18 && along <= b - 18) continue; // mid-block: fine
@@ -454,7 +458,10 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (let k = 0; k < pts.length; k++) {
       const p = pts[k], q = pts[(k + 1) % pts.length];
       const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
-      if ((pa - c0) * (qa - c0) >= 0) continue;
+      if (pa === qa) continue; // runs parallel to the street line
+      // a vertex pinned exactly ON the line counts as a crossing (the
+      // deformers land pins dead-centre) — only strictly-one-side skips
+      if ((pa - c0) * (qa - c0) > 0) continue;
       const t = (c0 - pa) / (qa - pa);
       const x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t;
       const along = horiz ? x : z;

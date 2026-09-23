@@ -896,7 +896,10 @@ export function perpendicularCrossings(
   interface Hit { s: number; x: number; z: number; horiz: boolean; line: number }
   const hits: Hit[] = [];
   const spanCross = (va: number, vb: number, c: number): number | null => {
-    if ((va - c) * (vb - c) >= 0) return null;
+    if (va === vb) return null; // runs parallel to the line
+    // a vertex landing exactly ON the line still crosses (the deformers
+    // land pins dead-centre) — only strictly-one-side spans are skipped
+    if ((va - c) * (vb - c) > 0) return null;
     return (c - va) / (vb - va);
   };
   for (let k = 0; k < N; k++) {

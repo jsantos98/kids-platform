@@ -185,14 +185,16 @@ for (const [bx, by] of cells) {
   }
 
   // R10b: every rail x open-street crossing carries a recorded crossing —
-  // no barrierless bumps where the track meets asphalt
+  // no barrierless bumps where the track meets asphalt. A rail vertex
+  // pinned exactly ON the street line counts as a crossing too (the
+  // deformers land pins dead-centre; a strict sign test misses those).
   {
     const pts = route.pts;
     for (let k = 0; k < pts.length; k++) {
       const p = pts[k], q = pts[(k + 1) % pts.length];
       for (let j = 0; j <= W; j++) {
         const c = j * 64;
-        if ((p.z - c) * (q.z - c) < 0) {
+        if (p.z !== q.z && (p.z - c) * (q.z - c) <= 0) {
           const t = (c - p.z) / (q.z - p.z);
           const x = p.x + (q.x - p.x) * t, i = Math.floor(x / 64);
           if (plan.segH(j, i) && !plan.crossings.some(cc =>
@@ -201,7 +203,7 @@ for (const [bx, by] of cells) {
       }
       for (let i = 0; i <= W; i++) {
         const c = i * 64;
-        if ((p.x - c) * (q.x - c) < 0) {
+        if (p.x !== q.x && (p.x - c) * (q.x - c) <= 0) {
           const t = (c - p.x) / (q.x - p.x);
           const z = p.z + (q.z - p.z) * t, j = Math.floor(z / 64);
           if (plan.segV(i, j) && !plan.crossings.some(cc =>

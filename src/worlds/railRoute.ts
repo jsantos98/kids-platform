@@ -34,6 +34,10 @@ export interface RailRoute {
   /** dense samples of the pristine spline, before crossing deformation —
    * lets the plan re-square the rail once the tram rectangle is known */
   basePts: Array<{ x: number; z: number; h: number }>;
+  /** control rings of the runner-up candidates: resquareRail re-rolls
+   * through them once the tram streets are known, so the COMPLETE street
+   * set gets the same quality gate the lattice set did */
+  candidates?: Array<Array<{ x: number; z: number }>>;
 }
 
 // the open race-corner zone: nothing rail-ish on its SE diagonal
@@ -58,19 +62,109 @@ export function railRouteFor(bx: number, by: number): RailRoute {
 
 interface Attempt { control: Array<{ x: number; z: number }>; score: number; path: WorldPath }
 
+/** how clean a deformed route came out — mirrors the audit's own checks,
+ * so a route is only ever shipped when the deformation provably worked */
+interface Quality { ride: number; skew: number; folds: number }
+
+function shapeQuality(p: WorldPath, H: number[], V: number[]): Quality {
+  const pts = p.pts, N = pts.length;
+  let ride = 0, run = 0, folds = 0, skew = 0;
+  for (let k = 0; k < N; k++) {
+    const a = pts[(k - 1 + N) % N], b = pts[k], c = pts[(k + 1) % N];
+    const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+    if (l1 > 0.5 && l2 > 0.5 && (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) folds++;
+    const h = b.h;
+    let bad = false;
+    for (const line of H) {
+      if (Math.abs(b.z - line * 64) < 7 && Math.abs(Math.abs(h) - Math.PI / 2) < Math.PI / 3) { bad = true; break; }
+    }
+    if (!bad) for (const line of V) {
+      const dev = Math.min(Math.abs(h), Math.PI - Math.abs(h));
+      if (Math.abs(b.x - line * 64) < 7 && dev < Math.PI / 3) { bad = true; break; }
+    }
+    if (bad) run += l2;
+    else { ride = Math.max(ride, run); run = 0; }
+  }
+  ride = Math.max(ride, run);
+  // squareness of every crossing the plan would record (span-crossings of
+  // the final path, >= 11 m from a node), read as the nearest-vertex heading
+  const cum: number[] = [0];
+  for (let k = 1; k <= N; k++) {
+    const a = pts[k - 1], b2 = pts[k % N];
+    cum.push(cum[k - 1] + Math.hypot(b2.x - a.x, b2.z - a.z));
+  }
+  const checkCross = (horiz: boolean, line: number): void => {
+    const c = line * 64;
+    for (let k = 0; k < N; k++) {
+      const va = horiz ? pts[k].z : pts[k].x;
+      const vb = horiz ? pts[(k + 1) % N].z : pts[(k + 1) % N].x;
+      if ((va - c) * (vb - c) >= 0) continue;
+      const f = (c - va) / (vb - va);
+      const along = horiz
+        ? pts[k].x + (pts[(k + 1) % N].x - pts[k].x) * f
+        : pts[k].z + (pts[(k + 1) % N].z - pts[k].z) * f;
+      if (Math.abs(along - Math.round(along / 64) * 64) < 11) continue;
+      // honest skew: the rail's worst angle to the street WHILE ON ITS
+      // asphalt near this crossing — the nearest-vertex reading misses a
+      // diagonal chord that only tilts between wall-end vertices
+      let worst = 0;
+      const streetH = horiz ? Math.PI / 2 : 0;
+      for (let i = 0; i < N; i++) {
+        const pd = horiz ? Math.abs(pts[i].z - c) : Math.abs(pts[i].x - c);
+        if (pd >= 6.5) continue;
+        const pa = horiz ? pts[i].x : pts[i].z;
+        if (Math.abs(pa - along) >= 24) continue;
+        let dev = Math.abs(pts[i].h - streetH);
+        if (dev > Math.PI) dev = Math.PI * 2 - dev;
+        while (dev > Math.PI / 2) dev = Math.PI - dev;
+        worst = Math.max(worst, Math.abs(90 - (dev * 180) / Math.PI));
+      }
+      skew = Math.max(skew, worst);
+    }
+  };
+  for (const line of H) checkCross(true, line);
+  for (const line of V) checkCross(false, line);
+  return { ride, skew, folds };
+}
+
+const qualityBetter = (a: Quality, b: Quality): boolean =>
+  a.folds !== b.folds ? a.folds < b.folds
+    : a.ride !== b.ride ? a.ride < b.ride
+      : a.skew < b.skew;
+
 function buildRoute(bx: number, by: number): RailRoute {
   const seed = citySeed(bx, by);
   const { H, V } = streetLinesFor(bx, by);
-  let best: Attempt | null = null;
+  // rank route candidates by the cheap pre-deform score, then actually
+  // deform the best few and SHIP the first whose geometry comes out clean
+  // (no on-road rides, no folds, square crossings). The deform has rare
+  // bad modes on adversarial splines; rather than patching each one, a
+  // dirty result just costs us a re-roll.
+  const ranked: Attempt[] = [];
+  const offer = (a: Attempt): void => {
+    let i = 0;
+    while (i < ranked.length && ranked[i].score <= a.score) i++;
+    if (i >= 8) return;
+    ranked.splice(i, 0, a);
+    if (ranked.length > 8) ranked.pop();
+  };
   for (let attempt = 0; attempt < 90; attempt++) {
     const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt));
     const a = tryRoute(r, H, V);
     if (!a) continue;
-    if (!best || a.score < best.score) best = a;
-    if (a.score === 0) break;
+    if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
+    offer(a);
   }
-  const chosen = best ?? forcedRoute(seed);
-  return finalize(bx, by, chosen.control, chosen.path);
+  if (ranked.length === 0) ranked.push(forcedRoute(seed));
+  let fallback: { route: RailRoute; q: Quality } | null = null;
+  for (const a of ranked) {
+    const route = finalize(bx, by, a.control, a.path);
+    route.candidates = ranked.map(t => t.control);
+    const q = shapeQuality(route.path, H, V);
+    if (q.folds === 0 && q.ride < 7 && q.skew < 19) return route;
+    if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
+  }
+  return fallback!.route;
 }
 
 /** one control-ring candidate; null when control spacing is impossible */
@@ -126,50 +220,72 @@ function tryRoute(r: () => number, H: number[], V: number[]): Attempt | null {
     const i = Math.round(p.x / 64), jn = Math.round(p.z / 64);
     if (i >= 1 && i < WORLD_CHUNKS && jn >= 1 && jn < WORLD_CHUNKS) {
       const dx = p.x - i * 64, dz = p.z - jn * 64;
-      if (dx * dx + dz * dz < 10 * 10) score += 6; // threading a junction
+      if (dx * dx + dz * dz < 14 * 14) score += 12; // threading a junction
     }
   }
   // a shallow line crossing means the rail rides the road corridor for tens
   // of metres no matter how the crossing itself is squared up — so any
   // crossing gentler than ~59 degrees rejects the candidate outright
+  const cum: number[] = [0];
+  for (let k = 1; k <= path.pts.length; k++) {
+    const a = path.pts[k - 1], b = path.pts[k % path.pts.length];
+    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  const hitArcs: number[] = [];
   for (let k = 0; k < path.pts.length; k++) {
     const a = path.pts[k], b = path.pts[(k + 1) % path.pts.length];
-    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const len = cum[k + 1] - cum[k];
     if (len < 0.001) continue;
     for (const line of H) {
-      if ((a.z - line * 64) * (b.z - line * 64) < 0 && Math.abs(b.z - a.z) / len < 0.85) score += 20;
+      if ((a.z - line * 64) * (b.z - line * 64) < 0) {
+        hitArcs.push(cum[k] + ((line * 64 - a.z) / (b.z - a.z)) * len);
+        if (Math.abs(b.z - a.z) / len < 0.85) score += 20;
+      }
     }
     for (const line of V) {
-      if ((a.x - line * 64) * (b.x - line * 64) < 0 && Math.abs(b.x - a.x) / len < 0.85) score += 20;
+      if ((a.x - line * 64) * (b.x - line * 64) < 0) {
+        hitArcs.push(cum[k] + ((line * 64 - a.x) / (b.x - a.x)) * len);
+        if (Math.abs(b.x - a.x) / len < 0.85) score += 20;
+      }
     }
     // a crossing spilling into a junction tile would go unrecorded (the
-    // collector keeps crossings away from nodes) — avoid those
+    // collector keeps crossings away from nodes) — avoid those hard, the
+    // deformation cannot rescue them
     const mi = Math.round((a.x + b.x) / 2 / 64), mj = Math.round((a.z + b.z) / 2 / 64);
     for (const line of H) {
       if ((a.z - line * 64) * (b.z - line * 64) < 0 && Math.abs(mj * 64 - line * 64) < 1 && Math.abs((mi * 64) % 64) >= 0) {
         // crossing of an H line: too close to a V-node column?
         const midX = (a.x + b.x) / 2;
-        if (Math.abs(midX - Math.round(midX / 64) * 64) < 14) score += 8;
+        if (Math.abs(midX - Math.round(midX / 64) * 64) < 16) score += 25;
       }
     }
     for (const line of V) {
       if ((a.x - line * 64) * (b.x - line * 64) < 0) {
         const midZ = (a.z + b.z) / 2;
-        if (Math.abs(midZ - Math.round(midZ / 64) * 64) < 14) score += 8;
+        if (Math.abs(midZ - Math.round(midZ / 64) * 64) < 16) score += 25;
       }
     }
   }
+  // two street hits within ~30 m of arc means the rail cuts a junction
+  // corner — the pins of both crossings crowd one stretch, the absolute
+  // cores collapse the path onto a knot, and the crossings end up unsquare.
+  // Rank any candidate carrying one out.
+  hitArcs.sort((p, q) => p - q);
+  for (let i = 1; i < hitArcs.length; i++) {
+    if (hitArcs[i] - hitArcs[i - 1] < 30) score += 50;
+  }
   // hugging a street line near-parallel (the rails would sit on the asphalt
-  // edge) — steer the search away from tracking roads
+  // edge) — steer the search away from tracking roads; same 55° window the
+  // clearance pusher treats as "riding", so scored-ugly means pushed-later
   for (const p of path.pts) {
     for (const line of H) {
       const d = Math.abs(p.z - line * 64);
-      if (d < 10 && Math.abs(Math.abs(p.h) - Math.PI / 2) < Math.PI / 4) score += 0.75;
+      if (d < 10 && Math.abs(Math.abs(p.h) - Math.PI / 2) < 55 * Math.PI / 180) score += 0.75;
     }
     for (const line of V) {
       const d = Math.abs(p.x - line * 64);
       const dev = Math.min(p.h, Math.PI - p.h, Math.abs(p.h - Math.PI * 2));
-      if (d < 10 && dev < Math.PI / 4) score += 0.75;
+      if (d < 10 && dev < 55 * Math.PI / 180) score += 0.75;
     }
   }
   return { control, score, path };
@@ -191,15 +307,27 @@ function forcedRoute(seed: number): Attempt {
   return { control, score: 0, path: makePath(control, true) };
 }
 
+/** shared deformation sequence. Order matters: tangential grazes are lifted
+ * off the roads BEFORE the crossing pins are placed. A graze pinned in place
+ * stays a ~30 m skim along the asphalt with a token square jog in the middle
+ * — the pins must only ever see genuine crossings. A final clearance sweep
+ * runs as insurance against pin/pin interference near junctions. */
+function deform(
+  pts: Array<{ x: number; z: number; h: number }>,
+  H: number[], V: number[],
+): Array<{ x: number; z: number }> {
+  const lifted = clearancePush(pts, H, V);
+  return clearancePush(perpendicularCrossings(polyPath(lifted), H, V), H, V);
+}
+
 function finalize(bx: number, by: number, control: Array<{ x: number; z: number }>, path: WorldPath): RailRoute {
   // the spline pays no attention to the street lattice, so wherever it
-  // happens to graze a road it does so at a rakish angle. Reshape the dense
-  // polyline so every street crossing is square: points near a hit are
-  // blended onto the perpendicular line through it (fully at the hit,
-  // smoothly released outward), which reads as a proper railway junction
-  // and gives the level crossings their barriers a clean strip to guard.
+  // happens to meet a road it is reshaped to do so properly: grazes are
+  // swung clear, every genuine crossing is squared up — which reads as a
+  // proper railway junction and gives the level crossings their barriers a
+  // clean strip to guard.
   const { H, V } = streetLinesFor(bx, by);
-  const shaped = clearancePush(perpendicularCrossings(path, H, V), H, V);
+  const shaped = deform(path.pts, H, V);
   const p2 = polyPath(shaped);
   return {
     path: p2,
@@ -216,13 +344,27 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
 
 /**
  * Re-run the crossing deformation once the plan knows streets the rail could
- * not (the tram rectangle is reserved after this route is built). Re-squares
- * crossings and re-applies clearance against the COMPLETE street set, then
- * rewrites the cached route in place — every consumer reads the same object.
+ * not (the tram rectangle is reserved after this route is built). The
+ * COMPLETE street set gets the same quality gate the lattice set did: every
+ * candidate ring is re-deformed against H/V and the first clean one wins.
+ * The tram rectangle was placed to dodge the shipped route's shadows, and a
+ * re-roll candidate is itself ride-free against the complete set, so the
+ * swap cannot put the rail on top of the tram corridor. Rewrites the cached
+ * route in place — every consumer reads the same object.
  */
 export function resquareRail(route: RailRoute, H: number[], V: number[]): void {
-  const shaped = clearancePush(perpendicularCrossings(polyPath(route.basePts), H, V), H, V);
-  const p2 = polyPath(shaped);
+  const cands = route.candidates && route.candidates.length > 0 ? route.candidates : [route.control];
+  let best: { p2: WorldPath; q: Quality } | null = null;
+  for (const c of cands) {
+    const p2 = polyPath(deform(makePath(c, true).pts, H, V));
+    const q = shapeQuality(p2, H, V);
+    if (q.folds === 0 && q.ride < 7 && q.skew < 19) {
+      best = { p2, q };
+      break;
+    }
+    if (!best || qualityBetter(q, best.q)) best = { p2, q };
+  }
+  const p2 = best!.p2;
   route.path = p2;
   route.total = p2.total;
   route.pts = p2.pts;
@@ -236,41 +378,154 @@ export function resquareRail(route: RailRoute, H: number[], V: number[]): void {
 const CROSS_ZONE = 24;
 
 /**
- * Final guarantee for "the rail never lies on a road": any stretch running
- * near-parallel within 9 m of a street line is pushed sideways out to a
- * 10.5 m clearance (bed edge ~8.8 m clear of the kerb). Crossings are
- * untouched — there the rail heads square across the line, not along it.
- * Pushes are box-smoothed so the swerve in and out is gentle.
+ * Final guarantee for "the rail never lies on a road": any point headed
+ * within 55° of a street's own direction while within 10 m of that street's
+ * centreline is displaced sideways to an 11.5 m clearance (bed edge ~2.8 m
+ * clear of the kerb). The 55° window is deliberately wider than the ±45°
+ * "clearly parallel" case — an oblique approach rides the asphalt just as
+ * visibly, and everything the audit would flag (60° window) must get
+ * pushed.
+ *
+ * One exemption keeps the correction from fighting the crossing pins:
+ * within ±12 m of arc of a span-crossing of the SAME street the path is
+ * genuinely crossing, the pin rebuilds that whole neighbourhood, and a
+ * push there would shear samples across the line and tear the path into
+ * a hairpin with a fake square crossing in the middle. Hugs beyond that
+ * window — including tangent graze bottoms that never dip 3 m deep — all
+ * lift.
+ *
+ * Two properties make the correction actually hold:
+ *  - it iterates until no point violates (steepening one stretch changes
+ *    headings downstream and can expose a new violation one pass later);
+ *  - the push spreads to neighbours by max-magnitude with a decaying
+ *    weight, NOT by averaging — a mean would dilute a lone violation back
+ *    onto the asphalt, which is exactly the brush this exists to kill.
+ * Every push moves its point AWAY from the line, so no pass can create a
+ * crossing that was not already there.
  */
 export function clearancePush(
   pts: Array<{ x: number; z: number }>,
   H: number[], V: number[],
 ): Array<{ x: number; z: number }> {
   const N = pts.length;
-  const pushX = new Array(N).fill(0);
-  const pushZ = new Array(N).fill(0);
-  for (let k = 0; k < N; k++) {
-    const p = pts[k];
-    const a = pts[(k - 2 + N) % N], b = pts[(k + 2) % N];
-    const h = Math.atan2(b.x - a.x, b.z - a.z);
-    const alongX = Math.abs(Math.abs(h) - Math.PI / 2) < Math.PI / 4;
-    for (const line of H) {
-      const d = p.z - line * 64;
-      if (Math.abs(d) < 10 && alongX) pushZ[k] = (11.5 - Math.abs(d)) * Math.sign(d || 1);
+  const CLEAR = 11.5, BAND = 10, NEAR = 12, SWING = 30, PARALLEL = (55 * Math.PI) / 180;
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  for (let pass = 0; pass < 6; pass++) {
+    // arc table + where the current path genuinely crosses each street family
+    const cum: number[] = [0];
+    for (let k = 1; k <= N; k++) {
+      const a = cur[k - 1], b = cur[k % N];
+      cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
     }
-    for (const line of V) {
-      const d = p.x - line * 64;
-      const dev = Math.min(Math.abs(h), Math.PI - Math.abs(h));
-      if (Math.abs(d) < 10 && dev < Math.PI / 4) pushX[k] = (11.5 - Math.abs(d)) * Math.sign(d || 1);
+    const total = cum[N];
+    // span-crossings of the CURRENT path, split by whether the plan would
+    // record them (>= 11.5 m from the nearest node, matching the
+    // collector's margin). Recorded crossings earn the no-push window —
+    // the pin rebuilds that neighbourhood. A crossing squeezed against a
+    // junction would go unrecorded (no barriers), so instead of tearing it
+    // apart the push SWINGS the whole neighbourhood to the majority side:
+    // the crossing re-forms at the window edge, away from the node, where
+    // it is eligible again. Same-line swings closer than two windows merge
+    // into one — opposing swings would yank the path into a knot.
+    const hKeep: number[] = [], vKeep: number[] = [];
+    const hSwing: Array<{ s: number; side: number; line: number }> = [];
+    const vSwing: Array<{ s: number; side: number; line: number }> = [];
+    const collect = (
+      line: number, c: number, horiz: boolean,
+      keep: number[], swing: Array<{ s: number; side: number; line: number }>,
+    ): void => {
+      const raw: Array<{ s: number; k: number }> = [];
+      for (let k = 0; k < N; k++) {
+        const va = horiz ? cur[k].z : cur[k].x;
+        const vb = horiz ? cur[(k + 1) % N].z : cur[(k + 1) % N].x;
+        const wa = horiz ? cur[k].x : cur[k].z;
+        const wb = horiz ? cur[(k + 1) % N].x : cur[(k + 1) % N].z;
+        if ((va - c) * (vb - c) < 0) {
+          const f = (c - va) / (vb - va);
+          const cross = wa + (wb - wa) * f;
+          const s = cum[k] + f * (cum[k + 1] - cum[k]);
+          if (Math.abs(cross - Math.round(cross / 64) * 64) >= 12) keep.push(s);
+          else raw.push({ s, k });
+        }
+      }
+      // same-line hits closer than two swing windows share ONE side, so
+      // their windows push the same direction instead of fighting
+      let group: Array<{ s: number; k: number }> = [];
+      const flush = (): void => {
+        if (group.length === 0) return;
+        const k0 = group[0].k, k1 = group[group.length - 1].k;
+        const d0 = (horiz ? cur[(k0 - 15 + N) % N].z : cur[(k0 - 15 + N) % N].x) - c;
+        const d1 = (horiz ? cur[(k1 + 15) % N].z : cur[(k1 + 15) % N].x) - c;
+        const side = Math.sign(d0 + d1) || 1;
+        for (const h of group) swing.push({ s: h.s, side, line });
+        group = [];
+      };
+      for (const h of raw) {
+        if (group.length > 0 && h.s - group[group.length - 1].s >= 60) flush();
+        group.push(h);
+      }
+      flush();
+    };
+    for (const line of H) collect(line, line * 64, true, hKeep, hSwing);
+    for (const line of V) collect(line, line * 64, false, vKeep, vSwing);
+    const arcDist = (s: number, c: number): number => {
+      let d = Math.abs(s - c);
+      if (d > total / 2) d = total - d;
+      return d;
+    };
+    const rawX = new Array(N).fill(0);
+    const rawZ = new Array(N).fill(0);
+    for (let k = 0; k < N; k++) {
+      const p = cur[k];
+      const a = cur[(k - 2 + N) % N], b = cur[(k + 2) % N];
+      const h = Math.atan2(b.x - a.x, b.z - a.z);
+      const nearH = hKeep.some(c => arcDist(cum[k], c) < NEAR);
+      const nearV = vKeep.some(c => arcDist(cum[k], c) < NEAR);
+      for (const line of H) {
+        const d = p.z - line * 64;
+        const ad = Math.abs(d);
+        if (ad >= BAND || nearH) continue;
+        if (Math.abs(Math.abs(h) - Math.PI / 2) >= PARALLEL) continue;
+        let swing: number | null = null, best = SWING;
+        for (const sw of hSwing) {
+          if (sw.line !== line) continue;
+          const dd = arcDist(cum[k], sw.s);
+          if (dd < best) { best = dd; swing = sw.side; }
+        }
+        if (swing !== null) rawZ[k] = (CLEAR - d * swing) * swing;
+        else rawZ[k] = (CLEAR - ad) * Math.sign(d || 1);
+      }
+      for (const line of V) {
+        const d = p.x - line * 64;
+        const ad = Math.abs(d);
+        if (ad >= BAND || nearV) continue;
+        const dev = Math.min(Math.abs(h), Math.PI - Math.abs(h));
+        if (dev >= PARALLEL) continue;
+        let swing: number | null = null, best = SWING;
+        for (const sw of vSwing) {
+          if (sw.line !== line) continue;
+          const dd = arcDist(cum[k], sw.s);
+          if (dd < best) { best = dd; swing = sw.side; }
+        }
+        if (swing !== null) rawX[k] = (CLEAR - d * swing) * swing;
+        else rawX[k] = (CLEAR - ad) * Math.sign(d || 1);
+      }
     }
+    if (rawX.every(v => v === 0) && rawZ.every(v => v === 0)) break;
+    // max-dilation spread: a violating point always keeps its full push,
+    // neighbours ramp down toward zero over ±4 samples
+    const spread = (raw: number[]): number[] => cur.map((_, k) => {
+      let best = 0;
+      for (let j = -4; j <= 4; j++) {
+        const v = raw[(k + j + N) % N] * (1 - 0.16 * Math.abs(j));
+        if (Math.abs(v) > Math.abs(best)) best = v;
+      }
+      return best;
+    });
+    const sx = spread(rawX), sz = spread(rawZ);
+    cur = cur.map((p, k) => ({ x: p.x + sx[k], z: p.z + sz[k] }));
   }
-  const blur = (arr: number[]): number[] => arr.map((_, k) => {
-    let sum = 0, n = 0;
-    for (let j = -4; j <= 4; j++) { sum += arr[(k + j + N) % N]; n++; }
-    return sum / n;
-  });
-  const sx = blur(pushX), sz = blur(pushZ);
-  return pts.map((p, k) => ({ x: p.x + sx[k], z: p.z + sz[k] }));
+  return cur;
 }
 
 export function perpendicularCrossings(
@@ -305,32 +560,89 @@ export function perpendicularCrossings(
     }
   }
   hits.sort((u, v) => u.s - v.s);
-  // a near-parallel stretch may graze one line repeatedly; the whole wiggle
-  // resolves to ONE square crossing — later hits within a blend-zone length
-  // of the kept hit fold into it (the blend flattens their span anyway)
+  // a noisy touch can wiggle across one line several times within a pin
+  // core; those fold into ONE square crossing. Separated pairs stay
+  // separate — the lift has already cleared the hugs, so two genuine
+  // crossings 30-40 m apart are a real double crossing and EACH needs its
+  // own wall (merging them used to leave the second one shallow).
   const centers: Hit[] = [];
   for (const h of hits) {
     const prev = centers[centers.length - 1];
-    if (prev && prev.horiz === h.horiz && prev.line === h.line && h.s - prev.s < CROSS_ZONE * 2) continue;
+    if (prev && prev.horiz === h.horiz && prev.line === h.line && h.s - prev.s < 26) continue;
     centers.push(h);
+  }
+  // hits from DIFFERENT lines can also crowd (the rail cutting a junction
+  // corner). Two overlapping absolute cores collapse every point between
+  // them onto one corner — a knot hanging off the crossing — so where kept
+  // hits sit closer than two cores, both cores shrink to tile the gap.
+  // Blend zones shrink too: overlapping blends shear each other's shoulder
+  // and leave the second of a close pair skewed off square.
+  const core: number[] = centers.map(() => 10);
+  const zone: number[] = centers.map(() => CROSS_ZONE);
+  for (let i = 0; i < centers.length; i++) {
+    if (centers.length < 2) break;
+    const j = (i + 1) % centers.length;
+    const gap = i + 1 < centers.length
+      ? centers[j].s - centers[i].s
+      : centers[j].s + total - centers[i].s;
+    if (gap < 20) {
+      const h = Math.max(3, (gap - 2) / 2);
+      core[i] = Math.min(core[i], h);
+      core[j] = Math.min(core[j], h);
+    }
+    if (gap < CROSS_ZONE * 2) {
+      const z = Math.max(12, gap / 2 - 1);
+      zone[i] = Math.min(zone[i], z);
+      zone[j] = Math.min(zone[j], z);
+    }
   }
   // blend the neighbourhood of every kept hit onto the perpendicular through
   // it. Inside the road corridor (±7 m) the pin is absolute — the crossing
   // itself is dead square however shallow the approach — then the pin fades
-  // out to CROSS_ZONE so the merge back into the line is smooth.
+  // out to its (possibly shrunk) zone so the merge back into the line is
+  // smooth.
   const out = pts.map(p => ({ x: p.x, z: p.z }));
+  // points claimed by TWO crossing walls (shared asphalt between close
+  // crossings) belong to no single wall — pinning them lets the later pin
+  // crush the earlier wall's spread. A wall tip merely reaching toward a
+  // junction street with no crossing of its own is NOT contested.
+  const claims = new Array(N).fill(0);
   for (const hit of centers) {
     for (let k = 0; k < N; k++) {
+      const d0 = Math.abs((hit.horiz ? pts[k].z : pts[k].x) - (hit.horiz ? hit.z : hit.x));
+      if (d0 >= 7.5) continue;
+      const pa = hit.horiz ? pts[k].x : pts[k].z;
+      if (Math.abs(pa - (hit.horiz ? hit.x : hit.z)) >= 30) continue;
+      claims[k]++;
+    }
+  }
+  const contested = claims.map(c => c > 1);
+  centers.forEach((hit, ci) => {
+    const co = core[ci], zo = zone[ci];
+    for (let k = 0; k < N; k++) {
+      if (contested[k]) continue;
       let ds = cum[k] - hit.s;
       if (ds > total / 2) ds -= total;
       if (ds < -total / 2) ds += total;
       const ad = Math.abs(ds);
-      if (ad >= CROSS_ZONE) continue;
-      const w = ad <= 10 ? 1 : 0.5 * (1 + Math.cos((Math.PI * (ad - 10)) / (CROSS_ZONE - 10)));
+      const arcW = ad <= co ? 1
+        : ad >= zo ? 0
+          : 0.5 * (1 + Math.cos((Math.PI * (ad - co)) / (zo - co)));
+      // the pin stays absolute across the asphalt within its own ±30 m
+      // street window: a wall whose arc runs out mid-corridor — or a graze
+      // squeezed between two crossings a few metres apart — leaves asphalt
+      // crossed at a visible skew otherwise. Windowed so near-node walls of
+      // the perpendicular street stay out of reach.
+      const d0 = Math.abs((hit.horiz ? pts[k].z : pts[k].x) - (hit.horiz ? hit.z : hit.x));
+      const mask = d0 >= 9 ? 0 : d0 <= 7 ? 1 : (9 - d0) / 2;
+      const pa = hit.horiz ? pts[k].x : pts[k].z;
+      const inWindow = Math.abs(pa - (hit.horiz ? hit.x : hit.z)) < 30;
+      const w = Math.max(arcW, inWindow ? mask : 0);
+      if (w <= 0) continue;
       if (hit.horiz) out[k].x += (hit.x - out[k].x) * w;
       else out[k].z += (hit.z - out[k].z) * w;
     }
-  }
+  });
   return out;
 }
 

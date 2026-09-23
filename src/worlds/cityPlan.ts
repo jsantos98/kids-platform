@@ -390,7 +390,11 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (const hit of hits) {
       if (!cluster.length) { cluster.push(hit); continue; }
       const prev = cluster[cluster.length - 1];
-      if ((horiz ? hit.x - prev.x : hit.z - prev.z) <= 12) cluster.push(hit);
+      // cluster tightly-spaced dips of one graze into ONE crossing (the
+      // deformer squares the whole stretch with a single wall). Two
+      // recorded crossings < ~30 m apart would put an on-asphalt jog
+      // between their walls — the "W" ride this exists to prevent.
+      if ((horiz ? hit.x - prev.x : hit.z - prev.z) <= 30) cluster.push(hit);
       else { flush(); cluster.push(hit); }
     }
     flush();

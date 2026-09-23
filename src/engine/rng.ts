@@ -13,9 +13,16 @@ export function rng(seed: number): Rng {
 }
 
 // Hash a world coordinate triple into a seed (used by the chunk streamer so
-// revisiting a chunk always rebuilds the identical block).
+// revisiting a chunk always rebuilds the identical block). Each coordinate
+// is folded in through its own imul avalanche: a plain XOR of multiplied
+// terms mapped opposite corners onto each other (imul(-1,A)^imul(-1,B)
+// equals imul(1,A)^imul(1,B) for those constants, so city (-1,-1) and city
+// (1,1) came out identical).
 export function chunkSeed(seed: number, cx: number, cz: number): number {
-  let h = (seed | 0) ^ Math.imul(cx | 0, 374761393) ^ Math.imul(cz | 0, 668265263);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return (h ^ (h >>> 16)) >>> 0;
+  let h = Math.imul(seed | 0, 0x9e3779b1) ^ 0x85ebca6b;
+  h = Math.imul(h ^ (cx | 0), 0xc2b2ae35);
+  h ^= h >>> 13;
+  h = Math.imul(h ^ (cz | 0), 0x27d4eb2f);
+  h ^= h >>> 16;
+  return h >>> 0;
 }

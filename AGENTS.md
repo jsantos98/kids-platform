@@ -31,8 +31,9 @@ add it here AND add an enforcement point (code guard or audit check).
 
 | # | Rule | Enforced in |
 |---|------|-------------|
-| R7 | **The rail crosses streets only perpendicular.** Route scoring rejects any candidate with a crossing gentler than ~59° (`sin < 0.85`); `perpendicularCrossings()` then pins the crossing square (hard inside the ±7 m corridor, cos-blend out to `CROSS_ZONE` 24 m). | `railRoute.ts` |
-| R8 | **The rail never lies on a road.** Parallel is fine (with clearance), crossing square is fine, overlap is not. `clearancePush()` pushes any near-parallel stretch within 10 m of a street line out to 11.5 m clearance. Known residual: a couple of ≤12 m marginal brushes per some seeds (seam between two crossings' pin zones) — do not let this grow. | `railRoute.ts` `clearancePush` |
+| R7 | **The rail crosses streets only perpendicular.** Route scoring heavily penalizes shallow crossings (<59°, +20 each) and junction-corner cuts (street hits <30 m of arc apart, +50, and threading within 14 m of a node). `perpendicularCrossings()` then pins every hit square: absolute across the asphalt (perpendicular distance < 7 m) within a ±30 m street window, plus a cos-blend by arc whose core and zone shrink where hits crowd. Points claimed by two crossings' walls (shared asphalt) are pinned by neither — a later wall would crush an earlier wall's spread. Same-line hits <26 m of arc apart fold into one crossing, and the plan clusters recorded crossings at ≤30 m — an unmerged close pair would leave an on-asphalt jog between two walls (the "W" ride). The wall's edge ramps 7→9 m off the line, so the kerb-edge vertex may lean up to ~18° while the travelled asphalt stays square; the bar is 20° worst in-corridor skew (measured at |d| < 6.5 m within ±24 m of the crossing). | `railRoute.ts`, `cityPlan.ts` |
+| R8 | **The rail never lies on a road.** Parallel-with-clearance is fine, a square crossing is fine, overlap is not. `clearancePush()` runs BEFORE the pins (a graze pinned in place stays a 30 m skim along the asphalt) and iterates until clean: any point headed within 55° of a street's direction inside 10 m of it is displaced sideways to 11.5 m. The spread to neighbours is max-magnitude with decay, NEVER a mean — averaging dilutes a lone violation back onto the asphalt. Within ±12 m of a recorded crossing the pin owns the geometry (no push); a crossing too close to a node to record (<12 m) is swung whole to its majority side so it re-forms mid-block — pushing both its sides apart only tears the path into a hairpin. | `railRoute.ts` |
+| R8b | **A route ships only if its deformation provably worked.** `shapeQuality()` re-checks the finished path against the same numbers the audit uses (on-road rides, path folds, crossing skew) and `buildRoute()` deforms the top-scoring candidates in order, shipping the first clean one. The deform has rare bad modes on adversarial splines; a dirty result must cost a re-roll, never a shipped city. | `railRoute.ts buildRoute` |
 | R9 | **Nothing built touches the track:** lots ≥16 m, street lamps ≥9 m from the rail centreline. | `cityPlan.ts addLot`, `cityChunk.ts` lamp guard |
 | R10 | **Crossings are recorded only for true crossings** of a street line (including samples exactly ON the line, but a tangent touch is not a crossing), kept ≥6 m from a junction node — the deformer slides node-adjacent hits out to mid-block first. | `cityPlan.ts collectCrossings`, `railRoute.ts` |
 | R11 | **Crossing arc distance `d` must come from cumulative arc length.** The deformed rail is NOT evenly spaced (crossing pins cram samples to ~0.2 m); a linear index→arc map misplaces `d` and mistimes every barrier. | `cityPlan.ts` `railCum` |
@@ -47,7 +48,7 @@ add it here AND add an enforcement point (code guard or audit check).
 | # | Rule | Enforced in |
 |---|------|-------------|
 | R17 | **The plan is the single source of truth.** `cityPlanFor(bx, by)` decides streets, junctions, crossings, bridges, lots, districts; chunks/transit/traffic/minimap/trains only replay it. Never bake geometry that disagrees with the plan. | `cityPlan.ts` |
-| R18 | **Determinism: same seed ⇒ same city.** All generation flows from seeded rng streams (`rng`/`chunkSeed`); no `Math.random()` in world generation. Street lines + causeway avenues come from the shared `streetLinesFor(bx, by)` so the rail and the plan can never disagree about where streets are. | `cityGrid.ts` |
+| R18 | **Determinism: same seed ⇒ same city.** All generation flows from seeded rng streams (`rng`/`chunkSeed`); no `Math.random()` in world generation. `chunkSeed` folds each coordinate through its own imul avalanche — an XOR-only mix silently mapped opposite corners onto each other (city (−1,−1) was a clone of (1,1)). Street lines + causeway avenues come from the shared `streetLinesFor(bx, by)` so the rail and the plan can never disagree about where streets are. | `cityGrid.ts`, `engine/rng.ts` |
 | R19 | **The archipelago contract:** each (bx, by) cell is one island city; the four causeway corridors are pinned full-length, their rim tips exempt from trimming, and each corridor must meet the street web inland. Edge exits derive from the *owning* cell so neighbours always agree. | `cityPlan.ts` stage 3b, `cityGrid.ts` |
 | R20 | New games roll a fresh seed and write it into the URL; `?seed` replays a world exactly. Default player vehicle is the helicopter (`?vehicle=` switches; race mode uses the kart). | `index.ts` |
 | R21 | Per-city systems stream and LRU (transit keep-4, scenery keep-3, chunks by view radius). Everything must survive crossing a strait and coming back. | `chunks.ts`, `transit.ts`, `scenery.ts` |
@@ -55,11 +56,14 @@ add it here AND add an enforcement point (code guard or audit check).
 ## Verification workflow
 
 - **Audit (numbers beat vibes):** `npx tsx tools/audit-world.ts <seed>` checks
-  R1, R7 (≤8° deviation), R8 (no near-parallel rail run <7 m from a road
-  centreline for ≥12 m), R9, R10 indirectly (crossing count > 0), R19.
-  Extend this tool whenever you add a rule — one rule, one check. Known
-  acceptable residual: up to ~2 marginal ≤12 m rail brushes per seed between
-  two crossings' pin zones; anything longer or more frequent is a regression.
+  R1, R7 (worst in-corridor skew ≤20°: the rail's worst angle to the street
+  while on its asphalt, |d| < 6.5 m, ±24 m along), R8 (no near-parallel rail
+  run <7 m from a road centreline for ≥8 m), R9, R10 indirectly (crossing
+  count > 0), R19. Extend this tool whenever you add a rule — one rule, one
+  check. Zero tolerance: the deform modes are seed-dependent, so sweep
+  several seeds
+  (`for s in 7 777 4242 2024 9999 3 21 5; do npx tsx tools/audit-world.ts $s; done`)
+  — a clean default seed proves nothing about the seed the player rolls.
 - **Gates:** `npx tsc --noEmit && npx vite build`.
 - **Visual:** dev server runs on port 8321 (reuse the running one). Load
   `play/city.html?seed=N&debugsea=1` — `window.__dbg` exposes

@@ -14,12 +14,10 @@ import { Searchlight, Winch } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
 import { GuideArrow, pulseBeacon } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
-import { Traffic } from './traffic.js';
-import { Trains } from './train.js';
 import { createSea, boatLoop, waveAt } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
-import { Pedestrians } from './pedestrians.js';
+import { IslandManager } from './island/manager.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
@@ -219,16 +217,29 @@ if (q.get('spraytest') === '1') {
   if (fp) { player.state.x = fp.pos.x + 6; player.state.z = fp.pos.z + 4; }
 }
 
-// ---- ambient life: trains on the smooth main line (with station stops),
-// the level crossings that hold the cars, a patrol
-// heli circling the neighbourhood while the kid plays the fire truck ----
-const trains = new Trains(scene, 0, 0);
-if (V.kind === 'rail') trains.addPlayer();
-/** the train: index of the station to stop at next (into trains.stationArcs) */
+// ---- the islands' own life: every island keeps a fixed, seeded population
+// — its trains, cars, pedestrians, pets and boats — that lives there for
+// good. The island the kid is on is awake, and so is the neighbour whose
+// shore they're approaching (island/manager.ts). ----
+const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];
+const PED_NAMES = [...'abcdef'].flatMap(s => [`ped-m${s}`, `ped-f${s}`]);
+const pickTpl = (n: string) => {
+  const t = bakedModel(n);
+  if (!t) console.warn('missing baked template:', n);
+  return t;
+};
+const islands = new IslandManager(scene, {
+  // unless the kid drives it, one of the AI vehicles is the fire truck
+  extraCars: MODE.id !== 'truck' ? ['/assets/kenney/firetruck.glb'] : [],
+  pets: PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
+  people: PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
+});
+// the kid's own train runs on the start island's railway
+const homeTrains = islands.sim(0, 0).trains;
+if (V.kind === 'rail') homeTrains.addPlayer();
+/** the train: index of the station to stop at next (into homeTrains.stationArcs) */
 let stationNext = -1;
 const transit = new Transit(scene);
-// unless the kid drives it, one of the AI vehicles is the fire truck
-const traffic = new Traffic(scene, 12, MODE.id !== 'truck' ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -238,8 +249,10 @@ if (q.get('debugsea') === '1') {
     scene,
     camera,
     renderer,
-    trains,
-    traffic,
+    get trains() { return homeTrains; },
+    islands,
+    /** the current island's car fleet */
+    get traffic() { return islands.sim(curCity.bx, curCity.by).cars; },
     chunks,
     player,
     course: () => course,
@@ -253,21 +266,8 @@ if (q.get('debugsea') === '1') {
   };
 }
 const patrol = airborne ? null : new PatrolHeli(scene);
-// ---- pets + pedestrians: cube pets and Kenney mini-characters share the
-// sidewalks; everyone strolls until the fire truck scares them ----
-const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];
-const PED_NAMES = [...'abcdef'].flatMap(s => [`ped-m${s}`, `ped-f${s}`]);
-const pickTpl = (n: string) => {
-  const t = bakedModel(n);
-  if (!t) console.warn('missing baked template:', n);
-  return t;
-};
-const pedestrians = new Pedestrians(scene, 14,
-  PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
-  PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
-  camera);
 // dev probe: current pedestrian spots (via console/window)
-(window as unknown as { __peds: () => unknown }).__peds = () => pedestrians.list();
+(window as unknown as { __peds: () => unknown }).__peds = () => islands.sim(curCity.bx, curCity.by).walkers.list();
 
 // ---- particles ----
 const particles = new Particles(scene);
@@ -283,19 +283,17 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => sea.boatDots());
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => islands.boatDots());
 
 // ---- the city grid: drive across a strait and the next city wakes up.
-// Every system (plan, trains, traffic, pedestrians, shore scenery,
-// minimap) repoints itself at the new island; the seed is derived from the
+// The per-city systems (plan, shore scenery, transit furniture, minimap,
+// missions) repoint themselves at the new island — its population was
+// already awake as we approached (islands); the seed is derived from the
 // city's coordinates, so city (3, -2) is always the same city. ----
 let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
 function applyCity(c: CityRef): void {
   curCity = c;
   river = riverFor(citySeed(c.bx, c.by));
-  traffic.setCity(c.bx, c.by, c.ox, c.oz, player.car.position);
-  pedestrians.setCity(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z);
-  trains.setCity(scene, c.bx, c.by);
   transit.setCity(c.bx, c.by, c.ox, c.oz);
   sea.setCity(c.ox, c.oz);
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
@@ -440,10 +438,10 @@ function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: nu
 
 /** the train's next station: world position + arc gap ahead of the train */
 function nextStation(): { x: number; z: number; gap: number } | null {
-  const arcs = trains.stationArcs;
-  const pose = trains.playerPose();
+  const arcs = homeTrains.stationArcs;
+  const pose = homeTrains.playerPose();
   if (!arcs.length || !pose) return null;
-  const total = trains.loopLength;
+  const total = homeTrains.loopLength;
   const ahead = (d: number): number => ((d - pose.s) % total + total) % total;
   if (stationNext < 0 || stationNext >= arcs.length) {
     // the first station ahead of the train
@@ -457,7 +455,7 @@ function nextStation(): { x: number; z: number; gap: number } | null {
     stationNext = (stationNext + 1) % arcs.length;
     gap = ahead(arcs[stationNext]);
   }
-  const p = trains.at(arcs[stationNext]);
+  const p = homeTrains.at(arcs[stationNext]);
   return { x: p.x + curCity.ox, z: p.z + curCity.oz, gap: gap > total - 12 ? 0 : gap };
 }
 
@@ -475,8 +473,8 @@ const tick = (): void => {
   // until the fire is out / the cat is down)
   if (V.kind === 'rail') {
     // the kid's train: wheel pedals drive it, the pose comes from the rails
-    trains.setControls(mode === 'drive' ? input.gas : 0, mode === 'drive' ? input.brake : 1, nextStation()?.gap ?? Infinity);
-    const pose = trains.playerPose();
+    homeTrains.setControls(mode === 'drive' ? input.gas : 0, mode === 'drive' ? input.brake : 1, nextStation()?.gap ?? Infinity);
+    const pose = homeTrains.playerPose();
     if (pose) {
       st.x = pose.x + curCity.ox; st.z = pose.z + curCity.oz;
       st.heading = pose.h; st.v = pose.v;
@@ -570,15 +568,14 @@ const tick = (): void => {
 
   // ambient life: the trains, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly
-  trains.update(dt);
-  trains.setOrigin(curCity.ox, curCity.oz);
-  transit.update(dt, elapsed, trains);
+  // every awake island: trains, cars, people, boats (people only scatter
+  // from vehicles on the ground)
+  islands.update(dt, elapsed, player.car.position,
+    airborne || V.kind === 'boat' ? null : player.car.position);
+  transit.update(dt, elapsed, key => islands.trainsFor(key));
   sea.update(elapsed);
   scenery.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
-  // people only scatter from vehicles on the ground
-  if (airborne || V.kind === 'boat') pedestrians.update(dt, 1e9, 1e9, st.x, st.z);
-  else pedestrians.update(dt, st.x, st.z, st.x, st.z);
   if (V.kind === 'ground' && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);
     splashTimer -= dt;
@@ -589,7 +586,6 @@ const tick = (): void => {
   }
 
   // ambient life
-  traffic.update(dt, elapsed, player.car.position);
   particles.updateDrift(dt, mode === 'drive', st.v, input.steer, player.car);
   particles.update(dt);
   chunks.updateLights(elapsed);
@@ -678,7 +674,7 @@ const tick = (): void => {
     }
   } else if (station) {
     // ---- the train: stop at the platform ----
-    const pose = trains.playerPose()!;
+    const pose = homeTrains.playerPose()!;
     const gap = station.gap;
     showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
     promptFill.style.width = '0%';
@@ -686,7 +682,7 @@ const tick = (): void => {
       : gap < 70 ? 'SLOW DOWN…' : 'DRIVE TO THE STATION';
     if (gap < 12 && pose.v < 0.5) {
       earnStar('🚉 STATION STOP!', new THREE.Vector3(st.x, 3, st.z));
-      stationNext = (stationNext + 1) % trains.stationArcs.length;
+      stationNext = (stationNext + 1) % homeTrains.stationArcs.length;
     }
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----

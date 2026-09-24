@@ -221,12 +221,15 @@ export class Transit {
     return trains.distTo(c.d) < CROSSING_WARN_DIST;
   }
 
-  update(dt: number, elapsed: number, trains: Trains): void {
-    for (const inst of this.cities.values()) {
+  /** `trainsFor(key)` is the railway of city "bx,by" (null: its island is
+   * dormant — no train can be near, the booms stay up) */
+  update(dt: number, elapsed: number, trainsFor: (key: string) => Trains | null): void {
+    for (const [key, inst] of this.cities) {
+      const trains = trainsFor(key);
       // crossing lamps: alternate flash while a train is near, dim otherwise;
       // the booms swing down for the train and lift again once it is past
       for (const sig of inst.signals) {
-        const warn = this.blocked(sig.c, trains);
+        const warn = !!trains && this.blocked(sig.c, trains);
         const phase = Math.floor(elapsed * 2.6) % 2;
         for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
         for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;

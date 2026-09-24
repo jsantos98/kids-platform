@@ -1,5 +1,5 @@
-// The island railway: Kenney train-kit consists riding the seeded spline loop
-// (railRoute.ts). Every vehicle gets its own path distance so the consist
+// One island's railway: Kenney train-kit consists riding the island's seeded
+// loop (railRoute.ts) — each island simulation owns its own Trains. Every vehicle gets its own path distance so the consist
 // articulates through the curves like a real train. Trains slow down and pause
 // at the plan's stations; the rails mesh is built here too.
 import * as THREE from 'three';
@@ -61,8 +61,8 @@ export class Trains {
     const seed = citySeed(bx, by);
     this.route = railRouteFor(bx, by);
     this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
-    // rails + vehicles ride in this group (city-local coordinates); the game
-    // offsets the group to the current city's world position each frame
+    // rails + vehicles ride in this group (city-local coordinates), placed
+    // at the island's world origin by setOrigin
     this.group = new THREE.Group();
     scene.add(this.group);
     this.group.add(bakeRails(this.route, bakedModel('rail-straight')));
@@ -127,27 +127,21 @@ export class Trains {
   /** position of arc distance d (city-local) */
   at(d: number): { x: number; z: number; h: number } { return this.route.sample(d); }
 
-  /** move the whole railway (mesh + consists) to another city */
-  setCity(scene: THREE.Scene, bx: number, by: number): void {
-    const seed = citySeed(bx, by);
-    this.route = railRouteFor(bx, by);
-    this.stations = cityPlanFor(bx, by).stations.map(s => s.d).sort((a, b) => a - b);
-    // re-home the mesh + vehicles into a fresh offset group
-    const parent = this.group.parent;
-    if (parent) parent.remove(this.group);
-    this.group = new THREE.Group();
-    scene.add(this.group);
-    this.group.add(bakeRails(this.route, bakedModel('rail-straight')));
-    for (const c of this.consists) {
-      c.next = this.nextStation(c.s);
-      c.hold = 0;
-      for (const u of c.units) {
-        if (u.obj && u.obj.parent !== this.group) {
-          (u.obj.parent ?? scene).remove(u.obj);
-          this.group.add(u.obj);
-        }
-      }
-    }
+  /** show / hide the whole railway (an island going dormant) */
+  setVisible(v: boolean): void { this.group.visible = v; }
+
+  /** remove the railway from the scene for good */
+  dispose(): void {
+    this.group.parent?.remove(this.group);
+    // the rails mesh is ours; the carriages are spawnVehicle clones that
+    // share the cached GLB's geometry with every other train — skip them
+    const walk = (o: THREE.Object3D): void => {
+      if (o.userData.shared) return;
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.geometry?.dispose();
+      for (const c of o.children) walk(c);
+    };
+    walk(this.group);
   }
 
   /** world offset applied to mesh + vehicles this frame */
@@ -169,6 +163,7 @@ export class Trains {
   private makeUnit(url: string, len: number, back: number): Unit {
     const unit: Unit = { obj: null, back };
     spawnVehicle(url, { len }).then(obj => {
+      obj.userData.shared = true;
       obj.traverse(o => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
       obj.position.y = RAIL_TOP;
       this.group.add(obj);

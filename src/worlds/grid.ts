@@ -15,12 +15,15 @@ import { coastFor } from './coast.js';
 import { railNetFor, railPortals } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { ISLAND, WORLD_CHUNKS } from './world.js';
+import { raceTrackFor } from './raceIsland.js';
 
 export const ROAD = 1;
 export const RAIL = 2;
 export const RIVER = 4;
 export const LOT = 8;
 export const PLAZA = 16;
+/** a race circuit's zone: track and apron (raceIsland.ts) */
+export const RACE = 64;
 /** off the island's shore (coast.ts) */
 export const SEA = 32;
 /** a causeway corridor out over the water (the only road allowed on SEA) */
@@ -188,6 +191,10 @@ function paint(bx: number, by: number): CityGrid {
     if (n.plaza) g.disc(n.x, n.z, ROUNDABOUT_REACH, PLAZA);
     else if (!n.mouth && !n.square) g.disc(n.x, n.z, Math.max(...n.reach) * 0.75, ROAD);
   }
+
+  // a race circuit's zone: the track and its apron (R32)
+  const race = raceTrackFor(bx, by);
+  if (race) g.obb(race.cx, race.cz, race.hx, race.hz, race.ry, RACE);
 
   // rail bed (3.4 m bed, stamped a little wider for approaches)
   for (const L of rail.lines) g.stroke(L.pts, 1.5, 2, RAIL);

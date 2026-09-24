@@ -28,8 +28,10 @@ import { railNetFor, STEM } from './railRoute.js';
 import { EXIT_IN } from './streetLines.js';
 import { ISLAND, CENTER } from './world.js';
 import { blocksOf, type Block } from './blocks.js';
+import { ringPolygon, RING_INSET } from './ringRoad.js';
+import { raceTrackFor, ZONE_ROAD } from './raceIsland.js';
 
-export type EdgeKind = 'exit' | 'ring' | 'river' | 'bridge' | 'railside' | 'railx' | 'seam' | 'street' | 'link';
+export type EdgeKind = 'exit' | 'ring' | 'circuit' | 'river' | 'bridge' | 'railside' | 'railx' | 'seam' | 'street' | 'link';
 
 export interface GNode {
   id: number;
@@ -63,7 +65,6 @@ export const MIN_EDGE = 32;
 const CLEARANCE = 15;   // two streets that don't meet stay this far apart
 const PAD_CLEAR = 20;   // and a junction this far from a street it doesn't meet (two kit pads' corners reach 10 m each)
 const SNAP = 16;        // a crossing this close to a node joins it
-const RING_INSET = 58;
 /** blocks longer than this get a street cut through them (m) */
 const BLOCK_MAX = 130;
 const BLOCK_MIN_CUT = 5000;
@@ -180,34 +181,6 @@ function clipHalf(poly: P[], m: P, n: P): P[] {
   return out;
 }
 
-/** closed-polygon Douglas-Peucker, then chords at least `minChord` long */
-function simplify(poly: P[], tol: number, minChord: number): P[] {
-  const dp = (pts: P[]): P[] => {
-    if (pts.length < 3) return pts;
-    let bi = 0, bd = 0;
-    for (let i = 1; i < pts.length - 1; i++) {
-      const d = segDist(pts[i], pts[0], pts[pts.length - 1]);
-      if (d > bd) { bd = d; bi = i; }
-    }
-    if (bd <= tol) return [pts[0], pts[pts.length - 1]];
-    const l = dp(pts.slice(0, bi + 1)), r = dp(pts.slice(bi));
-    return [...l.slice(0, -1), ...r];
-  };
-  const half = poly.length >> 1;
-  let out = [...dp(poly.slice(0, half + 1)).slice(0, -1), ...dp([...poly.slice(half), poly[0]]).slice(0, -1)];
-  // drop vertices whose chords are too short, shortest first
-  for (let guard = 0; guard < 400 && out.length > 6; guard++) {
-    let bi = -1, bl = minChord;
-    for (let i = 0; i < out.length; i++) {
-      const l = dist(out[i], out[(i + 1) % out.length]);
-      if (l < bl) { bl = l; bi = i; }
-    }
-    if (bi < 0) break;
-    out.splice((bi + 1) % out.length, 1);
-  }
-  return out;
-}
-
 export interface Builder {
   nodes: GNode[];
   edges: GEdge[];
@@ -222,8 +195,9 @@ export interface Builder {
   insertPolyline(pts: P[], kind: EdgeKind, closed?: boolean): void;
   /** link stranded pieces and exits to the main web with straight links */
   linkUp(): void;
-  /** drop what the plan's dead-end trim would: stubs and stranded pieces */
-  prune(): void;
+  /** drop what the plan's dead-end trim would: stubs and stranded pieces
+   * (`keep` spares some edges that aren't on the main web yet) */
+  prune(keep?: (e: GEdge) => boolean): void;
   /** save / roll back the network (a trial insertion) */
   snapshot(): () => void;
   /** does any edge with id >= `from` survive the dead-end trim? */
@@ -622,7 +596,7 @@ export function makeBuilder(
     for (const [c, n] of sizes) if (n > best) { best = n; main = c; }
     return main;
   };
-  const prune = (): void => {
+  const prune = (keep: (e: GEdge) => boolean = () => false): void => {
     const { comp, sizes } = skeleton();
     const main = mainOf(sizes);
     // an edge survives when both its ends are in the main web after the trim
@@ -640,7 +614,7 @@ export function makeBuilder(
       }
       for (const id of live) {
         const e = edges[id];
-        if (comp.get(e.a) === main && comp.get(e.b) === main) alive.add(id);
+        if ((comp.get(e.a) === main && comp.get(e.b) === main) || keep(e)) alive.add(id);
       }
     }
     for (const e of edges) if (e.alive && !alive.has(e.id)) detach(e);
@@ -761,7 +735,29 @@ function generate(bx: number, by: number): StreetNet {
     }
     return out;
   };
-  const B = makeBuilder(river, nearTrestle, railOk, undefined, railCut);
+  // a race island's circuit (raceIsland.ts): no street enters its zone —
+  // they stop at the road that rings it
+  const race = raceTrackFor(bx, by);
+  const zoneCut = (a: P, b: P, kind: EdgeKind): Array<[P, P]> => {
+    if (!race || kind === 'exit') return [[a, b]];
+    const L = dist(a, b);
+    const n = Math.max(1, Math.ceil(L / 2));
+    const at = (k: number): P => ({ x: a.x + ((b.x - a.x) * k) / n, z: a.z + ((b.z - a.z) * k) / n });
+    const out: Array<[P, P]> = [];
+    let k0 = -1;
+    for (let k = 0; k <= n + 1; k++) {
+      const ok = k <= n && !race.inZone(at(k).x, at(k).z, ZONE_ROAD - 3);
+      if (ok && k0 < 0) k0 = k;
+      if (!ok && k0 >= 0) {
+        const p = at(k0), q = at(k - 1);
+        if (dist(p, q) >= MIN_EDGE * 0.5) out.push([p, q]);
+        k0 = -1;
+      }
+    }
+    return out;
+  };
+  const cuts = (a: P, b: P, kind: EdgeKind): Array<[P, P]> => railCut(a, b, kind).flatMap(([p, q]) => zoneCut(p, q, kind));
+  const B = makeBuilder(river, nearTrestle, railOk, undefined, cuts);
   const { nodes, insertDry, insertPolyline } = B;
   // ---- 1. exit avenues: straight in from each causeway mouth ----
   const exN = southExit(bx, by - 1) * 64, exS = southExit(bx, by) * 64;
@@ -773,59 +769,121 @@ function generate(bx: number, by: number): StreetNet {
 
   // ---- 2. the coastal ring road: chords ~58 m inside the shore, crossing
   // the river on a dead-square stretch ----
-  const ringPoly = simplify(insetShore(coast, RING_INSET), 7, 70);
+  const ringPoly = ringPolygon(bx, by);
   const normalAt = (p: P): { c: P; n: P } => {
     const near = river.path.nearest(p.x, p.z);
     const h = river.pts[near.i].h;
     return { c: near.p, n: { x: Math.cos(h), z: -Math.sin(h) } };
   };
-  const ring: P[] = [];
-  /** the square crossings' own points, which the tidy-up must keep */
-  const pinned = new Set<P>();
-  for (let i = 0; i < ringPoly.length; i++) {
-    const a = ringPoly[i], b = ringPoly[(i + 1) % ringPoly.length];
-    ring.push(a);
-    // where this chord meets the river, splice in a square crossing
-    const L = dist(a, b);
-    for (let t = 0; t <= L; t += 2) {
-      const p = { x: a.x + ((b.x - a.x) * t) / L, z: a.z + ((b.z - a.z) * t) / L };
-      if (river.distTo(p.x, p.z) > 2) continue;
-      const { c, n } = normalAt(p);
-      const side = Math.sign((a.x - c.x) * n.x + (a.z - c.z) * n.z) || 1;
-      const r1 = { x: c.x + n.x * 48 * side, z: c.z + n.z * 48 * side }, r2 = { x: c.x - n.x * 48 * side, z: c.z - n.z * 48 * side };
-      ring.push(r1, r2);
-      pinned.add(r1); pinned.add(r2);
-      break;
+  // every place the ring polygon meets the river or a railway line becomes
+  // a dead-square straight stretch across it (river ±48 m, track ±60 m).
+  // Crossings close together (river and track reaching the shore side by
+  // side) merge into ONE stretch square to the track across both — two
+  // overlapping stretches fold the ring back on itself. The ring is then
+  // rebuilt in one pass: the polygon's vertices inside each stretch go, the
+  // stretch's two ends take their place.
+  interface Cross { x: number; z: number; n: P; hl: number; rail: boolean; i: number }
+  const crosses: Cross[] = [];
+  const segHit = (a: P, b: P, p: P, q: P): P | null => {
+    const d1x = b.x - a.x, d1z = b.z - a.z, d2x = q.x - p.x, d2z = q.z - p.z;
+    const den = d1x * d2z - d1z * d2x;
+    if (Math.abs(den) < 1e-9) return null;
+    const t = ((p.x - a.x) * d2z - (p.z - a.z) * d2x) / den;
+    const sn = ((p.x - a.x) * d1z - (p.z - a.z) * d1x) / den;
+    return t >= 0 && t < 1 && sn >= 0 && sn <= 1 ? { x: a.x + d1x * t, z: a.z + d1z * t } : null;
+  };
+  const RN = ringPoly.length;
+  const exitSegs: Array<[P, P]> = [
+    [{ x: exN, z: 0 }, { x: exN, z: EXIT_IN }], [{ x: exS, z: ISLAND - EXIT_IN }, { x: exS, z: ISLAND }],
+    [{ x: 0, z: exW }, { x: EXIT_IN, z: exW }], [{ x: ISLAND - EXIT_IN, z: exE }, { x: ISLAND, z: exE }],
+  ];
+  for (let i = 0; i < RN; i++) {
+    const a = ringPoly[i], b = ringPoly[(i + 1) % RN];
+    for (let k = 0; k + 1 < river.pts.length; k++) {
+      const h = segHit(a, b, river.pts[k], river.pts[k + 1]);
+      if (h) crosses.push({ ...h, n: normalAt(h).n, hl: 48, rail: false, i });
+    }
+    for (const L of rail.lines) {
+      for (let k = 0; k + 1 < L.pts.length; k++) {
+        const h = segHit(a, b, L.pts[k], L.pts[k + 1]);
+        if (h) crosses.push({ ...h, n: { x: Math.cos(L.pts[k].h), z: -Math.sin(L.pts[k].h) }, hl: 60, rail: true, i });
+      }
     }
   }
-  // ... and crossing each railway line dead square too (at the portals the
-  // ring bends round the headland, the track runs straight out)
-  for (const L of rail.lines) {
-    for (let i = 0; i < ring.length; i++) {
-      const a = ring[i], b = ring[(i + 1) % ring.length];
-      let hit: { x: number; z: number; h: number } | null = null;
-      for (let k = 0; k + 1 < L.pts.length && !hit; k++) {
-        const p = L.pts[k], q = L.pts[k + 1];
-        const d1x = b.x - a.x, d1z = b.z - a.z, d2x = q.x - p.x, d2z = q.z - p.z;
-        const den = d1x * d2z - d1z * d2x;
-        if (Math.abs(den) < 1e-9) continue;
-        const t = ((p.x - a.x) * d2z - (p.z - a.z) * d2x) / den;
-        const sn = ((p.x - a.x) * d1z - (p.z - a.z) * d1x) / den;
-        if (t > 0 && t < 1 && sn >= 0 && sn <= 1) hit = { x: a.x + d1x * t, z: a.z + d1z * t, h: p.h };
-      }
-      if (!hit) continue;
-      const n = { x: Math.cos(hit.h), z: -Math.sin(hit.h) };
-      const side = Math.sign((a.x - hit.x) * n.x + (a.z - hit.z) * n.z) || 1;
-      const c1 = { x: hit.x + n.x * 60 * side, z: hit.z + n.z * 60 * side }, c2 = { x: hit.x - n.x * 60 * side, z: hit.z - n.z * 60 * side };
-      pinned.add(c1); pinned.add(c2);
-      ring.splice(i + 1, 0, c1, c2);
-      // vertices inside the new square stretch would fold the ring back
-      const X = hit;
-      const drop = (k: number): boolean => dist(ring[k], X) < 62 && ring[k] !== c1 && ring[k] !== c2;
-      while (ring.length > 6 && drop((ring.indexOf(c1) - 1 + ring.length) % ring.length)) ring.splice((ring.indexOf(c1) - 1 + ring.length) % ring.length, 1);
-      while (ring.length > 6 && drop((ring.indexOf(c2) + 1) % ring.length)) ring.splice((ring.indexOf(c2) + 1) % ring.length, 1);
-      i = ring.indexOf(c2);
+  // the stretch a group of crossings makes: square to the track (or the
+  // river), spanning every member's half-length
+  const stretchOf = (g: Cross[]): { X: Cross; n: P; uHi: number; uLo: number } => {
+    const X = g.find(c => c.rail) ?? g[0];
+    const n = X.n;
+    const u = (p: P): number => (p.x - X.x) * n.x + (p.z - X.z) * n.z;
+    let uHi = -Infinity, uLo = Infinity;
+    for (const c of g) { uHi = Math.max(uHi, u(c) + c.hl); uLo = Math.min(uLo, u(c) - c.hl); }
+    // a causeway avenue the stretch spans (the rail stems run 24 m beside
+    // them) must meet it a street's length from either end
+    for (const [ea, eb] of exitSegs) {
+      const h = segHit({ x: X.x + n.x * (uLo - 60), z: X.z + n.z * (uLo - 60) }, { x: X.x + n.x * (uHi + 60), z: X.z + n.z * (uHi + 60) }, ea, eb);
+      if (!h) continue;
+      const ue = u(h);
+      if (ue > uLo - 36 && ue < uHi + 36) { uHi = Math.max(uHi, ue + 36); uLo = Math.min(uLo, ue - 36); }
     }
+    return { X, n, uHi, uLo };
+  };
+  const inlandStretch = (st: { X: Cross; n: P; uHi: number; uLo: number }): boolean => {
+    for (let t = st.uLo; t <= st.uHi; t += 6) {
+      if (!coast.inLand(st.X.x + st.n.x * t, st.X.z + st.n.z * t, 30)) return false;
+    }
+    return true;
+  };
+  const groups: Cross[][] = [];
+  for (const c of crosses) {
+    const g = groups.find(gr => gr.some(o => dist(o, c) < 150));
+    // (merged only while the joint stretch stays short and well inland —
+    // a long straight one cuts across the bays toward the sea)
+    if (g) {
+      const st = stretchOf([...g, c]);
+      if (st.uHi - st.uLo <= 170 && inlandStretch(st)) { g.push(c); continue; }
+      // kept apart: neither may reach into the other's stretch
+      for (const o of g) {
+        const room = Math.max(18, dist(o, c) / 2 - 6);
+        o.hl = Math.min(o.hl, room);
+        c.hl = Math.min(c.hl, room);
+      }
+    }
+    groups.push([c]);
+  }
+  // and no stretch reaches toward the shore: shorten it until it keeps inland
+  for (const g of groups) {
+    for (let guard = 0; guard < 4 && !inlandStretch(stretchOf(g)); guard++) for (const c of g) c.hl = Math.max(18, c.hl * 0.75);
+  }
+  const removed = new Array<boolean>(RN).fill(false);
+  const insertAfter = new Map<number, P[]>();
+  /** the square crossings' own points, which the tidy-up must keep */
+  const pinned = new Set<P>();
+  for (const g of groups) {
+    const { X, n, uHi, uLo } = stretchOf(g);
+    const u = (p: P): number => (p.x - X.x) * n.x + (p.z - X.z) * n.z;
+    const lat = (p: P): number => Math.abs((p.x - X.x) * -n.z + (p.z - X.z) * n.x);
+    const eHi = { x: X.x + n.x * uHi, z: X.z + n.z * uHi }, eLo = { x: X.x + n.x * uLo, z: X.z + n.z * uLo };
+    const inside = (k: number): boolean => { const v = ringPoly[k]; return lat(v) < 110 && u(v) > uLo - 2 && u(v) < uHi + 2; };
+    // the chords the group sits on, and the vertices inside the stretch
+    // either side of them
+    const is = g.map(c => c.i);
+    let first = Math.min(...is), last = Math.max(...is);
+    if (last - first > RN / 2) [first, last] = [last, first + RN]; // wraps past vertex 0
+    let k0 = first, k1 = last + 1;
+    for (let guard = 0; guard < RN && inside(((k0 % RN) + RN) % RN); guard++) k0--;
+    for (let guard = 0; guard < RN && inside(k1 % RN); guard++) k1++;
+    for (let k = k0 + 1; k < k1; k++) removed[((k % RN) + RN) % RN] = true;
+    const before = ringPoly[((k0 % RN) + RN) % RN];
+    const ends = dist(before, eHi) < dist(before, eLo) ? [eHi, eLo] : [eLo, eHi];
+    insertAfter.set(((k0 % RN) + RN) % RN, ends);
+    pinned.add(eHi); pinned.add(eLo);
+  }
+  const ring: P[] = [];
+  for (let k = 0; k < RN; k++) {
+    if (!removed[k]) ring.push(ringPoly[k]);
+    const ins = insertAfter.get(k);
+    if (ins) ring.push(...ins);
   }
   // no chord may come out shorter than a street: vertices crowding a spliced
   // river crossing go (the crossing's own two points stay)
@@ -835,6 +893,18 @@ function generate(bx: number, by: number): StreetNet {
       const b = ring[(i + 1) % ring.length];
       if (dist(ring[i], b) < 50 && !(pinned.has(ring[i]) && pinned.has(b))) { bi = i; break; }
     }
+    // (two stretches ending hard by each other meet at one vertex)
+    if (bi < 0) {
+      for (let i = 0; i < ring.length && bi < 0; i++) if (dist(ring[i], ring[(i + 1) % ring.length]) < 50) bi = i;
+      if (bi >= 0 && ring.length > 6) {
+        const a = ring[bi], b = ring[(bi + 1) % ring.length];
+        const m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+        pinned.add(m);
+        ring.splice(bi, 1, m);
+        ring.splice(ring.indexOf(b), 1);
+        continue;
+      }
+    }
     if (bi < 0 || ring.length <= 6) break;
     // drop whichever end of the short chord is not part of a river splice
     const a = ring[bi], b = ring[(bi + 1) % ring.length];
@@ -842,6 +912,25 @@ function generate(bx: number, by: number): StreetNet {
     ring.splice(spliced(a) && !spliced(b) ? (bi + 1) % ring.length : bi, 1);
   }
   insertPolyline(ring, 'ring', true);
+  // ... and the road round the race circuit's apron, laid next so the
+  // streets meet it square
+  if (race) {
+    const zr = race.outline(ZONE_ROAD);
+    insertPolyline(zr, 'circuit', true);
+    // spokes: square out of the middle of each side to the ring road, so
+    // the circuit's road is part of the web from the start
+    for (let i = 0; i < 4; i++) {
+      const a = zr[i], b = zr[(i + 1) % 4];
+      const m = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+      const L = dist(a, b);
+      const n = { x: (b.z - a.z) / L, z: -(b.x - a.x) / L };
+      // outward: away from the zone's centre
+      const sgn = (m.x - race.cx) * n.x + (m.z - race.cz) * n.z > 0 ? 1 : -1;
+      const far = { x: m.x + n.x * sgn * 600, z: m.z + n.z * sgn * 600 };
+      const piece = clipToPoly(m, far, ring).find(([p]) => dist(p, m) < 1);
+      if (piece && dist(piece[0], piece[1]) >= MIN_EDGE) insertDry(piece[0], { x: piece[1].x + n.x * sgn * 0.5, z: piece[1].z + n.z * sgn * 0.5 }, 'street');
+    }
+  }
   // the patches live inside the ring
   const inner = ring;
 
@@ -975,7 +1064,56 @@ function generate(bx: number, by: number): StreetNet {
     if (!railCells.has(k)) railCells.set(k, []);
     railCells.get(k)!.push(rp);
   }
-  B.prune();
+  // a race island's circuit road must be part of the web: spokes out of its
+  // sides (a few offsets and angles each, the T at its side kept fair) to
+  // whatever street they meet; each kept only if it survives the trim
+  // (tried once the stranded fragments are pruned away — surviving the trim
+  // then means reaching the main web — and again after subdivision)
+  const keepCircuit = (e: GEdge): boolean => e.kind === 'circuit';
+  const joinCircuit = (): number => {
+    if (!race) return 0;
+    const zr = race.outline(ZONE_ROAD);
+    let joined = 0;
+    // (diagonal spokes out of the corners too: 135 degrees from both sides)
+    const spoke = (m: P, d: P): boolean => {
+      const undo = B.snapshot();
+      const e0 = B.edges.length;
+      B.insertDry({ x: m.x - d.x * 0.5, z: m.z - d.z * 0.5 }, { x: m.x + d.x * 420, z: m.z + d.z * 420 }, 'street');
+      if (B.edges.length > e0 && B.survives(e0)) return true;
+      undo();
+      return false;
+    };
+    for (let i = 0; i < 4 && joined < 2; i++) {
+      const a = zr[i], b = zr[(i + 1) % 4];
+      const L = dist(a, b);
+      const t = { x: (b.x - a.x) / L, z: (b.z - a.z) / L };
+      const n0 = { x: t.z, z: -t.x };
+      const sgn = ((a.x + b.x) / 2 - race.cx) * n0.x + ((a.z + b.z) / 2 - race.cz) * n0.z > 0 ? 1 : -1;
+      let done = false;
+      for (const f of [0.5, 0.3, 0.7, 0.2, 0.8]) {
+        if (done || f * L < MIN_EDGE || (1 - f) * L < MIN_EDGE) continue;
+        for (const tilt of [0, 20, -20, 30, -30]) {
+          const th = (tilt * Math.PI) / 180;
+          const d = { x: (n0.x * Math.cos(th) + t.x * Math.sin(th)) * sgn, z: (n0.z * Math.cos(th) + t.z * Math.sin(th)) * sgn };
+          const m = { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
+          if (spoke(m, d)) { done = true; joined++; break; }
+        }
+      }
+    }
+    for (let i = 0; i < 4 && joined < 1; i++) {
+      const c = zr[i];
+      const out = { x: c.x - race.cx, z: c.z - race.cz };
+      const L = Math.hypot(out.x, out.z);
+      for (const tilt of [0, 15, -15]) {
+        const th = (tilt * Math.PI) / 180;
+        const d = { x: (out.x * Math.cos(th) + out.z * Math.sin(th)) / L, z: (-out.x * Math.sin(th) + out.z * Math.cos(th)) / L };
+        if (spoke(c, d)) { joined++; break; }
+      }
+    }
+    return joined;
+  };
+  B.prune(keepCircuit);
+  let circuitJoined = joinCircuit() > 0;
   const tried = new Set<string>();
   for (let round = 0; round < 160; round++) {
     const faces = blocksOf(B.result()).sort((p, q) => q.area - p.area);
@@ -983,11 +1121,16 @@ function generate(bx: number, by: number): StreetNet {
     for (const f of faces) {
       const fk = `${Math.round(f.cx)},${Math.round(f.cz)},${Math.round(f.area / 10)}`;
       if (tried.has(fk) || f.area < BLOCK_MIN_CUT) continue;
+      // (the circuit's own block: every corner on its ringing road)
+      if (race && f.poly.every(p => race.inZone(p.x, p.z, ZONE_ROAD + 1))) continue;
       if (cutBlock(f)) { did = true; break; }
       tried.add(fk);
     }
     if (!did) break;
   }
+  if (race && !circuitJoined) circuitJoined = joinCircuit() > 0;
+  // a circuit road that never joined the web goes with the other strays
+  B.prune();
   /** cheap geometry first: would the rules at both ends, beside the
    * block's corners and across the track even let this cut stand? */
   function cutPlausible(poly: P[], p: P, q: P): boolean {
@@ -1100,37 +1243,52 @@ function generate(bx: number, by: number): StreetNet {
         const R = 2000;
         const pieces = clipToPoly({ x: o.x - cut.x * R, z: o.z - cut.z * R }, { x: o.x + cut.x * R, z: o.z + cut.z * R }, poly);
         pieces.sort((m, n) => segDist(o, m[0], m[1]) - segDist(o, n[0], n[1]));
-        for (const [p, q] of pieces.slice(0, 2)) {
-          const L = dist(p, q);
-          if (L < MIN_EDGE * 1.5) continue;
-          if (!cutPlausible(poly, p, q)) continue;
-          // on land, and over the river only dead square (the track is the
-          // rail cut's business: only a square level crossing survives it)
-          let wet = false;
-          const hc = Math.atan2(q.x - p.x, q.z - p.z);
-          for (let s = 0; s <= L && !wet; s += 3) {
-            const x = p.x + ((q.x - p.x) * s) / L, z = p.z + ((q.z - p.z) * s) / L;
-            if (!coast.inLand(x, z, 20)) wet = true;
-            else if (river.distTo(x, z) < river.halfAt(x, z) + 18) {
-              const rh = river.pts[river.path.nearest(x, z).i].h;
-              if (Math.abs(Math.cos(rh - hc)) > Math.sin(RIVER_OK_LINK)) wet = true;
-            }
-          }
-          if (wet) continue;
-          const undo = B.snapshot();
-          const e0 = B.edges.length;
-          // a hair past both sides, so each end finds its side's edge
-          const ext = { x: (q.x - p.x) / L, z: (q.z - p.z) / L };
-          B.insertDry({ x: p.x - ext.x * 0.4, z: p.z - ext.z * 0.4 }, { x: q.x + ext.x * 0.4, z: q.z + ext.z * 0.4 }, 'street');
-          const sv = B.edges.length > e0 && B.survives(e0);
-          if (sv) {
-            B.prune();
-            return true;
-          }
-          undo();
-        }
+        for (const [p, q] of pieces.slice(0, 2)) if (tryCut(poly, p, q)) return true;
       }
     }
+    // cuts THROUGH the track (or the river) where it runs through the block,
+    // square to it right there: over winding track a cut placed by the
+    // block's sides almost never meets it square
+    const through: Array<{ x: number; z: number; h: number }> = [];
+    for (const L of rail.lines) for (let k = 0; k < L.pts.length; k += 5) if (inPoly(L.pts[k], poly)) through.push(L.pts[k]);
+    for (let k = 0; k < river.pts.length; k += 5) if (inPoly(river.pts[k], poly)) through.push(river.pts[k]);
+    for (const tp of through) {
+      const cut = { x: Math.cos(tp.h), z: -Math.sin(tp.h) };
+      const R = 2000;
+      const pieces = clipToPoly({ x: tp.x - cut.x * R, z: tp.z - cut.z * R }, { x: tp.x + cut.x * R, z: tp.z + cut.z * R }, poly);
+      const piece = pieces.find(([p, q]) => segDist(tp, p, q) < 1);
+      if (piece && tryCut(poly, piece[0], piece[1])) return true;
+    }
+    return false;
+  }
+  /** one candidate cut p -> q across block `poly`: pre-tested, laid, kept
+   * if it survives the trim */
+  function tryCut(poly: P[], p: P, q: P): boolean {
+    const L = dist(p, q);
+    if (L < MIN_EDGE * 1.5) return false;
+    if (!cutPlausible(poly, p, q)) return false;
+    // on land, and over the river only dead square (the track is the rail
+    // cut's business: only a square level crossing survives it)
+    const hc = Math.atan2(q.x - p.x, q.z - p.z);
+    for (let s = 0; s <= L; s += 3) {
+      const x = p.x + ((q.x - p.x) * s) / L, z = p.z + ((q.z - p.z) * s) / L;
+      if (!coast.inLand(x, z, 20)) return false;
+      if (river.distTo(x, z) < river.halfAt(x, z) + 18) {
+        const rh = river.pts[river.path.nearest(x, z).i].h;
+        if (Math.abs(Math.cos(rh - hc)) > Math.sin(RIVER_OK_LINK)) return false;
+      }
+    }
+    const undo = B.snapshot();
+    const e0 = B.edges.length;
+    // a hair past both sides, so each end finds its side's edge
+    const ext = { x: (q.x - p.x) / L, z: (q.z - p.z) / L };
+    B.insertDry({ x: p.x - ext.x * 0.4, z: p.z - ext.z * 0.4 }, { x: q.x + ext.x * 0.4, z: q.z + ext.z * 0.4 }, 'street');
+    if (B.edges.length > e0 && B.survives(e0)) {
+      B.prune(keepCircuit);
+      return true;
+    }
+    undo();
+    return false;
     return false;
   }
 

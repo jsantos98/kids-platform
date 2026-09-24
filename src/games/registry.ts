@@ -66,6 +66,13 @@ export const GAMES: GameEntry[] = [
     url: 'play/city.html?mode=train',
   },
   {
+    id: 'city-race',
+    title: 'Kart Race',
+    icon: '🏎️',
+    blurb: 'Three laps round the race island — beat the other karts to the flag!',
+    url: 'play/city.html?mode=race',
+  },
+  {
     id: 'firetruck',
     title: 'Fire Truck — City Rescue',
     icon: '🔥',

@@ -23,7 +23,9 @@ import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
-import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
+import { setCityBase, citySeed, cityAt, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
+import { raceTrackFor } from '../../worlds/raceIsland.js';
+import { Race, LAPS } from './race.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { Railway, lineDir } from './railway.js';
@@ -114,6 +116,10 @@ function trainStart(bx: number, by: number): { arc: number; x: number; z: number
 /** where a mode starts in city (bx, by) — city-local */
 function modeSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
   if (MODE.spawn === 'sea') return seaSpawn(bx, by);
+  if (MODE.spawn === 'race') {
+    const T = raceTrackFor(bx, by);
+    if (T) return { x: T.grid[1].x, z: T.grid[1].z, heading: T.grid[1].h };
+  }
   if (MODE.spawn === 'rail') {
     const r = trainStart(bx, by);
     return { x: r.x, z: r.z, heading: r.h };
@@ -140,7 +146,13 @@ scene.add(groundFollower);
 // ---- player vehicle ----
 const V = MODE.vehicle;
 const airborne = V.kind === 'heli' || V.kind === 'plane';
-let spawn = modeSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
+// the race starts on race island (0,0); every other mode on island (1,0)
+const START = MODE.spawn === 'race' ? { bx: 0, by: 0 } : { bx: 1, by: 0 };
+const START_OX = START.bx * CITY_PITCH, START_OZ = START.by * CITY_PITCH;
+let spawn = (() => {
+  const s = modeSpawn(START.bx, START.by);
+  return { x: s.x + START_OX, z: s.z + START_OZ, heading: s.heading };
+})()
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
@@ -200,7 +212,7 @@ if (q.get('debugbake') === '1') {
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
 const chunks = new ChunkManager(scene, 64, 4);
-let river = riverFor(0, 0);
+let river = riverFor(START.bx, START.by);
 chunks.ensure(999, spawn.x, spawn.z);
 if (q.get('buildall') === '1') {
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
@@ -218,6 +230,10 @@ const director = new Director(document.getElementById('fade')!);
 
 // ---- missions ----
 const missions = new Missions(scene, MODE.calls);
+{
+  const c0 = cityAt(spawn.x, spawn.z);
+  missions.setCity(c0.bx, c0.by, c0.ox, c0.oz);
+}
 const MAX_ACTIVE = MODE.calls.length ? 3 : 0;
 for (let i = 0; i < MAX_ACTIVE; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
 // checkpoint course (police car gates, sky rings, sea buoys)
@@ -251,7 +267,7 @@ const islands = new IslandManager(scene, {
   people: PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
 });
 // the kid's own train runs on the start island's north-south line
-if (V.kind === 'rail') railway.addPlayer(0, 0, trainStart(0, 0).arc);
+if (V.kind === 'rail') railway.addPlayer(START.bx, START.by, trainStart(START.bx, START.by).arc);
 /** the platform the kid's train last stopped at (the goal moves on) */
 let stationDone: { x: number; z: number } | null = null;
 const transit = new Transit(scene);
@@ -275,6 +291,8 @@ if (q.get('debugsea') === '1') {
     transit: () => transit.list(),
     river: () => river,
     route: () => railNetFor(curCity.bx, curCity.by),
+    /** race mode: the race on this island */
+    race: () => race,
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
       return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
@@ -306,7 +324,11 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
 // missions) repoint themselves at the new island — its population was
 // already awake as we approached (islands); the seed is derived from the
 // city's coordinates, so city (3, -2) is always the same city. ----
-let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
+let curCity: CityRef = cityAt(spawn.x, spawn.z);
+/** race mode: the race on this island's circuit (none elsewhere) */
+let race: Race | null = null;
+let raceCheer = 0, raceMsg = '', raceMsgT = 0;
+const ordinal = (n: number): string => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 function applyCity(c: CityRef): void {
   curCity = c;
   river = riverFor(c.bx, c.by);
@@ -319,6 +341,14 @@ function applyCity(c: CityRef): void {
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
   stationDone = null;
+  if (MODE.spawn === 'race') {
+    race?.dispose();
+    const T = raceTrackFor(c.bx, c.by);
+    race = T ? new Race(scene, T, c.ox, c.oz) : null;
+    if (race && raceTrackFor(c.bx, c.by) && T && T.inZone(player.state.x - c.ox, player.state.z - c.oz, 40)) {
+      Object.assign(player.state, race.reset(), { v: 0 });
+    } else race?.reset();
+  }
 }
 applyCity(curCity);
 const hud = makeHUD();
@@ -481,6 +511,9 @@ const tick = (): void => {
       st.heading = pose.h; st.v = pose.v; st.alt = pose.y;
     }
   } else if (mode === 'drive' || player.crashT > 0) {
+    // the race's countdown holds the kart on the grid
+    // (no brake: at a standstill the brake pedal is reverse)
+    if (race?.frozen) { input.gas = 0; input.brake = 0; input.steer = 0; st.v = 0; }
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
     const wasCrashing = player.crashT > 0;
     const ring = course?.target();
@@ -488,7 +521,7 @@ const tick = (): void => {
     if (step.crashed) {
       audio.thud();
       toast = '';
-      Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+      Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
     } else if (!wasCrashing && V.kind === 'ground' && mode === 'drive') {
       crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
       // stuck detector: gas held the whole window yet the truck went nowhere
@@ -498,7 +531,7 @@ const tick = (): void => {
       if (stuck.t >= 3) {
         if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
           startCrash(player);
-          Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+          Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
         }
         Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
       }
@@ -506,6 +539,36 @@ const tick = (): void => {
   } else {
     st.v = 0;
     Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
+  }
+
+  // the race: grass off the track slows the kart, the AI karts bump it
+  // softly, and laps / the finish are cheered
+  if (race) {
+    if (race.offTrack(st.x, st.z) > 1.5 && Math.abs(st.v) > 5) st.v *= 1 - Math.min(0.5, dt * 1.2);
+    const push = race.bump(st.x, st.z);
+    if (push) { st.x += push.dx; st.z += push.dz; st.v *= 1 - Math.min(0.5, dt * 3); }
+    const ev = race.update(dt, st.x, st.z);
+    const at = new THREE.Vector3(st.x, 2, st.z);
+    if (ev.go) { raceMsg = 'GO!'; raceMsgT = 1.5; particles.burstConfetti(at); }
+    if (ev.lap) { raceMsg = ev.lap === LAPS ? '🏁 LAST LAP!' : `LAP ${ev.lap}!`; raceMsgT = 2; }
+    raceMsgT -= dt;
+    if (ev.finished) {
+      const place = ev.finished;
+      earnStar(place === 1 ? '🏆 YOU WON THE RACE!' : `🏁 ${ordinal(place)} PLACE — GREAT RACE!`, at);
+      raceCheer = 0;
+    }
+    if (race.phase === 'finished') {
+      // the celebration: confetti all round the finish until the next race
+      raceCheer -= dt;
+      if (raceCheer <= 0) {
+        raceCheer = 0.5;
+        particles.burstConfetti(new THREE.Vector3(st.x + (Math.random() - 0.5) * 8, 2 + Math.random() * 3, st.z + (Math.random() - 0.5) * 8));
+      }
+    }
+    if (ev.restart) {
+      Object.assign(st, race.reset(), { v: 0 });
+      crumbs.clear();
+    }
   }
 
   // road vehicles ride the causeway decks up over the raised span
@@ -673,6 +736,22 @@ const tick = (): void => {
     promptEl.style.display = view.scene ? 'block' : 'none';
     promptText.textContent = view.prompt;
     promptFill.style.width = `${Math.min(100, view.progress * 100)}%`;
+  } else if (race) {
+    // ---- the race: lap, place, countdown ----
+    const rv = race.view();
+    const ahead = race.aheadPoint();
+    const bearingR = Math.atan2(ahead.x - st.x, ahead.z - st.z);
+    guideEl.style.opacity = '1';
+    guideIcon.textContent = '🏁';
+    guideArrow.style.transform = `rotate(${(camYaw - bearingR).toFixed(3)}rad)`;
+    guideArrow.style.display = '';
+    guideDist.innerHTML = `<span class="m">LAP ${rv.lap}/${LAPS} · ${ordinal(rv.place)}</span>`;
+    guideWait.textContent = '';
+    promptEl.style.display = 'block';
+    promptFill.style.width = `${(rv.progress * 100).toFixed(1)}%`;
+    promptText.textContent = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : 'GO!')
+      : rv.phase === 'finished' ? (rv.finalPlace === 1 ? '🏆 YOU WON!' : `🏁 ${ordinal(rv.finalPlace)} PLACE!`)
+      : raceMsgT > 0 ? raceMsg : `LAP ${rv.lap}/${LAPS} — ${ordinal(rv.place)}`;
   } else if (course && gate) {
     // ---- checkpoint course: through the glowing gate, then the next ----
     showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,

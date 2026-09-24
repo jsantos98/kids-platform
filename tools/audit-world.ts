@@ -10,7 +10,8 @@ import type { RailNet } from '../src/worlds/railRoute.js';
 import type { RiverRoute } from '../src/worlds/riverRoute.js';
 import type { CityGrid } from '../src/worlds/grid.js';
 import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
-import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK } from '../src/worlds/grid.js';
+import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK, RACE } from '../src/worlds/grid.js';
+import { isRaceIsland, raceTrackFor, clearRaceCache, UNIT } from '../src/worlds/raceIsland.js';
 import { clearCoastCache } from '../src/worlds/coast.js'; // (coastFor imported above)
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, edgePieces, pieceOutline, nodeReach } from '../src/worlds/roadLayout.js';
@@ -33,6 +34,7 @@ const clearAllWorldCaches = (): void => {
   clearCoastCache();
   clearTimetableCache();
   clearStreetNetCache();
+  clearRaceCache();
 };
 
 const W = 14;
@@ -77,6 +79,7 @@ let thinBlocks = 0;
 let worstFill = 1;
 let districtFaults = 0;
 let polesInLots = 0;
+let raceFaults = 0;
 let graphFaults = 0;
 let roadGaps = 0;
 let portalFaults = 0;
@@ -482,6 +485,41 @@ for (const [bx, by] of cells) {
   }
 }
 
+// R32: every race island carries a closed Toy Car Kit loop in its own
+// block, the apron carries nothing but grass and props (no street, track,
+// water, lot or sea), the track keeps clear of every street, and the island
+// still meets its four neighbours (four causeway mouths on one web)
+{
+  const raceIslands: Array<[number, number]> = [...cells.filter(([bx, by]) => isRaceIsland(bx, by)), [10, 0], [0, -10]];
+  for (const [bx, by] of raceIslands) {
+    const T = raceTrackFor(bx, by);
+    if (!T) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} has no circuit`); continue; }
+    // the pieces chain end to end, back to the first
+    for (let i = 0; i < T.pieces.length; i++) {
+      const p = T.pieces[i], q = T.pieces[(i + 1) % T.pieces.length];
+      const u = { x: Math.sin(p.ry), z: Math.cos(p.ry) }, l = { x: -Math.cos(p.ry), z: Math.sin(p.ry) };
+      const R = p.kind === 'corner' ? 4 * UNIT : 2 * UNIT;
+      const ex = p.kind === 'straight' ? { x: p.x + u.x * 4 * UNIT, z: p.z + u.z * 4 * UNIT, h: p.ry }
+        : { x: p.x + (u.x + l.x) * R, z: p.z + (u.z + l.z) * R, h: p.ry - Math.PI / 2 };
+      let dh = Math.abs(ex.h - q.ry) % (Math.PI * 2);
+      dh = Math.min(dh, Math.PI * 2 - dh);
+      if (Math.hypot(ex.x - q.x, ex.z - q.z) > 0.05 || dh > 0.01) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} piece ${i} does not meet piece ${(i + 1) % T.pieces.length}`); break; }
+    }
+    const plan = cityPlanFor(bx, by);
+    if (!plan.blocks.some(b => b.district === 'raceway')) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} circuit has no block of its own`); }
+    const mouths = plan.nodes.filter(n => n.mouth).length;
+    if (mouths !== 4) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} has ${mouths} causeway mouths`); }
+    // the track clear of every street (its apron and ringing road between)
+    for (const q of T.path) {
+      if (plan.edges.some(e => segDist(q, plan.nodes[e.a], plan.nodes[e.b]) < 7 + 6 + 8)) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} track at (${q.x.toFixed(0)},${q.z.toFixed(0)}) hugs a street`); break; }
+    }
+    const occ = occupancyFor(bx, by);
+    let bad = 0;
+    for (let i = 0; i < occ.raw.length; i++) if ((occ.raw[i] & RACE) && (occ.raw[i] & (ROAD | RAIL | RIVER | LOT | SEA))) bad++;
+    if (bad) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} apron carries ${bad} street/track/water/lot/sea cells`); }
+  }
+}
+
 // R31b: the timetable never puts two trains on a diamond at once (the
 // west-east line holds for the north-south one), and R30b: train heads move
 // continuously along a line across the portals — nothing ever teleports
@@ -581,6 +619,7 @@ if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (s
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
 if (thinBlocks > 0) fail('R33', `${thinBlocks} built blocks under 55% built over (worst ${(worstFill * 100).toFixed(0)}%)`);
+if (raceFaults > 0) fail('R32', `${raceFaults} race-island faults (circuit missing / open, apron built on, track by a street, mouths)`);
 if (polesInLots > 0) fail('R6', `${polesInLots} traffic-light poles stand inside a lot`);
 if (districtFaults > 0) fail('R33', `${districtFaults} district placement faults (rings from the centre, industry by the rail)`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);

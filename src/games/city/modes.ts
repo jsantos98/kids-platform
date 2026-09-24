@@ -2,7 +2,7 @@
 // `?mode=<id>` picks one; the old `?vehicle=` links still work as aliases.
 import { VEHICLES, type VehicleConfig } from './player.js';
 
-export type ModeId = 'truck' | 'police' | 'ambulance' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'train';
+export type ModeId = 'truck' | 'police' | 'ambulance' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'train' | 'race';
 
 /** emergency calls a mode answers (missions.ts) */
 export type CallKind = 'fire' | 'cat' | 'patient' | 'rescue';
@@ -27,8 +27,8 @@ export interface ModeDef {
   searchlight: boolean;
   /** medical helicopter: a winch line lowers while rescuing */
   winch: boolean;
-  /** where the vehicle starts */
-  spawn: 'street' | 'sea' | 'rail';
+  /** where the vehicle starts (race: on a race island's starting grid) */
+  spawn: 'street' | 'sea' | 'rail' | 'race';
 }
 
 const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, spawn: 'street' as const };
@@ -42,10 +42,11 @@ export const MODES: Record<ModeId, ModeDef> = {
   plane: { ...base, id: 'plane', title: 'Plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },
   boat: { ...base, id: 'boat', title: 'Boat', icon: '🚤', vehicle: VEHICLES.boat, course: 'buoys', spawn: 'sea' },
   train: { ...base, id: 'train', title: 'Train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },
+  race: { ...base, id: 'race', title: 'Kart Race', icon: '🏎️', vehicle: VEHICLES.kart, spawn: 'race' },
 };
 
 /** old ?vehicle= values */
-const ALIASES: Record<string, ModeId> = { truck: 'truck', heli: 'heliMedical', car: 'police', kart: 'truck' };
+const ALIASES: Record<string, ModeId> = { truck: 'truck', heli: 'heliMedical', car: 'police', kart: 'race' };
 
 /** the mode the URL asks for (the medical helicopter by default — R20) */
 export function modeFromURL(q: URLSearchParams): ModeDef {

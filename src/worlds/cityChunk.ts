@@ -16,6 +16,10 @@ import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT, SEA } from './grid.js
 import { coastFor, clipToRect, insetShore } from './coast.js';
 import { spansOf, deckProfile, deckSlope, type Span } from './causeway.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
+import { raceTrackFor, UNIT, TRACK_HALF, APRON, type RaceTrack } from './raceIsland.js';
+
+/** the race track's surface height: flush with the street asphalt */
+export const TRACK_TOP = 0.19;
 import { STRAIT } from './cityGrid.js';
 import { chunkRoadPieces, nodePiece, nodeReach, armDir, pieceOutline, trafficPoles } from './roadLayout.js';
 
@@ -81,6 +85,17 @@ function kenneyTPL() {
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
+    track: {
+      straight: bakedModel('tc-straight'),
+      corner: bakedModel('tc-corner'),
+      cornerS: bakedModel('tc-corner-s'),
+      finish: bakedModel('tc-gate-finish'),
+      cone: bakedModel('tc-cone'),
+      tree: bakedModel('tc-tree'),
+      pine: bakedModel('tc-pine'),
+      tents: bakedModel('rk-tents'),
+      forest: bakedModel('rk-forest'),
+    },
     road: {
       straight: bakedModel('road-straight'),
       pass: bakedModel('road-straight'),
@@ -136,6 +151,7 @@ export function slabColor(d: District): number {
     case 'park': return 0xa4cf85;
     case 'downtown': return 0xdcd6c6;
     case 'residential': return 0xcfe3b4; // lawns
+    case 'raceway': return 0x9fcf7f; // the circuit's grass apron
     case 'industrial': return 0xcfccc2; // worn concrete aprons
     default: return 0xe9e1cf; // urban
   }
@@ -518,6 +534,95 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
         bakeModel(B, TPL.lightCurved, x, 0.1, z, Math.atan2(-rx, -rz) - Math.PI, 5.5);
         boxes.push({ x1: x - 0.3, x2: x + 0.3, z1: z - 0.3, z2: z + 0.3, small: 1 });
       }
+    }
+  }
+
+  // ---- a race island's circuit (R32): the Toy Car Kit track, each piece
+  // laid by the chunk holding its middle, flush with the street asphalt; the
+  // finish gate, tents outside the start straight, forest in the infield,
+  // cones round the corners and trees on the apron ----
+  const race = raceTrackFor(bx, by);
+  if (race) bakeCircuit(race);
+  function bakeCircuit(T: RaceTrack): void {
+    const SY = 0.6; // the kit track's 0.3-unit slab, flattened to ~0.18 m
+    // (probed: the kit's asphalt sits 0.9 units below its origin, the kerbs
+    // 0.7, the slab's underside 1.0 — R15)
+    const y = TRACK_TOP + 0.9 * SY;
+    for (const p of T.pieces) {
+      if (!inChunk(p.mx, p.mz)) continue;
+      const tpl = p.kind === 'straight' ? TPL.track.straight : p.kind === 'corner' ? TPL.track.corner : TPL.track.cornerS;
+      if (tpl) bakeModel(B, tpl, p.x, y, p.z, p.ry, 1, [UNIT, SY, UNIT]);
+    }
+    if (!TPL.track.straight) {
+      // no kit: a plain asphalt ribbon along the centreline
+      for (let k = 0; k < T.path.length; k++) {
+        const a = T.path[k], b = T.path[(k + 1) % T.path.length];
+        if (!inChunk(a.x, a.z)) continue;
+        B.box(TRACK_HALF * 2, 0.08, Math.hypot(b.x - a.x, b.z - a.z) + 0.3, ROAD_ASPHALT, (a.x + b.x) / 2, TRACK_TOP - 0.04, (a.z + b.z) / 2, 0, a.h, 0);
+      }
+    }
+    // the finish gate across the start line
+    const st = T.sample(T.startS);
+    if (inChunk(st.x, st.z)) {
+      const rx = Math.cos(st.h), rz = -Math.sin(st.h); // right of the heading
+      if (TPL.track.finish) bakeModel(B, TPL.track.finish, st.x, TRACK_TOP, st.z, st.h, (TRACK_HALF * 2 + 1.5) / TPL.track.finish.size.x);
+      else for (const sd of [-1, 1]) B.box(0.5, 6, 0.5, 0xe25c5c, st.x + rx * sd * (TRACK_HALF + 0.7), 3, st.z + rz * sd * (TRACK_HALF + 0.7));
+      for (const sd of [-1, 1]) {
+        const px = st.x + rx * sd * (TRACK_HALF + 0.8), pz = st.z + rz * sd * (TRACK_HALF + 0.8);
+        boxes.push({ x1: px - 0.4, x2: px + 0.4, z1: pz - 0.4, z2: pz + 0.4, small: 1 });
+      }
+      // a chequered start line
+      for (let k = 0; k < 12; k++) {
+        const off = -TRACK_HALF + (k + 0.5) * (TRACK_HALF * 2 / 12);
+        B.box(TRACK_HALF * 2 / 12, 0.02, 1, k % 2 ? 0x2b2b2b : 0xf4f4f4, st.x + rx * off, TRACK_TOP + 0.02, st.z + rz * off, 0, st.h, 0);
+      }
+    }
+    // the tent village outside the start straight (right of the travel)
+    if (TPL.track.tents) {
+      const tp = T.sample(T.startS + 20);
+      const size = 12;
+      const x = tp.x + Math.cos(tp.h) * (TRACK_HALF + 2 + size / 2), z = tp.z - Math.sin(tp.h) * (TRACK_HALF + 2 + size / 2);
+      if (inChunk(x, z)) {
+        bakeModel(B, TPL.track.tents, x, 0.1, z, tp.h, size / TPL.track.tents.size.x);
+        boxes.push(obbBox(x, z, size / 2 - 1, size / 2 - 1, tp.h));
+      }
+    }
+    // forest tiles down the infield (between the two long straights)
+    if (TPL.track.forest) {
+      const ax = Math.sin(T.ry), az = Math.cos(T.ry); // the loop's long axis
+      const across = (T.hx - APRON - TRACK_HALF) * 2 - 2 * TRACK_HALF; // infield width
+      const size = Math.min(16, across - 10);
+      const len = (T.hz - APRON - TRACK_HALF) * 2 - 2 * TRACK_HALF - 10;
+      if (size >= 8) {
+        const n = Math.max(1, Math.floor(len / (size + 4)));
+        for (let k = 0; k < n; k++) {
+          const off = (k - (n - 1) / 2) * (size + 4);
+          const x = T.cx + ax * off, z = T.cz + az * off;
+          if (!inChunk(x, z)) continue;
+          bakeModel(B, TPL.track.forest, x, 0.1, z, T.ry + (k % 2) * Math.PI / 2, size / TPL.track.forest.size.x);
+          boxes.push(obbBox(x, z, size / 2 - 1.5, size / 2 - 1.5, T.ry));
+        }
+      }
+    }
+    // cones along the outside of the corners, trees on the apron
+    for (let k = 0; k < T.path.length; k += 3) {
+      const a = T.path[k], b = T.path[(k + 3) % T.path.length];
+      let dh = b.h - a.h;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      if (Math.abs(dh) < 0.05) continue; // on a straight
+      const x = a.x + Math.cos(a.h) * (TRACK_HALF + 1), z = a.z - Math.sin(a.h) * (TRACK_HALF + 1);
+      if (!inChunk(x, z)) continue;
+      if (TPL.track.cone) bakeModel(B, TPL.track.cone, x, 0.1, z, a.h, 0.9 / TPL.track.cone.size.y);
+      else B.cyl(0.05, 0.3, 0.9, 8, 0xf08a3c, x, 0.55, z);
+    }
+    const trees = [TPL.track.tree, TPL.track.pine].filter((t): t is BakedTemplate => !!t);
+    for (let i = 0; i < 14 && trees.length; i++) {
+      const x = X0 + 4 + r() * (CH - 8), z = Z0 + 4 + r() * (CH - 8);
+      if (!T.inZone(x, z, -2) || T.nearest(x, z).d < TRACK_HALF + 5) continue;
+      if (occ.claims(x, z, 1.2, STRUCTURED)) continue;
+      bakeModel(B, pick(r, trees), x, 0.1, z, r() * Math.PI * 2, (4.5 + r() * 2) / 0.83);
+      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
     }
   }
 

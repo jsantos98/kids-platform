@@ -6,6 +6,7 @@ import { chunkGroundColor, slabColor } from '../../worlds/cityChunk.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { raceTrackFor } from '../../worlds/raceIsland.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
@@ -87,6 +88,17 @@ export class Minimap {
       ctx.lineTo(tx(b.x), ty(b.z));
     }
     ctx.stroke();
+
+    // a race island's circuit: the loop in white on its apron
+    const race = raceTrackFor(this.bx, this.by);
+    if (race) {
+      ctx.strokeStyle = '#f4f1ea';
+      ctx.lineWidth = 12 * scale;
+      ctx.beginPath();
+      race.path.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
+      ctx.closePath();
+      ctx.stroke();
+    }
 
     // the river, ribbon-width
     const river = riverFor(this.bx, this.by);

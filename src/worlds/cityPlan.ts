@@ -30,6 +30,7 @@
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 import { blocksOf, inBlock, type Block } from './blocks.js';
+import { raceTrackFor, ZONE_ROAD } from './raceIsland.js';
 import { fillBlock, LotRaster, LOT_GAP, R_EDGE, R_CENTRE, R_LOT, R_NEAR_C, R_NEAR_E } from './blockFill.js';
 import { citySeed, southExit, eastExit } from './cityGrid.js';
 import { railNetFor, type RailRoute } from './railRoute.js';
@@ -44,7 +45,7 @@ export const ROUNDABOUT_REACH = 21;
 export const ROAD_HALF = 7;
 
 export type District =
-  | 'downtown' | 'urban' | 'residential' | 'industrial' | 'park' | 'green'
+  | 'downtown' | 'urban' | 'residential' | 'industrial' | 'park' | 'green' | 'raceway'
   | 'forest' | 'meadow' | 'desert';
 
 /** a city block (a face of the street web) and the district it belongs to */
@@ -425,7 +426,11 @@ function buildPlan(bx: number, by: number): CityPlan {
     return cx < 0 || cz < 0 || cx >= W || cz >= W ? null : natGrid[cx][cz];
   };
   const downtownR = 140 + r() * 40, mixedR = downtownR + 110 + r() * 40;
+  // a race island's circuit is its own district: the track and its apron
+  const race = raceTrackFor(bx, by);
+  const inRace = (x: number, z: number): boolean => !!race && race.inZone(x, z, ZONE_ROAD - 2);
   const blocks: CityBlock[] = blocksOf({ nodes, edges }).map(b => {
+    if (inRace(b.cx, b.cz)) return { ...b, district: 'raceway' as District };
     const nat = natureAt(b.cx, b.cz);
     const dc = Math.hypot(b.cx - CENTER, b.cz - CENTER);
     return { ...b, district: nat ?? (dc < downtownR ? 'downtown' : dc < mixedR ? 'urban' : 'residential') };
@@ -433,7 +438,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   const railIn = (b: CityBlock): boolean => rail.lines.some(L => L.pts.some((p, k) => k % 3 === 0 && inBlock(b, p.x, p.z)));
   // the park: a middling block just outside downtown, clear of the track
   {
-    const cands = blocks.filter(b => !natureAt(b.cx, b.cz) && b.area > 2500 && b.area < 30000 && !railIn(b))
+    const cands = blocks.filter(b => b.district !== 'raceway' && !natureAt(b.cx, b.cz) && b.area > 2500 && b.area < 30000 && !railIn(b))
       .sort((p, q) => Math.abs(Math.hypot(p.cx - CENTER, p.cz - CENTER) - downtownR) - Math.abs(Math.hypot(q.cx - CENTER, q.cz - CENTER) - downtownR));
     const pk = cands[(r() * Math.min(3, cands.length)) | 0];
     if (pk) pk.district = 'park';
@@ -441,7 +446,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   // industry: the railway's big blocks, grown into a few neighbours the
   // track also runs by
   {
-    const railside = blocks.filter(b => b.district !== 'park' && b.district !== 'downtown' && !natureAt(b.cx, b.cz)
+    const railside = blocks.filter(b => b.district !== 'park' && b.district !== 'downtown' && b.district !== 'raceway' && !natureAt(b.cx, b.cz)
       && (railIn(b) || rail.near(b.cx, b.cz, 70)));
     railside.sort((p, q) => q.area - p.area);
     const anchor = railside[(r() * Math.min(2, railside.length)) | 0];
@@ -456,7 +461,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       for (const b of zone) b.district = 'industrial';
     }
     // a big block the track runs through is a rail yard, wherever it lies
-    for (const b of blocks) if (b.area > 40000 && b.district !== 'park' && !natureAt(b.cx, b.cz) && railIn(b)) b.district = 'industrial';
+    for (const b of blocks) if (b.area > 40000 && b.district !== 'park' && b.district !== 'raceway' && !natureAt(b.cx, b.cz) && railIn(b)) b.district = 'industrial';
   }
   const blockBucket = new Map<string, CityBlock[]>();
   for (const b of blocks) {
@@ -470,7 +475,8 @@ function buildPlan(bx: number, by: number): CityPlan {
   }
   const blockAt = (x: number, z: number): CityBlock | null =>
     (blockBucket.get(key(Math.floor(x / CH), Math.floor(z / CH))) ?? []).find(b => inBlock(b, x, z)) ?? null;
-  const districtAt = (x: number, z: number): District => blockAt(x, z)?.district ?? natureAt(x, z) ?? 'green';
+  const districtAt = (x: number, z: number): District =>
+    blockAt(x, z)?.district ?? (inRace(x, z) ? 'raceway' : null) ?? natureAt(x, z) ?? 'green';
   const district = (cx: number, cz: number): District => districtAt(cx * CH + CH / 2, cz * CH + CH / 2);
 
   // ---- 5. crossings, bridges, plazas, lights ----

@@ -101,7 +101,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 9, steerMax: 0, cabF: 3.5, cabY: 3.1,
     front: 4.5, halfW: 1.6, frontR: 1.6,
   },
-  kart: groundCar(makeCar, '/assets/kenney/racing/vehicle-truck-red.glb', 3.2, {
+  kart: groundCar(() => makeCar({ body: 0xe25c5c }), '/assets/kenney/toycar/vehicle-racer.glb', 4, {
     accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
     camBack: 10, camUp: 4.6, highBack: 12, highUp: 11,
     wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5, front: 1.4, halfW: 0.9, frontR: 0.9,

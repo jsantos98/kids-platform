@@ -29,7 +29,7 @@ export interface Coast {
 
 const cache = new Map<number, Coast>();
 
-export function clearCoastCache(): void { cache.clear(); }
+export function clearCoastCache(): void { cache.clear(); spanCache.clear(); }
 
 /** distance from the centre to the cell square's edge along angle θ */
 function rimDist(theta: number): number {
@@ -136,12 +136,17 @@ export function insetShore(c: Coast, inset: number): Array<{ x: number; z: numbe
 
 /**
  * The deck a city lays across the strait on its south ('s') or east ('e')
- * side: along the exit line `at`, from the last dry land on our corridor to
- * the first dry land on the neighbour's (city-local coordinates, running
- * +z for 's', +x for 'e').
+ * side: along the exit line `at` (plus `offset` — the railway deck runs
+ * 24 m beside the avenue), from the last dry land on our corridor to the
+ * first dry land on the neighbour's (city-local coordinates, running +z
+ * for 's', +x for 'e'). Cached: the physics asks every frame.
  */
-export function causewaySpan(bx: number, by: number, side: 's' | 'e'): { at: number; from: number; to: number } {
-  const at = (side === 's' ? southExit(bx, by) : eastExit(bx, by)) * 64;
+const spanCache = new Map<string, { at: number; from: number; to: number }>();
+export function causewaySpan(bx: number, by: number, side: 's' | 'e', offset = 0): { at: number; from: number; to: number } {
+  const key = `${bx},${by},${side},${offset},${southExit(bx, by)},${eastExit(bx, by)}`;
+  const hit = spanCache.get(key);
+  if (hit) return hit;
+  const at = (side === 's' ? southExit(bx, by) : eastExit(bx, by)) * 64 + offset;
   const ours = coastFor(bx, by);
   const theirs = side === 's' ? coastFor(bx, by + 1) : coastFor(bx + 1, by);
   const dry = (c: Coast, t: number): boolean => (side === 's' ? c.inLand(at, t, 1) : c.inLand(t, at, 1));
@@ -149,5 +154,8 @@ export function causewaySpan(bx: number, by: number, side: 's' | 'e'): { at: num
   while (from < ISLAND && dry(ours, from + 1)) from++;
   let to = 0;
   while (to < CENTER && !dry(theirs, to)) to++;
-  return { at, from, to: ISLAND + STRAIT + to };
+  const out = { at, from, to: ISLAND + STRAIT + to };
+  if (spanCache.size > 256) spanCache.clear();
+  spanCache.set(key, out);
+  return out;
 }

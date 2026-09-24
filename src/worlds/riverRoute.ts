@@ -18,6 +18,7 @@
 import { rng, chunkSeed } from '../engine/rng.js';
 import { makePath, type WorldPath } from './spline.js';
 import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X } from './world.js';
+import { citySeed, southExit } from './cityGrid.js';
 
 const SPAWN = { x: CENTER, z: CENTER };
 const LANE = 64; // lattice spacing
@@ -37,25 +38,31 @@ export interface RiverRoute {
   near(x: number, z: number, r: number): boolean;
 }
 
-// module-level cache per seed
-const cache = new Map<number, RiverRoute>();
+// module-level cache per city
+const cache = new Map<string, RiverRoute>();
 
 /** test/audit hook: rivers are cached per seed, so switching the city base
  * seed requires a flush or stale rivers come back */
 export function clearRiverCache(): void { cache.clear(); }
 
-export function riverFor(seed: number): RiverRoute {
-  let rv = cache.get(seed);
+export function riverFor(bx: number, by: number): RiverRoute {
+  const seed = citySeed(bx, by);
+  const key = `${bx},${by},${seed}`;
+  let rv = cache.get(key);
   if (!rv) {
-    rv = buildRiver(seed);
-    cache.set(seed, rv);
+    // the north-south railway's straight portal stems run 24 m east of the
+    // north and south causeway avenues — the river keeps out of those two
+    // lanes, or a stem would sit in the water (R30)
+    rv = buildRiver(seed, [southExit(bx, by - 1), southExit(bx, by)]);
+    cache.set(key, rv);
+    if (cache.size > 64) cache.delete(cache.keys().next().value as string);
   }
   return rv;
 }
 
-function buildRiver(seed: number): RiverRoute {
+function buildRiver(seed: number, avoid: number[]): RiverRoute {
   // rejection-sampled wobble inside the chosen corridor
-  const lane = pickCorridor(seed);
+  const lane = pickCorridor(seed, avoid);
   let samples: Array<{ x: number; z: number; w: number }> | null = null;
   for (let attempt = 0; attempt < 48 && !samples; attempt++) {
     samples = tryRiver(rng(chunkSeed(seed, 0x71f3, attempt)), lane);
@@ -89,11 +96,12 @@ function buildRiver(seed: number): RiverRoute {
  * lattice columns, kept clear of the picnic causeway and the fire-station
  * spawn. Inside it the river can never cross — or run beneath — a
  * north-south street. */
-function pickCorridor(seed: number): number {
+function pickCorridor(seed: number, avoid: number[]): number {
   const r = rng(chunkSeed(seed, 0x71f5, 1));
   const lanes: number[] = [];
   for (let k = 1; k < WORLD_CHUNKS - 1; k++) {
     const cx = k * LANE + LANE / 2;
+    if (avoid.includes(k)) continue;
     if (Math.abs(cx - BRIDGE_X) < 100) continue;
     if (Math.abs(cx - SPAWN.x) < 60) continue;
     lanes.push(k);

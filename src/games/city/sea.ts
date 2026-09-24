@@ -10,6 +10,8 @@ import { templateToMesh } from '../../engine/baked.js';
 import { makeSailboat, makeTugboat, makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
+import { southExit, eastExit } from '../../worlds/cityGrid.js';
+import { RAIL_OFFSET } from '../../worlds/railRoute.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
 export function waveAt(x: number, z: number, t: number): number {
@@ -19,7 +21,9 @@ export function waveAt(x: number, z: number, t: number): number {
 }
 
 // offshore lane: the island's shore pushed 26 m out to sea, resampled every
-// ~3 m (city-local)
+// ~3 m (city-local). Where it meets a causeway (the avenue and the rail deck
+// 24 m beside it) it swings out to 44 m, under the raised span, where the
+// decks are high enough to sail beneath.
 const loops = new Map<string, Array<{ x: number; z: number }>>();
 
 /** city (bx, by)'s offshore sailing lane (city-local coordinates) */
@@ -28,7 +32,23 @@ export function boatLoop(bx: number, by: number): Array<{ x: number; z: number }
   let loop = loops.get(key);
   if (!loop) {
     const coast = coastFor(bx, by);
-    const ring = coast.pts.map(p => coast.shoreToward(p.x, p.z, 26));
+    // the four corridors that meet our shore: [vertical?, avenue coordinate]
+    const corr: Array<[boolean, number, number]> = [
+      [true, southExit(bx, by - 1) * 64, -1], [true, southExit(bx, by) * 64, 1],
+      [false, eastExit(bx - 1, by) * 64, -1], [false, eastExit(bx, by) * 64, 1],
+    ];
+    const out = (p: { x: number; z: number }): number => {
+      let w = 0;
+      for (const [vert, at, side] of corr) {
+        // only the shore on that corridor's side of the island
+        if ((vert ? p.z - CENTER : p.x - CENTER) * side <= 0) continue;
+        const a = vert ? p.x : p.z;
+        const lat = a < at - 8 ? at - 8 - a : a > at + RAIL_OFFSET + 4 ? a - at - RAIL_OFFSET - 4 : 0;
+        w = Math.max(w, 1 - Math.min(1, lat / 45));
+      }
+      return 26 + 18 * w * w * (3 - 2 * w);
+    };
+    const ring = coast.pts.map(p => coast.shoreToward(p.x, p.z, out(p)));
     loop = [];
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], b = ring[(i + 1) % ring.length];

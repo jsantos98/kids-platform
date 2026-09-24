@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setCityBase } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
-import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
+import { railNetFor, clearRailCache } from '../src/worlds/railRoute.js';
 import { clearOccupancyCache } from '../src/worlds/grid.js';
 import { clearRiverCache } from '../src/worlds/riverRoute.js';
 
@@ -32,7 +32,7 @@ function crossDir(c: Record<string, unknown>): string {
 
 function dumpCity(bx: number, by: number): string {
   const plan = cityPlanFor(bx, by);
-  const rail = railRouteFor(bx, by);
+  const net = railNetFor(bx, by);
   const out: string[] = [`city ${bx},${by} seed ${plan.seed}`];
   const segs: string[] = [];
   for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs.push(`h${j},${i}`);
@@ -56,7 +56,7 @@ function dumpCity(bx: number, by: number): string {
     for (const l of plan.lots(cx, cz)) lots.push(`${l.kind[0]}${f2(l.x)},${f2(l.z)},${f2(l.w)},${f2(l.d)}`);
   }
   out.push('lots ' + lots.join(' '));
-  out.push(`rail ${f2(rail.total)} ` + rail.pts.map(p => `${f2(p.x)},${f2(p.z)}`).join(' '));
+  for (const rail of net.lines) out.push(`rail ${rail.kind} ${f2(rail.total)} ` + rail.pts.map(p => `${f2(p.x)},${f2(p.z)}`).join(" "));
   return out.join('\n');
 }
 

@@ -1,5 +1,5 @@
 // Player vehicle: configs, arcade physics per movement kind (ground, heli,
-// plane, boat), collision and crash-resume. The train is driven by Trains.
+// plane, boat), collision and crash-resume. The kid's train is driven by the Railway (railway.ts).
 import * as THREE from 'three';
 import { makeCar, makeFireTruck, makeHelicopter, makePlane } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
@@ -8,6 +8,7 @@ import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { bridgeLayout } from './bridge.js';
+import { deckAt, BOAT_CLEAR } from '../../worlds/causeway.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 /** how a vehicle moves: on the streets, hovering, flying, sailing or on rails */
@@ -320,5 +321,9 @@ export function onGround(x: number, z: number): boolean {
  * bridges the boat passes under. */
 export function onLand(x: number, z: number, r: number): boolean {
   const c = cityAt(x, z);
-  return coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -(r + 1.5));
+  if (coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -(r + 1.5))) return true;
+  // a causeway deck too low to sail under is a wall too (the raised span
+  // in the middle clears the boats)
+  const dk = deckAt(x, z);
+  return !!dk && dk.y < BOAT_CLEAR;
 }

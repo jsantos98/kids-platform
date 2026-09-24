@@ -8,11 +8,12 @@ import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { cityPlanFor, type District, type Lot } from './cityPlan.js';
-import { railRouteFor } from './railRoute.js';
+import { railNetFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
 import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT, SEA } from './grid.js';
-import { coastFor, clipToRect, insetShore, causewaySpan } from './coast.js';
+import { coastFor, clipToRect, insetShore } from './coast.js';
+import { spansOf, deckProfile, deckSlope, type Span } from './causeway.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
 import { STRAIT } from './cityGrid.js';
 import { chunkRoadPieces, nodeArms, nodeReach, TRAFFIC_POLES, ROUNDABOUT_REACH } from './roadLayout.js';
@@ -122,8 +123,8 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const boxes: CollisionBox[] = [];
   const TPL = kenneyTPL();
   const plan = cityPlanFor(bx, by);
-  const rail = railRouteFor(bx, by);
-  const river = riverFor(seed);
+  const rail = railNetFor(bx, by);
+  const river = riverFor(bx, by);
   const occ = occupancyFor(bx, by);
   const district = plan.district(cx, cz);
 
@@ -224,38 +225,61 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   // strait to the first dry land on the neighbour's; the neighbours' decks
   // land on our north/west shores. The chunk holding the corridor's shore
   // crossing lays it. ----
-  for (const side of ['s', 'e'] as const) {
-    const span = causewaySpan(bx, by, side);
-    const [px, pz] = side === 's' ? [span.at, span.from] : [span.from, span.at];
-    if (px >= X0 && px < X0 + CH && pz >= Z0 && pz < Z0 + CH) {
-      bakeCauseway(span.at, side === 's' ? 'v' : 'h', span.from - 2, span.to + 2);
-    }
+  for (const span of spansOf(bx, by)) {
+    const [px, pz] = span.side === 's' ? [span.at, span.from] : [span.from, span.at];
+    if (px >= X0 && px < X0 + CH && pz >= Z0 && pz < Z0 + CH) bakeDeck(span);
   }
 
-  /** flush deck across the strait — flat physics can't arch, so parapets,
-   * fender piles and dashes do the looking (collision-free like the picnic
-   * causeway: splashing into the shallows is half the fun) */
-  function bakeCauseway(at: number, dir: 'h' | 'v', start: number, end: number): void {
-    const len = end - start, mid = start + len / 2;
-    if (dir === 'v') {
-      B.box(11, 0.7, len, CAUSEWAY_ASPHALT, at, -0.25, mid);
-      for (let z = start + 3; z < start + len - 2; z += 4) B.box(0.25, 0.02, 1.8, CAUSEWAY_DASH, at, 0.11, z);
+  /** a deck across the strait, following the raised-span profile (boats
+   * sail under the middle): 4 m slab pieces tilted to the local slope,
+   * parapets, piers down into the water. The avenue deck carries lane
+   * dashes; the railway deck carries timber, sleepers and two rails. */
+  function bakeDeck(span: Span): void {
+    const start = span.from - 2, end = span.to + 2;
+    const len = span.to - span.from;
+    const road = span.kind === 'road';
+    const v = span.side === 's';
+    const put = (w: number, h: number, t0: number, t1: number, color: number, across: number, lift: number): void => {
+      const tm = (t0 + t1) / 2 - span.from;
+      const y = deckProfile(tm, len) + lift;
+      const pitch = Math.atan(deckSlope(tm, len));
+      const segLen = (t1 - t0) / Math.cos(pitch) + 0.06;
+      const along = (t0 + t1) / 2;
+      if (v) B.box(w, h, segLen, color, span.at + across, y, along, -pitch, 0, 0);
+      else B.box(segLen, h, w, color, along, y, span.at + across, 0, 0, pitch);
+    };
+    const STEP = 4;
+    for (let t = start; t < end; t += STEP) {
+      const t1 = Math.min(end, t + STEP);
+      if (road) {
+        put(11, 0.7, t, t1, CAUSEWAY_ASPHALT, 0, -0.25);
+        for (const side of [-1, 1]) {
+          put(0.4, 0.55, t, t1, CAUSEWAY_CURB, side * 5.3, 0.375);
+          put(0.55, 0.12, t, t1, CAUSEWAY_CAP, side * 5.3, 0.71);
+        }
+        put(0.25, 0.02, t + 1.1, t + 2.9, CAUSEWAY_DASH, 0, 0.11);
+      } else {
+        put(4.6, 0.5, t, t1, 0x8a6a4a, 0, -0.15);
+        for (const side of [-1, 1]) {
+          put(0.3, 0.45, t, t1, CAUSEWAY_CURB, side * 2.25, 0.3);
+          put(0.12, 0.12, t, t1, 0x8d939e, side * 0.72, 0.3);
+        }
+        for (let q = t + 0.5; q < t1; q += 1.2) put(2.2, 0.1, q, q + 0.35, 0x6e5238, 0, 0.16);
+      }
+    }
+    // piers: pairs of posts from the water up under the deck
+    const half = road ? 6.3 : 2.1;
+    for (let t = start + 6; t < end - 2; t += 12) {
+      const y = deckProfile(t - span.from, len);
+      const hgt = y + 1.6;
       for (const side of [-1, 1]) {
-        B.box(0.4, 0.55, len, CAUSEWAY_CURB, at + side * 5.3, 0.375, mid);
-        B.box(0.55, 0.12, len, CAUSEWAY_CAP, at + side * 5.3, 0.71, mid);
+        const [x, z] = v ? [span.at + side * half, t] : [t, span.at + side * half];
+        B.box(0.7, hgt, 0.7, 0x8a6a4a, x, y - 0.6 - hgt / 2, z);
       }
-      for (let z = start + 6; z < start + len; z += 12) {
-        for (const side of [-1, 1]) B.box(0.7, 2, 0.7, 0x8a6a4a, at + side * 6.3, -0.6, z);
-      }
-    } else {
-      B.box(len, 0.7, 11, CAUSEWAY_ASPHALT, mid, -0.25, at);
-      for (let x = start + 3; x < start + len - 2; x += 4) B.box(1.8, 0.02, 0.25, CAUSEWAY_DASH, x, 0.11, at);
-      for (const side of [-1, 1]) {
-        B.box(len, 0.55, 0.4, CAUSEWAY_CURB, mid, 0.375, at + side * 5.3);
-        B.box(len, 0.12, 0.55, CAUSEWAY_CAP, mid, 0.71, at + side * 5.3);
-      }
-      for (let x = start + 6; x < start + len; x += 12) {
-        for (const side of [-1, 1]) B.box(0.7, 2, 0.7, 0x8a6a4a, x, -0.6, at + side * 6.3);
+      // a cross beam under the raised part
+      if (y > 1.5) {
+        if (v) B.box(half * 2 + 0.7, 0.4, 0.6, 0x7a5c40, span.at, y - 0.75, t);
+        else B.box(0.6, 0.4, half * 2 + 0.7, 0x7a5c40, t, y - 0.75, span.at);
       }
     }
   }

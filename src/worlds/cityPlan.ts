@@ -30,9 +30,8 @@
 import { rng, chunkSeed } from '../engine/rng.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
 import { citySeed, southExit, eastExit, streetLinesFor } from './cityGrid.js';
-import { railRouteFor, type RailRoute } from './railRoute.js';
+import { railNetFor, type RailNet, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
-import { arcGap } from './spline.js';
 import { coastFor } from './coast.js';
 
 /** half-size of the kit roundabout at plazas (3 x 14 m tiles); roadLayout.ts
@@ -60,7 +59,9 @@ export interface Crossing {
   /** heading of the street being crossed (atan2 of its direction; the rail
    * crosses it square). Meaningful modulo pi. */
   heading: number;
-  /** arc distance along the rail loop — trains query this */
+  /** which railway line crosses here (index into railNetFor().lines) */
+  line: number;
+  /** arc distance along that line — trains query this */
   d: number;
 }
 
@@ -75,6 +76,8 @@ export interface RiverBridge {
 
 /** a rail stop: platform beside a straight stretch of the line */
 export interface Station {
+  /** which railway line the platform serves, and where along it */
+  line: number;
   d: number;
   x: number;
   z: number;
@@ -145,8 +148,11 @@ export function cityPlanFor(bx: number, by: number): CityPlan {
 function buildPlan(bx: number, by: number): CityPlan {
   const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, 0xc17, 0));
-  const rail = railRouteFor(bx, by);
-  const river = riverFor(seed);
+  const rail = railNetFor(bx, by);
+  const river = riverFor(bx, by);
+  /** every open span of both lines, in order */
+  const railSpans: Array<[{ x: number; z: number }, { x: number; z: number }]> = [];
+  for (const L of rail.lines) for (let k = 0; k + 1 < L.pts.length; k++) railSpans.push([L.pts[k], L.pts[k + 1]]);
   // the island's shore (R29): streets, lots and stations stay on land
   const coast = coastFor(bx, by);
   /** any stretch of this segment's carriageway would lie in the sea */
@@ -154,6 +160,10 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (let t = a; t <= b; t += 4) {
       const x = horiz ? t : line * CH, z = horiz ? line * CH : t;
       if (!coast.inLand(x, z, 11)) return true;
+      // both kerbs too: on a steep headland flank the shore turns fast, and
+      // the radial inset alone misses an edge dipping into a bay
+      const nx = horiz ? 0 : 7, nz = horiz ? 7 : 0;
+      if (!coast.inLand(x + nx, z + nz, 4) || !coast.inLand(x - nx, z - nz, 4)) return true;
     }
     return false;
   };
@@ -202,8 +212,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   // the water with a road bridge is the one rail/river/road pileup the
   // world forbids, and the dead-end trim repairs the street web afterwards.
   const trestles: Array<{ x: number; z: number }> = [];
-  for (let k = 0; k < rail.pts.length; k++) {
-    const a = rail.pts[k], b = rail.pts[(k + 1) % rail.pts.length];
+  for (const [a, b] of railSpans) {
     const len = Math.hypot(b.x - a.x, b.z - a.z);
     // interpolated: pin-collapsed vertices leave long chords whose MIDDLE
     // slices through water the endpoints never touch
@@ -305,7 +314,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   // dead-end trim below repairs the street web afterwards. ----
   {
     const trestles2: Array<{ x: number; z: number }> = [];
-    for (const p of rail.pts) {
+    for (const L of rail.lines) for (const p of L.pts) {
       if (river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4)) trestles2.push({ x: p.x, z: p.z });
     }
     const exitLines = new Set([exN, exS, exW, exE]);
@@ -344,9 +353,7 @@ function buildPlan(bx: number, by: number): CityPlan {
     const nodeClash = (horiz: boolean, line: number, a: number, b: number): boolean => {
       if (exitLines.has(line)) return false;
       const c = line * CH;
-      const pts = rail.pts;
-      for (let k = 0; k < pts.length; k++) {
-        const p = pts[k], q = pts[(k + 1) % pts.length];
+      for (const [p, q] of railSpans) {
       const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
       if (pa === qa) continue; // runs parallel to the street line
       // a vertex pinned exactly ON the line still crosses (see
@@ -356,6 +363,10 @@ function buildPlan(bx: number, by: number): CityPlan {
         const t = (c - pa) / (qa - pa);
         const along = horiz ? p.x + (q.x - p.x) * t : p.z + (q.z - p.z) * t;
         if (along >= a + 18 && along <= b - 18) continue; // mid-block: fine
+        // only crossings ON this segment, or just past one of its end nodes
+        // (through that junction's pad), concern it — a crossing elsewhere
+        // on the same line belongs to another segment
+        if (along < a - 9 || along > b + 9) continue;
         return true; // node-adjacent: the barriers would stand in a junction
       }
       return false;
@@ -457,11 +468,11 @@ function buildPlan(bx: number, by: number): CityPlan {
   // arc position of every rail sample — the deformed polyline is NOT evenly
   // spaced (crossing pins cram samples together), so a linear index-to-arc
   // map would misplace crossings and mistime the barriers
-  const railCum: number[] = [0];
-  for (let k = 1; k <= rail.pts.length; k++) {
-    const a2 = rail.pts[k - 1], b2 = rail.pts[k % rail.pts.length];
-    railCum.push(railCum[k - 1] + Math.hypot(b2.x - a2.x, b2.z - a2.z));
-  }
+  const railCums: number[][] = rail.lines.map(L => {
+    const cum: number[] = [0];
+    for (let k = 1; k < L.pts.length; k++) cum.push(cum[k - 1] + Math.hypot(L.pts[k].x - L.pts[k - 1].x, L.pts[k].z - L.pts[k - 1].z));
+    return cum;
+  });
   const exitLines = new Set([exN, exS, exW, exE]);
   const collectCrossings = (horiz: boolean, line: number, a: number, b: number): void => {
     // true crossings only: sample spans that actually cross the street line
@@ -472,10 +483,11 @@ function buildPlan(bx: number, by: number): CityPlan {
     const c0 = line * CH;
     const isExit = exitLines.has(line);
     const mNode = isExit ? 0 : 18;
-    const pts = rail.pts;
+    rail.lines.forEach((L, li) => {
+    const pts = L.pts, railCum = railCums[li];
     const hits: Array<{ x: number; z: number; d: number }> = [];
-    for (let k = 0; k < pts.length; k++) {
-      const p = pts[k], q = pts[(k + 1) % pts.length];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const p = pts[k], q = pts[k + 1];
       const pa = horiz ? p.z : p.x, qa = horiz ? q.z : q.x;
       if (pa === qa) continue; // runs parallel to the street line
       // a vertex pinned exactly ON the line counts as a crossing (the
@@ -493,7 +505,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       if (!cluster.length) return;
       const mx = cluster.reduce((s, u) => s + u.x, 0) / cluster.length;
       const mz = cluster.reduce((s, u) => s + u.z, 0) / cluster.length;
-      crossings.push({ x: mx, z: mz, heading: horiz ? Math.PI / 2 : 0, d: cluster[(cluster.length / 2) | 0].d });
+      crossings.push({ x: mx, z: mz, heading: horiz ? Math.PI / 2 : 0, line: li, d: cluster[(cluster.length / 2) | 0].d });
       cluster = [];
     };
     for (const hit of hits) {
@@ -507,6 +519,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       else { flush(); cluster.push(hit); }
     }
     flush();
+    });
   };
   for (const k of segHSet) {
     const [j, i] = k.split(',').map(Number);
@@ -713,36 +726,35 @@ function buildPlan(bx: number, by: number): CityPlan {
     }
   }
 
-  // ---- 9. train stations: straight, quiet stretches away from crossings
-  // and the river ----
+  // ---- 9. train stations: straight, quiet stretches away from crossings,
+  // the diamond and the river — up to two per line, well apart ----
   const stations: Station[] = [];
   {
-    const cand: number[] = [];
-    for (let d = 0; d < rail.total; d += 4) {
-      const h1 = rail.sample(d - 14).h, h2 = rail.sample(d + 14).h;
-      let dh = Math.abs(h2 - h1);
-      if (dh > Math.PI) dh = Math.PI * 2 - dh;
-      if (dh > 0.16) continue; // needs ~28 m of straight track
-      const p = rail.sample(d);
-      if (p.x < 46 || p.x > ISLAND - 46 || p.z < 46 || p.z > ISLAND - 46) continue;
-      if (!coast.inLand(p.x, p.z, 25)) continue;
-      if (river.distTo(p.x, p.z) < 18) continue;
-      if (crossings.some(c => arcGap(c.d, d, rail.total) < 24 || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
-      cand.push(d);
-    }
-    if (cand.length) {
-      const rs = rng(chunkSeed(seed, 0x9a7, 4));
-      const chosen: number[] = [cand[(rs() * cand.length) | 0]];
-      // space further stations around the loop, away from the earlier ones
-      for (let n = 0; n < 2 && chosen.length < 3; n++) {
-        const next = cand.find(c => chosen.every(cd =>
-          arcGap(c, cd, rail.total) > rail.total * 0.22
-          && Math.hypot(rail.sample(c).x - rail.sample(cd).x, rail.sample(c).z - rail.sample(cd).z) > 80));
-        if (next === undefined) break;
-        chosen.push(next);
+    const rs = rng(chunkSeed(seed, 0x9a7, 4));
+    rail.lines.forEach((L, li) => {
+      const cand: number[] = [];
+      for (let d = 60; d < L.rimOut - 60; d += 4) {
+        const h1 = L.sample(d - 14).h, h2 = L.sample(d + 14).h;
+        let dh = Math.abs(h2 - h1);
+        if (dh > Math.PI) dh = Math.PI * 2 - dh;
+        if (dh > 0.16) continue; // needs ~28 m of straight track
+        const p = L.sample(d);
+        if (p.x < 46 || p.x > ISLAND - 46 || p.z < 46 || p.z > ISLAND - 46) continue;
+        if (!coast.inLand(p.x, p.z, 25)) continue;
+        if (river.distTo(p.x, p.z) < 18) continue;
+        if (Math.abs(d - rail.diamond.d[li]) < 60) continue;
+        if (crossings.some(c => (c.line === li && Math.abs(c.d - d) < 24) || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
+        if (rail.lines.some((o, oi) => oi !== li && o.near(p.x, p.z, 20))) continue;
+        if (stations.some(st => Math.hypot(st.x - p.x, st.z - p.z) < 60)) continue;
+        cand.push(d);
       }
-      for (const d of chosen) stations.push(mkStation(rail, d));
-    }
+      if (!cand.length) return;
+      const chosen: number[] = [cand[(rs() * cand.length) | 0]];
+      const next = cand.find(c => chosen.every(cd => Math.abs(c - cd) > 220));
+      if (next !== undefined) chosen.push(next);
+      chosen.sort((p, q) => p - q);
+      for (const d of chosen) stations.push(mkStation(L, li, d));
+    });
   }
 
   const plan: CityPlan = {
@@ -759,9 +771,9 @@ function buildPlan(bx: number, by: number): CityPlan {
   return plan;
 }
 
-function mkStation(rail: RailRoute, d: number): Station {
+function mkStation(rail: RailRoute, line: number, d: number): Station {
   const p = rail.sample(d);
-  return { d, x: p.x, z: p.z, h: p.h };
+  return { line, d, x: p.x, z: p.z, h: p.h };
 }
 
 /**
@@ -769,7 +781,7 @@ function mkStation(rail: RailRoute, d: number): Station {
  * its level crossings even when the random drops ate the neighbourhood.
  */
 function forceRailCrossings(
-  rail: RailRoute,
+  rail: RailNet,
   H: number[], V: number[],
   segHSet: Set<string>, segVSet: Set<string>,
   skip: (horiz: boolean, line: number, a: number, b: number) => boolean,
@@ -781,8 +793,7 @@ function forceRailCrossings(
     skip(horiz, line, i * CH, (i + 1) * CH);
   const pinsH = new Set<string>();
   const pinsV = new Set<string>();
-  for (let k = 0; k < rail.pts.length; k++) {
-    const p = rail.pts[k];
+  for (const p of rail.lines.flatMap(L => L.pts)) {
     // vertical street line i crossed at (i*64, p.z)?
     const i = Math.round(p.x / 64);
     if (V.includes(i) && Math.abs(p.x - i * CH) < 7) {

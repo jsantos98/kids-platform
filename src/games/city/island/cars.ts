@@ -13,7 +13,7 @@ import { citySeed } from '../../../worlds/cityGrid.js';
 import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
 import { lightState, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST } from '../transit.js';
-import type { Trains } from '../train.js';
+import type { Railway } from '../railway.js';
 
 const MODELS = [
   '/assets/kenney/sedan.glb', '/assets/kenney/taxi.glb', '/assets/kenney/suv.glb',
@@ -193,7 +193,7 @@ export class IslandCars {
    * Advance every car by dt. `player` (world) makes cars brake/dodge (null =
    * no player nearby, e.g. fast-forwarding); `draw` updates the meshes.
    */
-  update(dt: number, elapsed: number, trains: Trains | null, player: THREE.Vector3 | null, draw: boolean): void {
+  update(dt: number, elapsed: number, rail: Railway | null, player: THREE.Vector3 | null, draw: boolean): void {
     const g = this.graph;
     for (const c of this.cars) {
       if (c.round) {
@@ -221,11 +221,11 @@ export class IslandCars {
             if (dStop < 12) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
           }
         }
-        if (trains) {
+        if (rail) {
           for (const cr of e.crossings) {
             const sC = c.dir > 0 ? cr.s : e.len - cr.s;
             if (sC <= c.s) continue;
-            if (trains.distTo(cr.c.d) < CROSSING_WARN_DIST) {
+            if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, elapsed) < CROSSING_WARN_DIST) {
               const dStop = sC - 10.5 - c.s;
               if (dStop < 16) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
             }

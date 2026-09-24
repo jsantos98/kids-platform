@@ -12,9 +12,8 @@
 // truth; the grid is the shared authority on what occupies where.
 import { cityPlanFor, ROUNDABOUT_REACH } from './cityPlan.js';
 import { coastFor } from './coast.js';
-import { railRouteFor } from './railRoute.js';
+import { railNetFor, railPortals } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
-import { citySeed } from './cityGrid.js';
 import { ISLAND, WORLD_CHUNKS } from './world.js';
 
 export const ROAD = 1;
@@ -134,8 +133,8 @@ export function occupancyFor(bx: number, by: number): Occupancy {
  * R22 sweep, trims), and the grid must record that final rail. */
 function paint(bx: number, by: number): CityGrid {
   const plan = cityPlanFor(bx, by);
-  const rail = railRouteFor(bx, by);
-  const river = riverFor(citySeed(bx, by));
+  const rail = railNetFor(bx, by);
+  const river = riverFor(bx, by);
   const g = new CityGrid();
 
   // water first — everything later declares itself against the river.
@@ -169,7 +168,7 @@ function paint(bx: number, by: number): CityGrid {
   }
 
   // rail bed (3.4 m bed, stamped a little wider for approaches)
-  g.stroke(rail.pts, 1.5, 2, RAIL);
+  for (const L of rail.lines) g.stroke(L.pts, 1.5, 2, RAIL);
 
   // lots: developed ground (buildings, tree rows, parking slabs)
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
@@ -182,9 +181,12 @@ function paint(bx: number, by: number): CityGrid {
     }
   }
   // the sea: every cell off the shore; causeway corridors out over it are
-  // DECK (the one road the sea may carry)
+  // DECK — the avenue and, 24 m beside it, the railway stem (the one road
+  // and the one track the sea may carry)
   const coast = coastFor(bx, by);
   const exitV = [plan.exits.n, plan.exits.s], exitH = [plan.exits.w, plan.exits.e];
+  const P = railPortals(bx, by);
+  const stemV = [P.xN, P.xS], stemH = [P.zW, P.zE];
   for (let iz = 0; iz < SIZE; iz++) {
     const z = iz - MARGIN + 0.5, row = iz * SIZE;
     for (let ix = 0; ix < SIZE; ix++) {
@@ -192,6 +194,7 @@ function paint(bx: number, by: number): CityGrid {
       if (coast.inLand(x, z)) continue;
       let bits = g.raw[row + ix] | SEA;
       if (exitV.some(l => Math.abs(x - l * 64) <= 8) || exitH.some(l => Math.abs(z - l * 64) <= 8)) bits |= DECK;
+      if (stemV.some(v => Math.abs(x - v) <= 4) || stemH.some(v => Math.abs(z - v) <= 4)) bits |= DECK;
       g.raw[row + ix] = bits;
     }
   }

@@ -22,7 +22,9 @@ export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean):
   const total = curve.getLength();
   const N = Math.max(48, Math.round(total / 2));
   const pts: PathPt[] = [];
-  for (let k = 0; k < N; k++) {
+  // an open path samples its end point too (t = 1): railway lines must
+  // reach their portals exactly
+  for (let k = 0; k < (closed ? N : N + 1); k++) {
     const p = curve.getPointAt(k / N);
     const t = curve.getTangentAt(k / N);
     pts.push({ x: p.x, z: p.z, h: Math.atan2(t.x, t.z) });
@@ -35,8 +37,8 @@ export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean):
         ? ((dist % total) + total) % total
         : Math.max(0, Math.min(total - 0.01, dist));
       const f = (d / total) * N;
-      const i0 = Math.floor(f) % N;
-      const i1 = (i0 + 1) % N;
+      const i0 = closed ? Math.floor(f) % N : Math.min(N - 1, Math.floor(f));
+      const i1 = closed ? (i0 + 1) % N : i0 + 1;
       const fr = f - Math.floor(f);
       const a = pts[i0], b = pts[i1];
       let dh = b.h - a.h;
@@ -66,32 +68,37 @@ function nearestOf(pts: PathPt[], x: number, z: number): { d2: number; p: PathPt
   return { d2: bd, p: pts[bi], i: bi };
 }
 
-/** A closed path that follows a dense polyline exactly (linear interpolation
+/** A path that follows a dense polyline exactly (linear interpolation
  * between samples) — used for the railway after its crossing deformation,
- * where the shape must not be re-smoothed back off the perpendicular. */
-export function polyPath(raw: Array<{ x: number; z: number }>): WorldPath {
+ * where the shape must not be re-smoothed back off the perpendicular. The
+ * railway lines are OPEN (portal to portal); `closed` wraps the last vertex
+ * back onto the first. */
+export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): WorldPath {
   const N = raw.length;
+  const at = (i: number): { x: number; z: number } =>
+    closed ? raw[((i % N) + N) % N] : raw[Math.max(0, Math.min(N - 1, i))];
   const pts: PathPt[] = raw.map((p, i) => {
-    const a = raw[(i - 1 + N) % N], b = raw[(i + 1) % N];
+    const a = at(i - 1), b = at(i + 1);
     return { x: p.x, z: p.z, h: Math.atan2(b.x - a.x, b.z - a.z) };
   });
+  const S = closed ? N : N - 1; // segments
   const cum: number[] = [0];
-  for (let k = 1; k <= N; k++) {
+  for (let k = 1; k <= S; k++) {
     const a = raw[k - 1], b = raw[k % N];
     cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
   }
-  const total = cum[N];
+  const total = cum[S];
   return {
     total,
     pts,
     sample(dist: number): PathPt {
-      const d = ((dist % total) + total) % total;
-      let lo = 0, hi = N;
+      const d = closed ? ((dist % total) + total) % total : Math.max(0, Math.min(total, dist));
+      let lo = 0, hi = S;
       while (lo + 1 < hi) {
         const mid = (lo + hi) >> 1;
         if (cum[mid] <= d) lo = mid; else hi = mid;
       }
-      const fr = (d - cum[lo]) / (cum[lo + 1] - cum[lo] || 1e-6);
+      const fr = Math.min(1, (d - cum[lo]) / (cum[lo + 1] - cum[lo] || 1e-6));
       const a = pts[lo], b = pts[(lo + 1) % N];
       let dh = b.h - a.h;
       while (dh > Math.PI) dh -= Math.PI * 2;
@@ -103,7 +110,7 @@ export function polyPath(raw: Array<{ x: number; z: number }>): WorldPath {
       // samples, and the polyline between two far-apart vertices is real
       // rail that vertex-based guards would miss entirely
       let bi = 0, bd = Infinity, bt = 0;
-      for (let i = 0; i < N; i++) {
+      for (let i = 0; i < S; i++) {
         const a = pts[i], b = pts[(i + 1) % N];
         const abx = b.x - a.x, abz = b.z - a.z;
         const len2 = abx * abx + abz * abz;

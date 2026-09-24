@@ -21,8 +21,11 @@ headlands reaching out to the four causeways — ringed by open sea. Every new g
 `?seed=N` replays that world exactly. Pick a mode from the garage (or
 `?mode=`): fire truck (fires + cats), police car (patrol gates), ambulance and
 medical helicopter (people to rescue), police helicopter and plane (sky
-rings), boat (buoy course) and train (station stops). The world keeps running while you play: each city has a railway
-loop with stations and gated level crossings that trains run on, traffic obeys
+rings), boat (buoy course) and train (station stops). The world keeps running while you play: two railway lines cross
+every island (north-south and west-east, meeting at a diamond) and carry on
+over the causeways to the neighbours, with stations, gated level crossings
+and trains on a timetable that never stops; boats pass under the causeways'
+raised spans, traffic obeys
 the lights, an EMS helicopter patrols the sky, and whenever the kid isn't
 driving it the fire truck drives itself.
 

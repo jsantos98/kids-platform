@@ -1,32 +1,49 @@
-// The island railway: a seeded, free-flowing closed loop — a Catmull-Rom
-// spline through a wobbling ring of control points, not a lattice polyline.
-// Trains lean through long gentle curves the whole way round. The loop is
-// validated per seed:
-//   - it never threads a street intersection (junction tile chaos)
-//   - control points keep a minimum spacing (no kinks)
-// Where the line meets a street the plan carves a level crossing (cityPlan);
-// where it meets the river, transit lays a trestle deck.
+// The island railway: two seeded, free-flowing THROUGH LINES per island — a
+// north-south line and a west-east line. Each runs portal to portal: it
+// enters on a straight stem 24 m beside a causeway avenue, wanders across the
+// island as a Catmull-Rom spline, and leaves on the opposite stem, carrying
+// on over the strait on the causeway (the strait south / east of an island
+// belongs to that island's lines, so neighbouring lines meet end to end). The
+// two lines cross exactly once, at a square diamond in the middle of a block.
+//
+// The spline pays no attention to the street lattice, so it is then DEFORMED
+// against it: grazes are lifted off the asphalt, every genuine street
+// crossing is squared up, the trestles meet the river at a right angle.
+// Every candidate is validated per seed (shapeQuality mirrors the audit), and
+// only a clean one ships. Where a line meets a street the plan carves a level
+// crossing (cityPlan); where it meets the river, transit lays a trestle deck.
 import * as THREE from 'three';
 import { rng, chunkSeed } from '../engine/rng.js';
 import { Baked } from '../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { makePath, polyPath, type WorldPath } from './spline.js';
-import { citySeed } from './cityGrid.js';
+import { citySeed, southExit, eastExit, CITY_PITCH } from './cityGrid.js';
 import {
   streetCandidatesFor, across, along, pointAt, lineDev,
   type StreetLine, type StreetCandidates,
 } from './streetLines.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
-import { ISLAND, CENTER } from './world.js';
+import { ISLAND } from './world.js';
 import { coastFor, type Coast } from './coast.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
 export const RAIL_TOP = 0.21; // where train wheels sit
+/** the track runs this far beside a causeway avenue's centreline (m) */
+export const RAIL_OFFSET = 24;
+/** straight portal stem inland from the rim (m) */
+export const STEM = 40;
+/** half-length of the pinned straight through the diamond (m) */
+const DIAMOND_ARM = 16;
+
+export type LineKind = 'ns' | 'ew';
 
 export interface RailRoute {
+  kind: LineKind;
   path: WorldPath;
   total: number;
-  /** dense polyline (for the rails mesh + minimap), h = heading atan2(dx, dz) */
+  /** dense polyline (for the rails mesh + minimap), h = heading atan2(dx, dz),
+   * running from the north / west rim (arc 0) to the neighbour's rim across
+   * the south / east strait (arc total) */
   pts: Array<{ x: number; z: number; h: number }>;
   sample(dist: number): { x: number; z: number; h: number };
   /** distance from (x, z) to the centreline */
@@ -35,32 +52,82 @@ export interface RailRoute {
   /** rail heading at the point nearest to (x, z) — lets the plan tell a
    * parallel run (bad, shadows streets) from a square crossing (fine) */
   headingAt(x: number, z: number): number;
+  /** arc position of the point nearest to (x, z) */
+  arcAt(x: number, z: number): number;
+  /** arc where the line leaves the island over the south / east rim */
+  rimOut: number;
   control: Array<{ x: number; z: number }>;
 }
 
-// module-level cache: the route only depends on the city cell, and the chunk
-// baker, the city plan and the trains all ask for it
-const cache = new Map<string, RailRoute>();
+/** both lines of one island + the diamond where they cross */
+export interface RailNet {
+  lines: [RailRoute, RailRoute];
+  diamond: { x: number; z: number; /** arc of the diamond on each line */ d: [number, number] };
+  distTo(x: number, z: number): number;
+  near(x: number, z: number, r: number): boolean;
+  /** heading of the nearest line at (x, z) */
+  headingAt(x: number, z: number): number;
+}
 
-/** test/audit hook: routes are cached per cell, so switching the city base
+/** where the two lines enter / leave the island: the stems' across-axis
+ * coordinate (x for the north-south line, z for the west-east line) */
+export function railPortals(bx: number, by: number): { xN: number; xS: number; zW: number; zE: number } {
+  return {
+    xN: southExit(bx, by - 1) * 64 + RAIL_OFFSET,
+    xS: southExit(bx, by) * 64 + RAIL_OFFSET,
+    zW: eastExit(bx - 1, by) * 64 + RAIL_OFFSET,
+    zE: eastExit(bx, by) * 64 + RAIL_OFFSET,
+  };
+}
+
+// module-level cache: the net only depends on the city cell, and the chunk
+// baker, the city plan and the trains all ask for it
+const cache = new Map<string, RailNet>();
+
+/** test/audit hook: nets are cached per cell, so switching the city base
  * seed requires a flush or stale cities come back */
 export function clearRailCache(): void { cache.clear(); }
 
-export function railRouteFor(bx: number, by: number): RailRoute {
+export function railNetFor(bx: number, by: number): RailNet {
   const key = `${bx},${by}`;
-  let route = cache.get(key);
-  if (!route) {
-    route = buildRoute(bx, by);
-    cache.set(key, route);
+  let net = cache.get(key);
+  if (!net) {
+    net = buildNet(bx, by);
+    cache.set(key, net);
+    if (cache.size > 48) cache.delete(cache.keys().next().value as string);
   }
-  return route;
+  return net;
 }
 
 interface Attempt { control: Array<{ x: number; z: number }>; score: number; path: WorldPath }
 
-/** how clean a deformed route came out — mirrors the audit's own checks,
- * so a route is only ever shipped when the deformation provably worked */
-interface Quality { ride: number; skew: number; folds: number; bridge: number; riverSkew: number; offLand: number }
+/** how clean a deformed line came out — mirrors the audit's own checks,
+ * so a line is only ever shipped when the deformation provably worked */
+interface Quality {
+  ride: number; skew: number; folds: number; bridge: number; riverSkew: number;
+  offLand: number; riverRide: number; extra: number;
+}
+
+/** the frame a line runs in: u = progress (z for north-south, x for
+ * west-east), v = the across coordinate */
+interface Frame {
+  kind: LineKind;
+  /** stems' v at the start (north / west) and end (south / east) */
+  v0: number;
+  v1: number;
+  /** diamond in (u, v) */
+  du: number;
+  dv: number;
+}
+const toXZ = (f: Frame, u: number, v: number): { x: number; z: number } =>
+  f.kind === 'ns' ? { x: v, z: u } : { x: u, z: v };
+const uOf = (f: Frame, x: number, z: number): number => (f.kind === 'ns' ? z : x);
+const vOf = (f: Frame, x: number, z: number): number => (f.kind === 'ns' ? x : z);
+/** inside the island's own interior (off both stems and the strait) */
+const interior = (f: Frame, x: number, z: number, pad = 5): boolean => {
+  const u = uOf(f, x, z);
+  return u > STEM + pad && u < ISLAND - STEM - pad;
+};
 
 /**
  * Where the river passes within 8 m of a lattice street line, a road bridge
@@ -84,19 +151,12 @@ function bridgeZones(lines: StreetLine[], river: RiverRoute): Array<{ x: number;
   return zones;
 }
 
-function shapeQuality(
-  p: WorldPath, lines: StreetLine[],
-  river: RiverRoute | null, zones: Array<{ x: number; z: number }>,
-  coast: Coast,
-): Quality {
-  const pts = p.pts, N = pts.length;
-  let ride = 0, run = 0, folds = 0, skew = 0;
-  // dense resample at ~2 m: pin walls collapse vertices, leaving 20 m+
-  // chords that point-based scans would skim straight over — the chords
-  // are real rail the audit will see, so the gate must see them too
+/** ~2 m resample of an open polyline, headings interpolated */
+function densify(pts: Array<{ x: number; z: number; h: number }>): Array<{ x: number; z: number; h: number }> {
   const dense: Array<{ x: number; z: number; h: number }> = [];
-  for (let k = 0; k < N; k++) {
-    const a = pts[k], b = pts[(k + 1) % N];
+  const N = pts.length;
+  for (let k = 0; k < N - 1; k++) {
+    const a = pts[k], b = pts[k + 1];
     const len = Math.hypot(b.x - a.x, b.z - a.z);
     const steps = Math.max(1, Math.ceil(len / 2));
     let dh = b.h - a.h;
@@ -107,9 +167,72 @@ function shapeQuality(
       dense.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, h: a.h + dh * t });
     }
   }
+  if (N) dense.push({ ...pts[N - 1] });
+  return dense;
+}
+
+/** proper segment intersections of two open polylines, skipping any within
+ * `skipR` of (sx, sz) */
+function lineHits(
+  a: Array<{ x: number; z: number }>, b: Array<{ x: number; z: number }>,
+  sx: number, sz: number, skipR: number,
+): number {
+  // bucket b's segments for speed
+  const CELL = 32;
+  const grid = new Map<string, number[]>();
+  for (let k = 0; k < b.length - 1; k++) {
+    const p = b[k], q = b[k + 1];
+    const x0 = Math.floor(Math.min(p.x, q.x) / CELL), x1 = Math.floor(Math.max(p.x, q.x) / CELL);
+    const z0 = Math.floor(Math.min(p.z, q.z) / CELL), z1 = Math.floor(Math.max(p.z, q.z) / CELL);
+    for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
+      const kk = `${gx},${gz}`;
+      if (!grid.has(kk)) grid.set(kk, []);
+      grid.get(kk)!.push(k);
+    }
+  }
+  let hits = 0;
+  const seen = new Set<string>();
+  for (let i = 0; i < a.length - 1; i++) {
+    const p = a[i], q = a[i + 1];
+    const cells = new Set<string>();
+    const x0 = Math.floor(Math.min(p.x, q.x) / CELL), x1 = Math.floor(Math.max(p.x, q.x) / CELL);
+    const z0 = Math.floor(Math.min(p.z, q.z) / CELL), z1 = Math.floor(Math.max(p.z, q.z) / CELL);
+    for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) cells.add(`${gx},${gz}`);
+    for (const c of cells) {
+      for (const k of grid.get(c) ?? []) {
+        const tag = `${i},${k}`;
+        if (seen.has(tag)) continue;
+        seen.add(tag);
+        const r = b[k], s = b[k + 1];
+        const d1x = q.x - p.x, d1z = q.z - p.z, d2x = s.x - r.x, d2z = s.z - r.z;
+        const den = d1x * d2z - d1z * d2x;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((r.x - p.x) * d2z - (r.z - p.z) * d2x) / den;
+        const w = ((r.x - p.x) * d1z - (r.z - p.z) * d1x) / den;
+        if (t < 0 || t >= 1 || w < 0 || w >= 1) continue;
+        const hx = p.x + d1x * t, hz = p.z + d1z * t;
+        if (Math.hypot(hx - sx, hz - sz) < skipR) continue;
+        hits++;
+      }
+    }
+  }
+  return hits;
+}
+
+function shapeQuality(
+  p: WorldPath, f: Frame, lines: StreetLine[],
+  river: RiverRoute | null, zones: Array<{ x: number; z: number }>,
+  coast: Coast, other: RailRoute | null,
+): Quality {
+  const pts = p.pts, N = pts.length;
+  let ride = 0, run = 0, folds = 0, skew = 0;
+  // dense resample at ~2 m: pin walls collapse vertices, leaving 20 m+
+  // chords that point-based scans would skim straight over — the chords
+  // are real rail the audit will see, so the gate must see them too
+  const dense = densify(pts);
   const D = dense.length;
-  for (let k = 0; k < N; k++) {
-    const a = pts[(k - 1 + N) % N], b = pts[k], c = pts[(k + 1) % N];
+  for (let k = 1; k < N - 1; k++) {
+    const a = pts[k - 1], b = pts[k], c = pts[k + 1];
     const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
     if (l1 > 0.5 && l2 > 0.5 && (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) folds++;
   }
@@ -118,8 +241,8 @@ function shapeQuality(
   // still folding the track back on itself (and skimming asphalt at the
   // apex). Square crossing walls turn ~90 degrees per wall, so a >120
   // degree swing across a tight window is never legitimate track.
-  for (let k = 0; k < N; k++) {
-    const a = pts[k], b = pts[(k + 3) % N];
+  for (let k = 0; k + 3 < N; k++) {
+    const a = pts[k], b = pts[k + 3];
     if (Math.hypot(b.x - a.x, b.z - a.z) > 12) continue;
     let dh = b.h - a.h;
     while (dh > Math.PI) dh -= Math.PI * 2;
@@ -127,35 +250,27 @@ function shapeQuality(
     if (Math.abs(dh) > (120 * Math.PI) / 180) folds++;
   }
   for (let k = 0; k < D; k++) {
-    const b = dense[k], nxt = dense[(k + 1) % D];
-    const h = b.h;
+    const b = dense[k];
     let bad = false;
     for (const L of lines) {
-      if (Math.abs(across(L, b.x, b.z)) < 7 && lineDev(L, h) < Math.PI / 3) { bad = true; break; }
+      if (Math.abs(across(L, b.x, b.z)) < 7 && lineDev(L, b.h) < Math.PI / 3) { bad = true; break; }
     }
     if (bad) run += 2;
     else { ride = Math.max(ride, run); run = 0; }
   }
   ride = Math.max(ride, run);
   // squareness of every crossing the plan would record (span-crossings of
-  // the final path, >= 11 m from a node), read as the nearest-vertex heading
-  const cum: number[] = [0];
-  for (let k = 1; k <= N; k++) {
-    const a = pts[k - 1], b2 = pts[k % N];
-    cum.push(cum[k - 1] + Math.hypot(b2.x - a.x, b2.z - a.z));
-  }
-  const checkCross = (L: StreetLine): void => {
-    for (let k = 0; k < N; k++) {
-      const a = pts[k], b = pts[(k + 1) % N];
+  // the final path, >= 11 m from a node): the rail's worst angle to the
+  // street WHILE ON ITS asphalt near this crossing
+  for (const L of lines) {
+    for (let k = 0; k < N - 1; k++) {
+      const a = pts[k], b = pts[k + 1];
       const va = across(L, a.x, a.z), vb = across(L, b.x, b.z);
       if (va * vb >= 0) continue;
-      const f = -va / (vb - va);
+      const fr = -va / (vb - va);
       const sa = along(L, a.x, a.z);
-      const s = sa + (along(L, b.x, b.z) - sa) * f;
+      const s = sa + (along(L, b.x, b.z) - sa) * fr;
       if (L.nodeGap(s) < 11) continue;
-      // honest skew: the rail's worst angle to the street WHILE ON ITS
-      // asphalt near this crossing — the nearest-vertex reading misses a
-      // diagonal chord that only tilts between wall-end vertices
       let worst = 0;
       for (let i = 0; i < D; i++) {
         if (Math.abs(across(L, dense[i].x, dense[i].z)) >= 6.5) continue;
@@ -164,17 +279,14 @@ function shapeQuality(
       }
       skew = Math.max(skew, worst);
     }
-  };
-  for (const L of lines) checkCross(L);
+  }
   // R22: a trestle sharing the river with a road bridge is forbidden —
   // count trestle runs (contiguous in-water stretches) that come within
-  // 12 m of any bridge zone. 12 m provably yields zero forbidden cells: a
-  // cell needs the rail bed within 9 m of the street line, and every
-  // in-bed sample is at least its zone distance from the line. (The route
-  // scorer still prefers 24 m; this is the hard gate.) The water test uses
-  // the bed's outer edge (halfAt + 2 m), matching the grid's rail stamp.
+  // 9 m of any bridge zone (the route scorer still prefers 24 m; this is
+  // the hard gate). The water test uses the bed's outer edge.
   let bridge = 0;
   let riverSkew = 0;
+  let riverRide = 0;
   if (river) {
     let inRun = false;
     for (const pt of dense) {
@@ -196,39 +308,86 @@ function shapeQuality(
       if (d > Math.PI / 2) d = Math.PI - d;
       riverSkew = Math.max(riverSkew, d);
     }
+    // a line may cross the river, never ride it: an in-water run longer
+    // than a square trestle is a line lying in the water
+    let wet = 0;
+    for (const pt of dense) {
+      if (river.inWater(pt.x, pt.z)) { wet += 2; if (wet > 34) { riverRide++; wet = -1e9; } } else wet = 0;
+    }
   }
-  // R29: the whole loop runs on dry land, a bed-width clear of the beach
+  // R29: the interior runs on dry land, a bed-width clear of the beach (the
+  // stems cross the shore onto the causeway by design)
   let offLand = 0;
-  for (const pt of dense) if (!coast.inLand(pt.x, pt.z, 12)) offLand++;
-  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI, offLand };
+  for (const pt of dense) if (interior(f, pt.x, pt.z) && !coast.inLand(pt.x, pt.z, 12)) offLand++;
+  // R31: the second line meets the first ONLY at the diamond
+  const extra = other ? lineHits(pts, other.pts, toXZ(f, f.du, f.dv).x, toXZ(f, f.du, f.dv).z, 6) : 0;
+  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI, offLand, riverRide, extra };
 }
 
-const qualityBetter = (a: Quality, b: Quality): boolean =>
-  a.offLand !== b.offLand ? a.offLand < b.offLand
-  : a.folds !== b.folds ? a.folds < b.folds
-    : a.bridge !== b.bridge ? a.bridge < b.bridge
-      : a.ride !== b.ride ? a.ride < b.ride
-        : a.skew !== b.skew ? a.skew < b.skew
-          : a.riverSkew < b.riverSkew;
+const clean = (q: Quality): boolean =>
+  q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24
+  && q.riverSkew < 30 && q.riverRide === 0 && q.extra === 0;
 
-function buildRoute(bx: number, by: number): RailRoute {
+const qualityBetter = (a: Quality, b: Quality): boolean =>
+  a.extra !== b.extra ? a.extra < b.extra
+  : a.offLand !== b.offLand ? a.offLand < b.offLand
+    : a.folds !== b.folds ? a.folds < b.folds
+      : a.riverRide !== b.riverRide ? a.riverRide < b.riverRide
+        : a.bridge !== b.bridge ? a.bridge < b.bridge
+          : a.ride !== b.ride ? a.ride < b.ride
+            : a.skew !== b.skew ? a.skew < b.skew
+              : a.riverSkew < b.riverSkew;
+
+/** the diamond: a block centre near the middle of the island, well clear of
+ * the river, the shore and every street (32 m to each bounding line) */
+function pickDiamond(bx: number, by: number, river: RiverRoute, coast: Coast): { x: number; z: number } {
+  const r = rng(chunkSeed(citySeed(bx, by), 0xd1a, 7));
+  const opts: Array<{ x: number; z: number }> = [];
+  for (let cx = 4; cx <= 9; cx++) for (let cz = 4; cz <= 9; cz++) {
+    const x = cx * 64 + 32, z = cz * 64 + 32;
+    if (river.distTo(x, z) < 44) continue;
+    if (!coast.inLand(x, z, 140)) continue;
+    opts.push({ x, z });
+  }
+  return opts.length ? opts[(r() * opts.length) | 0] : { x: 5 * 64 + 32, z: 6 * 64 + 32 };
+}
+
+function buildNet(bx: number, by: number): RailNet {
   const seed = citySeed(bx, by);
   const streets = streetCandidatesFor(bx, by);
   const lines = streets.lines;
-  const river = riverFor(seed);
+  const river = riverFor(bx, by);
   const zones = bridgeZones(lines, river);
   const coast = coastFor(bx, by);
-  // rank route candidates by the cheap pre-deform score, then actually
+  const P = railPortals(bx, by);
+  const D = pickDiamond(bx, by, river, coast);
+  const fNS: Frame = { kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x };
+  const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z };
+  const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
+  const ew = buildLine(seed, fEW, streets, river, zones, coast, ns);
+  const both: [RailRoute, RailRoute] = [ns, ew];
+  return {
+    lines: both,
+    diamond: { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] },
+    distTo: (x, z) => Math.min(ns.distTo(x, z), ew.distTo(x, z)),
+    near: (x, z, rr) => ns.near(x, z, rr) || ew.near(x, z, rr),
+    headingAt: (x, z) => (ns.distTo(x, z) <= ew.distTo(x, z) ? ns : ew).headingAt(x, z),
+  };
+}
+
+function buildLine(
+  seed: number, f: Frame, streets: StreetCandidates, river: RiverRoute,
+  zones: Array<{ x: number; z: number }>, coast: Coast, other: RailRoute | null,
+): RailRoute {
+  const lines = streets.lines;
+  const salt = f.kind === 'ns' ? 0x5a1 : 0x5e1;
+  // rank line candidates by the cheap pre-deform score, then actually
   // deform the best few and SHIP the first whose geometry comes out clean
   // (no on-road rides, no folds, square crossings, trestles clear of road
-  // bridges). The deform has rare bad modes on adversarial splines; rather
-  // than patching each one, a dirty result just costs us a re-roll.
-  //
-  // The ring always crosses the river, and its crossing lands where the
-  // west arc happens to meet it — a narrow band of z. When one round's
-  // candidates all cross inside a bridge zone, a different control-slide
-  // strength shifts that band, so later rounds re-search with new strengths
-  // before anyone settles for a dirty fallback.
+  // bridges, one diamond). The deform has rare bad modes on adversarial
+  // splines; rather than patching each one, a dirty result costs a re-roll.
+  // Later rounds re-search with other control-slide strengths (they shift
+  // where the line meets the water).
   const strengths = [0.9, 1.4, 0.5, 1.8, 0.3];
   let fallback: { route: RailRoute; q: Quality } | null = null;
   for (let round = 0; round < strengths.length; round++) {
@@ -237,81 +396,88 @@ function buildRoute(bx: number, by: number): RailRoute {
     const offer = (a: Attempt): void => {
       let i = 0;
       while (i < ranked.length && ranked[i].score <= a.score) i++;
-      if (i >= 16) return;
+      if (i >= 12) return;
       ranked.splice(i, 0, a);
-      if (ranked.length > 16) ranked.pop();
+      if (ranked.length > 12) ranked.pop();
     };
-    for (let attempt = 0; attempt < 120; attempt++) {
-      const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt + round * 1000));
-      const a = tryRoute(r, streets, river, zones, coast, mul);
+    for (let attempt = 0; attempt < 90; attempt++) {
+      const r = rng(chunkSeed(seed, salt, 0x7e + attempt + round * 1000));
+      const a = tryLine(r, f, streets, river, zones, coast, other, mul);
       if (!a) continue;
       if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
       offer(a);
     }
-    if (ranked.length === 0) continue;
     for (const a of ranked) {
-      const route = finalize(bx, by, a.control, a.path);
-      const q = shapeQuality(route.path, lines, river, zones, coast);
-      if (q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
+      const route = finalize(f, a.control, a.path, lines, river, zones);
+      const q = shapeQuality(route.path, f, lines, river, zones, coast, other);
+      if (clean(q)) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
     }
   }
-  // last resort: the deterministic rectangle ring through every strength
-  for (const mul of strengths) {
-    const a = forcedRoute(seed);
-    const route = finalize(bx, by, a.control, a.path);
-    const q = shapeQuality(route.path, lines, river, zones, coast);
-    if (q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
-    if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
-  }
-  return fallback!.route;
+  // last resort: the deterministic straight-ish line through the diamond
+  const a = forcedLine(f);
+  const route = finalize(f, a.control, a.path, lines, river, zones);
+  const q = shapeQuality(route.path, f, lines, river, zones, coast, other);
+  if (clean(q) || !fallback || qualityBetter(q, fallback.q)) return route;
+  return fallback.route;
 }
 
-/** one control-ring candidate; null when control spacing is impossible */
-function tryRoute(
-  r: () => number, streets: StreetCandidates,
+/** the fixed control points every candidate shares: both stems (straight,
+ * rim to STEM, plus the strait) and the diamond's guides */
+function stemControls(f: Frame): { head: Array<{ x: number; z: number }>; mid: Array<{ x: number; z: number }>; tail: Array<{ x: number; z: number }> } {
+  const G = 22;
+  return {
+    head: [toXZ(f, 0, f.v0), toXZ(f, STEM / 2, f.v0), toXZ(f, STEM, f.v0)],
+    mid: [toXZ(f, f.du - G, f.dv), toXZ(f, f.du, f.dv), toXZ(f, f.du + G, f.dv)],
+    tail: [
+      toXZ(f, ISLAND - STEM, f.v1), toXZ(f, ISLAND - STEM / 2, f.v1), toXZ(f, ISLAND, f.v1),
+      toXZ(f, ISLAND + (CITY_PITCH - ISLAND) / 2, f.v1), toXZ(f, CITY_PITCH, f.v1),
+    ],
+  };
+}
+
+/** one control-chain candidate; null when control spacing is impossible */
+function tryLine(
+  r: () => number, f: Frame, streets: StreetCandidates,
   river: RiverRoute, zones: Array<{ x: number; z: number }>,
-  coast: Coast,
+  coast: Coast, other: RailRoute | null,
   slideMul = 0.9,
 ): Attempt | null {
   const lines = streets.lines;
-  const CX = CENTER, CZ = CENTER;
-  const n = 10 + ((r() * 4) | 0);
-  const base = ISLAND * (0.3 + r() * 0.1);
-  // per-axis radii: some rings run oval, some near-circular — a visible
-  // silhouette difference between seeds on the minimap
-  const radX = base * (0.88 + 0.24 * r());
-  const radZ = base * (0.88 + 0.24 * r());
-  const ph1 = r() * Math.PI * 2, ph2 = r() * Math.PI * 2;
-  const control: Array<{ x: number; z: number }> = [];
-  for (let k = 0; k < n; k++) {
-    const th = (k / n) * Math.PI * 2;
-    const rad = 0.82 + 0.36 * r();
-    let x = CX + Math.cos(th) * radX * rad * (1 + 0.24 * Math.sin(th + ph1));
-    let z = CZ + Math.sin(th) * radZ * rad * (1 + 0.24 * Math.sin(th + ph2));
-    x = Math.max(44, Math.min(ISLAND - 44, x));
-    z = Math.max(44, Math.min(ISLAND - 44, z));
-    control.push({ x, z });
-  }
-  // slide control points out of the street-junction squares — a railway
+  const { head, mid, tail } = stemControls(f);
+  // free control points between the stems and the diamond: evenly spaced in
+  // u, wandering in v around the straight chord
+  const free = (u0: number, v0: number, u1: number, v1: number): Array<{ x: number; z: number }> => {
+    const n = 1 + ((r() * 3) | 0);
+    const amp = 40 + r() * 110;
+    const out: Array<{ x: number; z: number }> = [];
+    for (let k = 1; k <= n; k++) {
+      const t = k / (n + 1);
+      const u = u0 + (u1 - u0) * t + (r() - 0.5) * 20;
+      let v = v0 + (v1 - v0) * t + (r() - 0.5) * 2 * amp;
+      v = Math.max(70, Math.min(ISLAND - 70, v));
+      out.push(toXZ(f, u, v));
+    }
+    return out;
+  };
+  const freeA = free(STEM, f.v0, f.du - 22, f.dv);
+  const freeB = free(f.du + 22, f.dv, ISLAND - STEM, f.v1);
+  const movable = [...freeA, ...freeB];
+  // slide free points out of the street-junction squares — a railway
   // through an intersection tile reads as chaos, so keep a 16 m bubble
-  for (let k = 0; k < control.length; k++) {
-    const p = control[k];
+  for (const p of movable) {
     const node = streets.nearestNode(p.x, p.z);
     if (!node) continue;
-    const nx = node.x, nz = node.z;
-    const d = Math.hypot(p.x - nx, p.z - nz);
+    const d = Math.hypot(p.x - node.x, p.z - node.z);
     if (d < 16) {
-      const f = d < 0.01 ? 16 : 16 / d;
-      p.x = nx + (p.x - nx) * f;
-      p.z = nz + (p.z - nz) * f;
+      const k = d < 0.01 ? 16 : 16 / d;
+      p.x = node.x + (p.x - node.x) * k;
+      p.z = node.z + (p.z - node.z) * k;
     }
   }
-  // the ring always crosses the river somewhere; WHERE it crosses is the
-  // one thing we can steer. Control points near a bridge zone slide along
-  // the river (in z) so the arc's water crossing lands between road
-  // bridges instead of on one (R22) — same bubble trick as the junctions.
-  for (const p of control) {
+  // free points near a bridge zone slide along the river (in z) so the
+  // line's water crossing lands between road bridges instead of on one (R22)
+  for (const p of movable) {
     if (!river.near(p.x, p.z, 80)) continue;
     let zn: { x: number; z: number } | null = null, dn = Infinity;
     for (const z of zones) {
@@ -322,31 +488,42 @@ function tryRoute(
     const dz = p.z - zn.z;
     p.z += Math.max(-45, Math.min(45, Math.sign(dz || 1) * (60 - Math.min(dn, 60)) * slideMul));
   }
-  // the ring stays well inland: a control point near the shore is pulled in
-  // to 70 m from it (R29)
-  for (const p of control) {
+  // the line stays well inland: a free point near the shore is pulled in to
+  // 70 m from it (R29)
+  for (const p of movable) {
     if (coast.inLand(p.x, p.z, 70)) continue;
     const q = coast.shoreToward(p.x, p.z, -70);
     p.x = q.x; p.z = q.z;
   }
-  // adjacent control points need breathing room, or the spline kinks
-  for (let k = 0; k < n; k++) {
-    const a = control[k], b = control[(k + 1) % n];
-    if (Math.hypot(a.x - b.x, a.z - b.z) < 60) return null;
+  const control = [...head, ...freeA, ...mid, ...freeB, ...tail];
+  // progress must keep going forward, with breathing room between the free
+  // points, or the spline kinks
+  for (let k = 1; k < control.length; k++) {
+    const a = control[k - 1], b = control[k];
+    if (uOf(f, b.x, b.z) - uOf(f, a.x, a.z) < 12) return null;
   }
-  const path = makePath(control, true);
+  for (const p of movable) {
+    for (const q of control) {
+      if (q === p) continue;
+      if (Math.hypot(p.x - q.x, p.z - q.z) < 45) return null;
+    }
+  }
+  const path = makePath(control, false);
   // score violations on dense samples
   let score = 0;
   let inBridgeRun = false;
+  let wet = 0;
   for (let k = 0; k < path.pts.length; k++) {
     const p = path.pts[k];
-    if (p.x < 34 || p.x > ISLAND - 34 || p.z < 34 || p.z > ISLAND - 34) score += 3;
+    if (!interior(f, p.x, p.z, 0)) continue;
     if (!coast.inLand(p.x, p.z, 30)) score += 30; // too close to the shore / at sea
     const node = streets.nearestNode(p.x, p.z);
     if (node) {
       const dx = p.x - node.x, dz = p.z - node.z;
       if (dx * dx + dz * dz < 14 * 14) score += 12; // threading a junction
     }
+    // riding along the river is never a crossing
+    if (river.inWater(p.x, p.z)) { wet += 2; if (wet > 30) score += 6; } else wet = 0;
     // dipping into the river anywhere near a road bridge means a trestle
     // sharing the water with the bridge — the one overlap the world
     // forbids. Decisively expensive so clean candidates always rank above
@@ -360,8 +537,7 @@ function tryRoute(
       if (dmin < 24 * 24) {
         if (!inBridgeRun) { score += 120; inBridgeRun = true; }
       } else inBridgeRun = false;
-      // a trestle that would meet the water at a skew costs rank too — the
-      // perpendicular pin can only straighten so much after a bad approach
+      // a trestle that would meet the water at a skew costs rank too
       const near = river.path.nearest(p.x, p.z);
       const nx = river.pts[near.i].h + Math.PI / 2;
       let rd = Math.abs(p.h - nx) % Math.PI;
@@ -370,16 +546,15 @@ function tryRoute(
     } else inBridgeRun = false;
   }
   // a shallow line crossing means the rail rides the road corridor for tens
-  // of metres no matter how the crossing itself is squared up — so any
-  // crossing gentler than ~59 degrees rejects the candidate outright
+  // of metres no matter how the crossing itself is squared up
+  const pts = path.pts;
   const cum: number[] = [0];
-  for (let k = 1; k <= path.pts.length; k++) {
-    const a = path.pts[k - 1], b = path.pts[k % path.pts.length];
-    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+  for (let k = 1; k < pts.length; k++) {
+    cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z));
   }
   const hitArcs: number[] = [];
-  for (let k = 0; k < path.pts.length; k++) {
-    const a = path.pts[k], b = path.pts[(k + 1) % path.pts.length];
+  for (let k = 0; k < pts.length - 1; k++) {
+    const a = pts[k], b = pts[k + 1];
     const len = cum[k + 1] - cum[k];
     if (len < 0.001) continue;
     for (const L of lines) {
@@ -390,44 +565,42 @@ function tryRoute(
       // road corridor for tens of metres however it's squared up later
       if (Math.abs(vb - va) / len < 0.85) score += 20;
       // a crossing spilling into a junction tile would go unrecorded (the
-      // collector keeps crossings away from nodes) — avoid those hard, the
-      // deformation cannot rescue them
+      // collector keeps crossings away from nodes) — avoid those hard
       if (L.nodeGap(along(L, (a.x + b.x) / 2, (a.z + b.z) / 2)) < 20) score += 25;
     }
   }
-  // two street hits within ~30 m of arc means the rail cuts a junction
-  // corner — the pins of both crossings crowd one stretch, the absolute
-  // cores collapse the path onto a knot, and the crossings end up unsquare.
-  // Rank any candidate carrying one out.
+  // two street hits within ~30 m of arc means the rail cuts a junction corner
   hitArcs.sort((p, q) => p - q);
   for (let i = 1; i < hitArcs.length; i++) {
     if (hitArcs[i] - hitArcs[i - 1] < 30) score += 50;
   }
   // hugging a street line near-parallel (the rails would sit on the asphalt
-  // edge) — steer the search away from tracking roads; same 55° window the
-  // clearance pusher treats as "riding", so scored-ugly means pushed-later
-  for (const p of path.pts) {
+  // edge) — same 55° window the clearance pusher treats as "riding"
+  for (const p of pts) {
     for (const L of lines) {
       if (Math.abs(across(L, p.x, p.z)) < 10 && lineDev(L, p.h) < 55 * Math.PI / 180) score += 0.75;
+    }
+  }
+  // R31: meet the other line only at the diamond, and never run close by it
+  if (other) {
+    const D = toXZ(f, f.du, f.dv);
+    score += 300 * lineHits(pts, other.pts, D.x, D.z, 12);
+    for (let k = 0; k < pts.length; k += 3) {
+      const p = pts[k];
+      if (Math.hypot(p.x - D.x, p.z - D.z) < 40) continue;
+      if (other.near(p.x, p.z, 14)) score += 4;
     }
   }
   return { control, score, path };
 }
 
-/** deterministic last resort: a plain rounded rectangle ring */
-function forcedRoute(seed: number): Attempt {
-  const r = rng(chunkSeed(seed, 0x5a2, 3));
-  const ph = r() * Math.PI * 2;
-  const off = ISLAND * 0.22; // well inside even the smallest shore
-  const control: Array<{ x: number; z: number }> = [];
-  const ring = (fx: number, fz: number): { x: number; z: number } => {
-    const px = CENTER + fx * off, pz = CENTER + fz * off;
-    return { x: px + 14 * Math.sin(pz * 0.012 + ph), z: pz + 14 * Math.sin(px * 0.012 + ph) };
-  };
-  for (const [fx, fz] of [[-1, -1], [0, -1.15], [1, -1], [1.15, 0], [1, 1], [0, 1.15], [-1, 1], [-1.15, 0]]) {
-    control.push(ring(fx, fz));
-  }
-  return { control, score: 0, path: makePath(control, true) };
+/** deterministic last resort: stems + diamond guides, straight in between */
+function forcedLine(f: Frame): Attempt {
+  const { head, mid, tail } = stemControls(f);
+  const la = toXZ(f, (STEM + f.du - 22) / 2, (f.v0 + f.dv) / 2);
+  const lb = toXZ(f, (f.du + 22 + ISLAND - STEM) / 2, (f.dv + f.v1) / 2);
+  const control = [...head, la, ...mid, lb, ...tail];
+  return { control, score: 0, path: makePath(control, false) };
 }
 
 /** shared deformation sequence. Order matters: tangential grazes are lifted
@@ -442,9 +615,6 @@ function deform(
   lines: StreetLine[],
   river: RiverRoute, zones: Array<{ x: number; z: number }>,
 ): Array<{ x: number; z: number }> {
-  // R22: slide in-water stretches along the river out of bridge zones
-  // BEFORE anything else — this early, the crossing pins re-square every
-  // street approach the slide drags, so no skew survives
   const swung = riverSwing(pts, river, zones);
   const lifted = clearancePush(riverPerp(swung, river), lines);
   const pushed = clearancePush(perpendicularCrossings(polyPath(lifted), lines), lines);
@@ -455,13 +625,43 @@ function deform(
   if (cleaned.length === ironed.length) return cleaned;
   // a fold was spliced out: its chord can cut a street approach askew or
   // ride the asphalt the fold used to skirt, so re-run the crossing tail
-  // once on the cleaned shape. The splice leaves locally SPARSE vertices
-  // (a 30 m+ chord straddling a street sits beyond every pin's 12 m
-  // across-street reach), so re-densify to ~2 m first — then the pins can
-  // grip the chord's middle and bend it square. (Rare — fold-free cities
-  // skip this pass.)
+  // once on the cleaned shape, re-densified to ~2 m first so the pins can
+  // grip the chord's middle and bend it square
   const repinned = perpendicularCrossings(polyPath(subdivide(cleaned)), lines);
   return deOverlap(deSpikes(ironSpikes(clearancePush(roundCorners(clearancePush(repinned, lines)), lines))));
+}
+
+/** hard pins after the deform: both stems dead straight on their portal
+ * coordinate (fading back into the free line over 30 m), and the diamond a
+ * dead-straight run through the crossing point along the line's own axis —
+ * the second line runs perpendicular, so the diamond is square (R30, R31) */
+function pinFrame(pts: Array<{ x: number; z: number }>, f: Frame, FADE = 30): Array<{ x: number; z: number }> {
+  const out = pts.map(p => ({ x: p.x, z: p.z }));
+  // the diamond: find where the line passes it, then pin by arc around it
+  let kD = 0, best = Infinity;
+  const D = toXZ(f, f.du, f.dv);
+  out.forEach((p, k) => {
+    const d = (p.x - D.x) ** 2 + (p.z - D.z) ** 2;
+    if (d < best) { best = d; kD = k; }
+  });
+  const cum: number[] = [0];
+  for (let k = 1; k < out.length; k++) cum.push(cum[k - 1] + Math.hypot(out[k].x - out[k - 1].x, out[k].z - out[k - 1].z));
+  for (let k = 0; k < out.length; k++) {
+    const p = out[k];
+    const u = uOf(f, p.x, p.z);
+    let v = vOf(f, p.x, p.z);
+    // stems
+    if (u <= STEM) v = f.v0;
+    else if (u < STEM + FADE) v += (f.v0 - v) * 0.5 * (1 + Math.cos((Math.PI * (u - STEM)) / FADE));
+    if (u >= ISLAND - STEM) v = f.v1;
+    else if (u > ISLAND - STEM - FADE) v += (f.v1 - v) * 0.5 * (1 + Math.cos((Math.PI * (ISLAND - STEM - u)) / FADE));
+    // diamond
+    const ad = Math.abs(cum[k] - cum[kD]);
+    if (ad <= DIAMOND_ARM) v = f.dv;
+    else if (ad < DIAMOND_ARM + FADE) v += (f.dv - v) * 0.5 * (1 + Math.cos((Math.PI * (ad - DIAMOND_ARM)) / FADE));
+    out[k] = toXZ(f, u, v);
+  }
+  return out;
 }
 
 /** round off sharp turns into real curves: any corner turning more than
@@ -471,7 +671,8 @@ function deform(
  * or splice remnants read as smooth track. Crossing walls keep their
  * square run through the asphalt: both corners of a wall bow alike and
  * the stretch between them is untouched. A clearance push afterwards
- * guarantees a curve can't dip the rail back onto asphalt. */
+ * guarantees a curve can't dip the rail back onto asphalt. The ends of the
+ * open line are never rounded. */
 function roundCorners(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
   let cur = pts.map(p => ({ x: p.x, z: p.z }));
   for (let pass = 0; pass < 2; pass++) {
@@ -480,7 +681,9 @@ function roundCorners(pts: Array<{ x: number; z: number }>): Array<{ x: number; 
     const out: Array<{ x: number; z: number }> = [];
     let changed = false;
     for (let k = 0; k < N; k++) {
-      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+      const b = cur[k];
+      if (k === 0 || k === N - 1) { out.push(b); continue; }
+      const a = cur[k - 1], c = cur[k + 1];
       const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
       let turn = 0;
       if (l1 > 0.25 && l2 > 0.25) {
@@ -516,13 +719,14 @@ function subdivide(
 ): Array<{ x: number; z: number }> {
   const out: Array<{ x: number; z: number }> = [];
   const N = pts.length;
-  for (let k = 0; k < N; k++) {
-    const a = pts[k], b = pts[(k + 1) % N];
+  for (let k = 0; k < N - 1; k++) {
+    const a = pts[k], b = pts[k + 1];
     const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / maxLen));
     for (let q = 0; q < steps; q++) {
       out.push({ x: a.x + (b.x - a.x) * q / steps, z: a.z + (b.z - a.z) * q / steps });
     }
   }
+  if (N) out.push({ x: pts[N - 1].x, z: pts[N - 1].z });
   return out;
 }
 
@@ -534,21 +738,21 @@ function subdivide(
  *    reversal — splice out the two middle vertices instead. Square crossing
  *    walls turn ~90 degrees per wall and are untouched; after a splice the
  *    caller re-runs the crossing tail so the shortcut re-squares its
- *    approaches. */
+ *    approaches. The line's two end vertices always stay. */
 function deSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
   let cur = pts.map(p => ({ x: p.x, z: p.z }));
   for (let pass = 0; pass < 4; pass++) {
     const N = cur.length;
     const drop: boolean[] = new Array(N).fill(false);
     let any = false;
-    for (let k = 0; k < N; k++) {
-      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+    for (let k = 1; k < N - 1; k++) {
+      const a = cur[k - 1], b = cur[k], c = cur[k + 1];
       const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
       if (l1 < 0.5 || l2 < 0.5) continue;
       if ((c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) { drop[k] = true; any = true; }
     }
-    for (let k = 0; k < N; k++) {
-      const a = cur[k], b = cur[(k + 1) % N], c = cur[(k + 2) % N], d = cur[(k + 3) % N];
+    for (let k = 0; k + 3 < N; k++) {
+      const a = cur[k], b = cur[k + 1], c = cur[k + 2], d = cur[k + 3];
       const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
       const l3 = Math.hypot(d.x - c.x, d.z - c.z);
       if (l1 > 12 || l2 < 0.5 || l2 > 12 || l3 > 12) continue;
@@ -557,8 +761,8 @@ function deSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: n
       if (dh > Math.PI) dh = Math.PI * 2 - dh;
       if (dh <= (120 * Math.PI) / 180) continue;
       if (Math.hypot(d.x - a.x, d.z - a.z) > 12) continue;
-      drop[(k + 1) % N] = true;
-      drop[(k + 2) % N] = true;
+      drop[k + 1] = true;
+      drop[k + 2] = true;
       any = true;
     }
     if (!any) break;
@@ -567,23 +771,18 @@ function deSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: n
   return cur;
 }
 
-/** remove needle folds: places where the loop doubled back so hard that
+/** remove needle folds: places where the line doubled back so hard that
  * two NON-adjacent stretches of track lie on top of each other (legs of a
  * ~180-degree turn can land within centimetres of each other). The pinch
- * pair is spliced — everything on the short arc between them goes, the
- * loop closes across the <=4 m gap, and roundCorners smooths the join.
- * Longer excursions than 300 m are never lobes; that would be the ring. */
+ * pair is spliced — everything on the arc between them goes, the line
+ * closes across the <=4 m gap, and roundCorners smooths the join. */
 function deOverlap(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
   let cur = pts.map(p => ({ x: p.x, z: p.z }));
   const CELL = 8;
   for (let pass = 0; pass < 4; pass++) {
     const N = cur.length;
     const cum: number[] = [0];
-    for (let k = 1; k <= N; k++) {
-      const a = cur[k - 1], b = cur[k % N];
-      cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
-    }
-    const total = cum[N];
+    for (let k = 1; k < N; k++) cum.push(cum[k - 1] + Math.hypot(cur[k].x - cur[k - 1].x, cur[k].z - cur[k - 1].z));
     const grid = new Map<string, number[]>();
     for (let k = 0; k < N; k++) {
       const kk = `${Math.floor(cur[k].x / CELL)},${Math.floor(cur[k].z / CELL)}`;
@@ -600,9 +799,9 @@ function deOverlap(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: 
           const arr = grid.get(`${gx + ox},${gz + oz}`);
           if (!arr) continue;
           for (const m of arr) {
-            const darc = Math.abs(cum[k] - cum[m]);
-            const sep = Math.min(darc, total - darc);
-            if (sep < 14 || sep > 300) continue; // neighbours are fine; the long way round is the ring
+            if (m <= k) continue;
+            const sep = cum[m] - cum[k];
+            if (sep < 14 || sep > 300) continue; // neighbours are fine
             const q = cur[m];
             if (Math.hypot(q.x - p.x, q.z - p.z) < 4) { cutA = k; cutB = m; break; }
           }
@@ -611,16 +810,7 @@ function deOverlap(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: 
       }
     }
     if (cutA < 0) return cur;
-    // drop everything on the shorter arc between the pair (the lobe)
-    let lo, hi; // indices so that walking cutA+1 .. cutB-1 is the shorter arc
-    const fwd = ((cutB - cutA) % N + N) % N;
-    if (fwd <= N - fwd) { lo = cutA; hi = cutB; } else { lo = cutB; hi = cutA; }
-    const out: Array<{ x: number; z: number }> = [];
-    for (let k = 0; k < N; k++) {
-      const onLobe = (k > lo && k < hi) || (lo > hi && (k > lo || k < hi));
-      if (!onLobe) out.push(cur[k]);
-    }
-    cur = out;
+    cur = cur.filter((_, k) => k <= cutA || k >= cutB);
   }
   return cur;
 }
@@ -635,8 +825,8 @@ function ironSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z:
   for (let it = 0; it < 3; it++) {
     let moved = false;
     const out = cur.map(p => ({ x: p.x, z: p.z }));
-    for (let k = 0; k < N; k++) {
-      const a = cur[(k - 1 + N) % N], b = cur[k], c = cur[(k + 1) % N];
+    for (let k = 1; k < N - 1; k++) {
+      const a = cur[k - 1], b = cur[k], c = cur[k + 1];
       const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
       if (l1 >= 3 || l2 >= 3) continue;
       const dot = (c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z);
@@ -651,12 +841,11 @@ function ironSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z:
 }
 
 /** the rail must cross the river at a right angle — a trestle meeting the
- * water at 45 degrees reads broken, and one day bridges will span it.
- * Every in-water stretch is pinned ONTO ONE LINE: the river's normal
- * through the stretch midpoint's centreline point (weight 1 — the whole
- * trestle ends up dead straight across the water, however riverSwing
- * sheared it), with a cosine fade over 8 samples beyond the water so the
- * approach merges smoothly into the rest of the loop. */
+ * water at 45 degrees reads broken. Every in-water stretch is pinned ONTO
+ * ONE LINE: the river's normal through the stretch midpoint's centreline
+ * point (weight 1 — the whole trestle ends up dead straight across the
+ * water), with a cosine fade over 8 samples beyond the water so the
+ * approach merges smoothly into the rest of the line. */
 function riverPerp(
   pts: Array<{ x: number; z: number }>,
   river: RiverRoute,
@@ -665,26 +854,23 @@ function riverPerp(
   let cur = pts.map(p => ({ x: p.x, z: p.z }));
   for (let pass = 0; pass < 3; pass++) {
     const inW = cur.map(p => river.near(p.x, p.z, river.halfAt(p.x, p.z) + 4));
-    let start = inW.findIndex(v => !v);
-    if (start === -1) return cur; // (impossible) fully in water
     const stretches: number[][] = [];
     let run: number[] = [];
-    for (let q = 0; q <= N; q++) {
-      const k = (start + q) % N;
-      if (q < N && inW[k]) run.push(k);
+    for (let k = 0; k <= N; k++) {
+      if (k < N && inW[k]) run.push(k);
       else if (run.length) { stretches.push(run); run = []; }
     }
     let changed = false;
     for (const st of stretches) {
       const m = st[(st.length / 2) | 0];
       const mid = cur[m];
-      const rp = river.path.nearest(mid.x, mid.z).p;
-      const hr = river.pts[river.path.nearest(mid.x, mid.z).i].h;
+      const near = river.path.nearest(mid.x, mid.z);
+      const rp = near.p;
+      const hr = river.pts[near.i].h;
       const nx = Math.cos(hr), nz = -Math.sin(hr); // river normal (heading + 90 deg)
       const half = st.length / 2, FADE = 8;
       for (let q = 0; q < N; q++) {
-        let d = Math.abs(q - m);
-        d = Math.min(d, N - d);
+        const d = Math.abs(q - m);
         let wgt = 0;
         if (d <= half) wgt = 1;
         else if (d <= half + FADE) wgt = 0.5 * (1 + Math.cos((Math.PI * (d - half)) / FADE));
@@ -703,9 +889,7 @@ function riverPerp(
 }
 
 /**
- * R22's active half
-
-: any sample sitting in the water (bed edge touching)
+ * R22's active half: any sample sitting in the water (bed edge touching)
  * within 24 m of a bridge zone slides ALONG the river (in z) until the
  * crossing clears the zone — the river is a north-south band, so sliding
  * z moves the trestle to free water instead of piling it onto a bridge.
@@ -737,7 +921,8 @@ function riverSwing(
     const spread = raw.map((_, k) => {
       let best = 0;
       for (let j = -4; j <= 4; j++) {
-        const v = raw[(k + j + N) % N] * (1 - 0.16 * Math.abs(j));
+        if (k + j < 0 || k + j >= N) continue;
+        const v = raw[k + j] * (1 - 0.16 * Math.abs(j));
         if (Math.abs(v) > Math.abs(best)) best = v;
       }
       return best;
@@ -747,17 +932,36 @@ function riverSwing(
   return cur;
 }
 
-function finalize(bx: number, by: number, control: Array<{ x: number; z: number }>, path: WorldPath): RailRoute {
+function finalize(
+  f: Frame, control: Array<{ x: number; z: number }>, path: WorldPath,
+  lines: StreetLine[], river: RiverRoute, zones: Array<{ x: number; z: number }>,
+): RailRoute {
   // the spline pays no attention to the street lattice, so wherever it
   // happens to meet a road it is reshaped to do so properly: grazes are
   // swung clear, every genuine crossing is squared up — which reads as a
   // proper railway junction and gives the level crossings their barriers a
-  // clean strip to guard.
-  const lines = streetCandidatesFor(bx, by).lines;
-  const river = riverFor(citySeed(bx, by));
-  const shaped = deform(path.pts, lines, river, bridgeZones(lines, river));
+  // clean strip to guard. The stems and the diamond are pinned last.
+  // pinned BEFORE the deform (so every crossing pin sees the final stems and
+  // diamond and squares against them), then re-snapped with a short fade in
+  // case a pin's zone nudged a stem end
+  const pre = pinFrame(path.pts, f);
+  const withH = polyPath(pre).pts;
+  const shaped = pinFrame(deform(withH, lines, river, zones), f, 8);
   const p2 = polyPath(shaped);
+  // where the line crosses the island's far rim
+  let rimOut = p2.total;
+  {
+    let s = 0;
+    for (let k = 1; k < p2.pts.length; k++) {
+      const a = p2.pts[k - 1], b = p2.pts[k];
+      const seg = Math.hypot(b.x - a.x, b.z - a.z);
+      const ua = uOf(f, a.x, a.z), ub = uOf(f, b.x, b.z);
+      if (ua < ISLAND && ub >= ISLAND) { rimOut = s + seg * ((ISLAND - ua) / (ub - ua || 1)); break; }
+      s += seg;
+    }
+  }
   return {
+    kind: f.kind,
     path: p2,
     total: p2.total,
     pts: p2.pts,
@@ -765,6 +969,13 @@ function finalize(bx: number, by: number, control: Array<{ x: number; z: number 
     distTo(x, z) { return Math.sqrt(p2.nearest(x, z).d2); },
     near(x, z, r) { return p2.nearest(x, z).d2 < r * r; },
     headingAt(x, z) { return p2.nearest(x, z).p.h; },
+    arcAt(x, z) {
+      const n = p2.nearest(x, z);
+      let s = 0;
+      for (let k = 1; k <= n.i; k++) s += Math.hypot(p2.pts[k].x - p2.pts[k - 1].x, p2.pts[k].z - p2.pts[k - 1].z);
+      return s + Math.hypot(n.p.x - p2.pts[n.i].x, n.p.z - p2.pts[n.i].z);
+    },
+    rimOut,
     control,
   };
 }
@@ -804,6 +1015,7 @@ export function clearancePush(
 ): Array<{ x: number; z: number }> {
   const N = pts.length;
   const CLEAR = 11.5, BAND = 10, NEAR = 12, SWING = 30, PARALLEL = (55 * Math.PI) / 180;
+  const clamp = (k: number): number => Math.max(0, Math.min(N - 1, k));
   // street families (parallel lines) in first-appearance order; a family's
   // pushes all run along its shared normal
   const families: Array<{ key: string; nx: number; nz: number; lines: StreetLine[] }> = [];
@@ -816,11 +1028,7 @@ export function clearancePush(
   for (let pass = 0; pass < 6; pass++) {
     // arc table + where the current path genuinely crosses each street family
     const cum: number[] = [0];
-    for (let k = 1; k <= N; k++) {
-      const a = cur[k - 1], b = cur[k % N];
-      cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
-    }
-    const total = cum[N];
+    for (let k = 1; k < N; k++) cum.push(cum[k - 1] + Math.hypot(cur[k].x - cur[k - 1].x, cur[k].z - cur[k - 1].z));
     // span-crossings of the CURRENT path, split by whether the plan would
     // record them (>= 18 m from the nearest node, matching the
     // collector's margin). Recorded crossings earn the no-push window —
@@ -838,8 +1046,8 @@ export function clearancePush(
       const swing: Array<{ s: number; side: number }> = [];
       swings.set(L.id, swing);
       const raw: Array<{ s: number; k: number }> = [];
-      for (let k = 0; k < N; k++) {
-        const a = cur[k], b = cur[(k + 1) % N];
+      for (let k = 0; k < N - 1; k++) {
+        const a = cur[k], b = cur[k + 1];
         const va = across(L, a.x, a.z), vb = across(L, b.x, b.z);
         if (va * vb < 0) {
           const f = -va / (vb - va);
@@ -856,7 +1064,7 @@ export function clearancePush(
       const flush = (): void => {
         if (group.length === 0) return;
         const k0 = group[0].k, k1 = group[group.length - 1].k;
-        const p0 = cur[(k0 - 15 + N) % N], p1 = cur[(k1 + 15) % N];
+        const p0 = cur[clamp(k0 - 15)], p1 = cur[clamp(k1 + 15)];
         const side = Math.sign(across(L, p0.x, p0.z) + across(L, p1.x, p1.z)) || 1;
         for (const h of group) swing.push({ s: h.s, side });
         group = [];
@@ -868,20 +1076,15 @@ export function clearancePush(
       flush();
     };
     for (const L of lines) collect(L);
-    const arcDist = (s: number, c: number): number => {
-      let d = Math.abs(s - c);
-      if (d > total / 2) d = total - d;
-      return d;
-    };
     // one push per family per point, along the family normal; within a
     // family the last violated line wins
     const raws = families.map(() => new Array(N).fill(0));
     for (let k = 0; k < N; k++) {
       const p = cur[k];
-      const a = cur[(k - 2 + N) % N], b = cur[(k + 2) % N];
+      const a = cur[clamp(k - 2)], b = cur[clamp(k + 2)];
       const h = Math.atan2(b.x - a.x, b.z - a.z);
       families.forEach((fam, fi) => {
-        if (keep.get(fam.key)!.some(c => arcDist(cum[k], c) < NEAR)) return;
+        if (keep.get(fam.key)!.some(c => Math.abs(cum[k] - c) < NEAR)) return;
         for (const L of fam.lines) {
           const d = across(L, p.x, p.z);
           const ad = Math.abs(d);
@@ -889,7 +1092,7 @@ export function clearancePush(
           if (lineDev(L, h) >= PARALLEL) continue;
           let swing: number | null = null, best = SWING;
           for (const sw of swings.get(L.id)!) {
-            const dd = arcDist(cum[k], sw.s);
+            const dd = Math.abs(cum[k] - sw.s);
             if (dd < best) { best = dd; swing = sw.side; }
           }
           if (swing !== null) raws[fi][k] = (CLEAR - d * swing) * swing;
@@ -903,7 +1106,8 @@ export function clearancePush(
     const spread = (raw: number[]): number[] => cur.map((_, k) => {
       let best = 0;
       for (let j = -4; j <= 4; j++) {
-        const v = raw[(k + j + N) % N] * (1 - 0.16 * Math.abs(j));
+        if (k + j < 0 || k + j >= N) continue;
+        const v = raw[k + j] * (1 - 0.16 * Math.abs(j));
         if (Math.abs(v) > Math.abs(best)) best = v;
       }
       return best;
@@ -928,17 +1132,13 @@ export function perpendicularCrossings(
   const pts = path.pts;
   const N = pts.length;
   const cum: number[] = [0];
-  for (let k = 1; k <= N; k++) {
-    const a = pts[k - 1], b = pts[k % N];
-    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
-  }
-  const total = cum[N];
+  for (let k = 1; k < N; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z));
   // where does a sample span cross a street line?
   // (a = the hit's position ALONG its street line)
   interface Hit { s: number; a: number; L: StreetLine }
   const hits: Hit[] = [];
-  for (let k = 0; k < N; k++) {
-    const p = pts[k], q = pts[(k + 1) % N];
+  for (let k = 0; k < N - 1; k++) {
+    const p = pts[k], q = pts[k + 1];
     const segLen = cum[k + 1] - cum[k];
     for (const L of lines) {
       const va = across(L, p.x, p.z), vb = across(L, q.x, q.z);
@@ -954,9 +1154,7 @@ export function perpendicularCrossings(
   hits.sort((u, v) => u.s - v.s);
   // a noisy touch can wiggle across one line several times within a pin
   // core; those fold into ONE square crossing. Separated pairs stay
-  // separate — the lift has already cleared the hugs, so two genuine
-  // crossings 30-40 m apart are a real double crossing and EACH needs its
-  // own wall (merging them used to leave the second one shallow).
+  // separate — two genuine crossings 30-40 m apart each need their own wall.
   const centers: Hit[] = [];
   for (const h of hits) {
     const prev = centers[centers.length - 1];
@@ -965,18 +1163,13 @@ export function perpendicularCrossings(
   }
   // hits from DIFFERENT lines can also crowd (the rail cutting a junction
   // corner). Two overlapping absolute cores collapse every point between
-  // them onto one corner — a knot hanging off the crossing — so where kept
-  // hits sit closer than two cores, both cores shrink to tile the gap.
-  // Blend zones shrink too: overlapping blends shear each other's shoulder
-  // and leave the second of a close pair skewed off square.
+  // them onto one corner, so where kept hits sit closer than two cores,
+  // both cores shrink to tile the gap; blend zones shrink too.
   const core: number[] = centers.map(() => 10);
   const zone: number[] = centers.map(() => CROSS_ZONE);
-  for (let i = 0; i < centers.length; i++) {
-    if (centers.length < 2) break;
-    const j = (i + 1) % centers.length;
-    const gap = i + 1 < centers.length
-      ? centers[j].s - centers[i].s
-      : centers[j].s + total - centers[i].s;
+  for (let i = 0; i + 1 < centers.length; i++) {
+    const j = i + 1;
+    const gap = centers[j].s - centers[i].s;
     if (gap < 20) {
       const h = Math.max(3, (gap - 2) / 2);
       core[i] = Math.min(core[i], h);
@@ -996,8 +1189,7 @@ export function perpendicularCrossings(
   const out = pts.map(p => ({ x: p.x, z: p.z }));
   // points claimed by TWO crossing walls (shared asphalt between close
   // crossings) belong to no single wall — pinning them lets the later pin
-  // crush the earlier wall's spread. A wall tip merely reaching toward a
-  // junction street with no crossing of its own is NOT contested.
+  // crush the earlier wall's spread
   const claims = new Array(N).fill(0);
   for (const hit of centers) {
     for (let k = 0; k < N; k++) {
@@ -1011,18 +1203,13 @@ export function perpendicularCrossings(
     const co = core[ci], zo = zone[ci];
     for (let k = 0; k < N; k++) {
       if (contested[k]) continue;
-      let ds = cum[k] - hit.s;
-      if (ds > total / 2) ds -= total;
-      if (ds < -total / 2) ds += total;
-      const ad = Math.abs(ds);
+      const ad = Math.abs(cum[k] - hit.s);
       const arcW = ad <= co ? 1
         : ad >= zo ? 0
           : 0.5 * (1 + Math.cos((Math.PI * (ad - co)) / (zo - co)));
       // the pin stays absolute across the asphalt within its own ±30 m
-      // street window: a wall whose arc runs out mid-corridor — or a graze
-      // squeezed between two crossings a few metres apart — leaves asphalt
-      // crossed at a visible skew otherwise. Windowed so near-node walls of
-      // the perpendicular street stay out of reach.
+      // street window: a wall whose arc runs out mid-corridor leaves asphalt
+      // crossed at a visible skew otherwise
       const L = hit.L;
       const d0 = Math.abs(across(L, pts[k].x, pts[k].z));
       const mask = d0 >= 12 ? 0 : d0 <= 7 ? 1 : (12 - d0) / 5;
@@ -1040,12 +1227,27 @@ export function perpendicularCrossings(
 }
 
 /**
- * Rails mesh: track pieces laid along the whole path (the Kenney
- * railroad-straight tile, scaled per piece; a procedural ballast+rails
- * fallback when the kit is unavailable). One merged mesh for the island.
+ * Rails mesh: track pieces laid along a line (the Kenney railroad-straight
+ * tile, scaled per piece; a procedural ballast+rails fallback when the kit
+ * is unavailable). One merged mesh. `keep(x, z)` drops pieces elsewhere
+ * (the causeway decks carry their own track; the diamond lays one plate).
  */
-export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Mesh {
+export function bakeRails(
+  route: RailRoute, tpl: BakedTemplate | null,
+  keep: (x: number, z: number) => boolean = () => true,
+): THREE.Mesh {
   const B = new Baked();
+  layRails(B, route, tpl, keep);
+  const mesh = B.build();
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** lay a line's track pieces into an existing builder (see bakeRails) */
+export function layRails(
+  B: Baked, route: RailRoute, tpl: BakedTemplate | null,
+  keep: (x: number, z: number) => boolean = () => true,
+): void {
   const W = 3.4; // track bed width (m)
   // the kit tile is modelled about a metre below its own origin — measure it
   // and lift, so the bed rests on the ground (RAIL_Y) instead of hanging
@@ -1060,6 +1262,7 @@ export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Me
     if (Number.isFinite(minY)) dy = -minY;
   }
   const piece = (x: number, z: number, h: number, len: number): void => {
+    if (!keep(x, z)) return;
     if (tpl) {
       const sx = W / tpl.size.x, sz = (len + 0.3) / tpl.size.z;
       for (const src of tpl.geos) {
@@ -1080,21 +1283,10 @@ export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Me
   // walk the polyline, emitting each piece as the exact CHORD from the
   // previous piece's end vertex to a shared end vertex — a straight tile
   // oriented by its run's start heading misses the next joint by metres at
-  // the square corners the crossing pins bend into the path, so the tiles
-  // pieces mitre corner-to-corner instead (straights still merge into ~14 m
-  // pieces; a turn over ~20 deg or a >0.2 m bow off the chord ends the run).
-  const N = route.pts.length;
-  // the deformation leaves 10 m+ segments where pushes spread differentially;
-  // subdivide to <=2 m so the bow test below can fire between their ends
-  // (a subdivided polyline interpolates identically — same rail, same ride)
-  const dense: Array<{ x: number; z: number }> = [];
-  for (let k = 0; k < N; k++) {
-    const a = route.pts[k], b = route.pts[(k + 1) % N];
-    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2));
-    for (let q = 0; q < steps; q++) {
-      dense.push({ x: a.x + (b.x - a.x) * q / steps, z: a.z + (b.z - a.z) * q / steps });
-    }
-  }
+  // the square corners the crossing pins bend into the path, so the pieces
+  // mitre corner-to-corner instead (straights still merge into ~14 m
+  // pieces; a turn over ~20 deg or a >0.15 m bow off the chord ends the run).
+  const dense = subdivide(route.pts);
   const M = dense.length;
   let ix = 0;     // vertex the open run starts from
   let runLen = 0; // arc length since that vertex
@@ -1103,37 +1295,36 @@ export function bakeRails(route: RailRoute, tpl: BakedTemplate | null): THREE.Me
     piece((s.x + e.x) / 2, (s.z + e.z) / 2,
       Math.atan2(e.x - s.x, e.z - s.z), Math.hypot(e.x - s.x, e.z - s.z));
   };
-  for (let k = 0; k < M; k++) {
-    const a = dense[k], b = dense[(k + 1) % M], c = dense[(k + 2) % M];
+  for (let k = 0; k < M - 1; k++) {
+    const a = dense[k], b = dense[k + 1], c = dense[Math.min(M - 1, k + 2)];
     runLen += Math.hypot(b.x - a.x, b.z - a.z);
     const t1 = Math.atan2(b.x - a.x, b.z - a.z), t2 = Math.atan2(c.x - b.x, c.z - b.z);
     let turn = Math.abs(t2 - t1);
     if (turn > Math.PI) turn = Math.PI * 2 - turn;
-    // worst bow of ANY interior vertex off the run's chord. On a smooth arc
-    // the deviation peaks mid-chord while the newest vertex sits at ~zero,
-    // so a newest-only check sails straight through 0.8 m bows.
+    // worst bow of ANY interior vertex off the run's chord
     let dev = 0;
     if (runLen >= 1.5) {
       const s = dense[ix];
       const ex = b.x - s.x, ez = b.z - s.z, L2 = ex * ex + ez * ez;
       if (L2 > 1e-6) {
-        const cnt = (k - ix + M) % M;
-        for (let m = 1; m <= cnt; m++) {
-          const p = dense[(ix + m) % M];
+        for (let m = ix + 1; m <= k; m++) {
+          const p = dense[m];
           const t = Math.max(0, Math.min(1, ((p.x - s.x) * ex + (p.z - s.z) * ez) / L2));
           const d = Math.hypot(s.x + ex * t - p.x, s.z + ez * t - p.z);
           if (d > dev) dev = d;
         }
       }
     }
-    if ((turn > 0.3 && runLen >= 0.5) || (dev > 0.15 && runLen >= 1.5) || runLen >= 14) {
-      emitChord((k + 1) % M);
-      ix = (k + 1) % M;
+    // a run also ends wherever `keep` flips (shore -> deck, the diamond), so
+    // no kept piece reaches into a dropped stretch
+    const flip = keep(b.x, b.z) !== keep(c.x, c.z);
+    if ((turn > 0.3 && runLen >= 0.5) || (dev > 0.15 && runLen >= 1.5) || runLen >= 14 || flip || k === M - 2) {
+      emitChord(k + 1);
+      ix = k + 1;
       runLen = 0;
     }
   }
-  if (runLen > 0.5) emitChord(0);
-  const mesh = B.build();
-  mesh.receiveShadow = true;
-  return mesh;
 }
+
+/** the kit railroad tile (cached template), for callers baking track */
+export function railTile(): BakedTemplate | null { return bakedModel('rail-straight'); }

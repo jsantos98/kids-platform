@@ -2,15 +2,19 @@
 // Run: npx tsx tools/audit-world.ts [baseSeed]
 // Every check maps to a rule in AGENTS.md; a FAIL means the change that
 // caused it must be fixed before commit.
-import { setCityBase, citySeed, streetLinesFor } from '../src/worlds/cityGrid.js';
+import { setCityBase, streetLinesFor, CITY_PITCH } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
-import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
+import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK } from '../src/worlds/grid.js';
 import { clearCoastCache } from '../src/worlds/coast.js';
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, pieceRect, segmentPieces, nodeReach } from '../src/worlds/roadLayout.js';
 import { graphFor, clearGraphCache } from '../src/worlds/streetGraph.js';
 import { clearStreetLineCache } from '../src/worlds/streetLines.js';
+import * as THREE from 'three';
+import { Railway, HEADWAY, timetableHeads, clearTimetableCache } from '../src/games/city/railway.js';
+import { boatLoop } from '../src/games/city/sea.js';
+import { deckAt, BOAT_CLEAR } from '../src/worlds/causeway.js';
 
 const clearAllWorldCaches = (): void => {
   clearCityPlanCache();
@@ -20,6 +24,7 @@ const clearAllWorldCaches = (): void => {
   clearGraphCache();
   clearStreetLineCache();
   clearCoastCache();
+  clearTimetableCache();
 };
 
 const W = 14;
@@ -62,10 +67,17 @@ let worstTrestleSkew = 0;
 let roadOverlaps = 0;
 let graphFaults = 0;
 let roadGaps = 0;
+let portalFaults = 0;
+let diamondFaults = 0;
+let lineOverlap = 0;
+let diamondClashes = 0;
+let teleports = 0;
+let tailgates = 0;
+let lowDecks = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
-  const route = railRouteFor(bx, by);
+  const net = railNetFor(bx, by);
 
   // R1 + R19: no dead ends except the four causeway mouths; causeways intact
   const deg = (i: number, j: number): number =>
@@ -100,7 +112,7 @@ for (const [bx, by] of cells) {
     const streetH = c.heading;
     const ux = Math.sin(streetH), uz = Math.cos(streetH);
     let worst = 0;
-    for (const p of route.pts) {
+    for (const p of net.lines[c.line].pts) {
       // across the street (normal distance) and along it, from the crossing
       const pd = Math.abs((p.x - c.x) * uz - (p.z - c.z) * ux);
       if (pd >= 6.5) continue;
@@ -125,11 +137,11 @@ for (const [bx, by] of cells) {
     let run = 0;
     for (let t = 0; t <= 64; t += 2) {
       const x = horiz ? a + t : c0, z = horiz ? c0 : a + t;
-      const h = route.headingAt(x, z);
+      const h = net.headingAt(x, z);
       let dev = Math.abs(h - (horiz ? Math.PI / 2 : 0));
       if (dev > Math.PI) dev = Math.PI * 2 - dev;
       const parallel = Math.min(dev, Math.PI - dev) < Math.PI / 3;
-      if (route.distTo(x, z) < 7 && parallel) {
+      if (net.distTo(x, z) < 7 && parallel) {
         run += 2;
         if (run >= 8) {
           railOnRoadSegs++;
@@ -146,7 +158,7 @@ for (const [bx, by] of cells) {
   // R9: lots keep 16 m from the rail centreline (0.5 m tolerance)
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
     for (const lot of plan.lots(cx, cz)) {
-      worstLot = Math.min(worstLot, route.distTo(lot.x, lot.z));
+      worstLot = Math.min(worstLot, net.distTo(lot.x, lot.z));
     }
   }
 
@@ -156,22 +168,85 @@ for (const [bx, by] of cells) {
   // track can stop reading as connected). A ~150-degree U-turn smeared over
   // 3-4 vertices turns <90 degrees per vertex, so also fail any >120-degree
   // heading swing across a tight window — square crossing walls never do it.
-  const rpts = route.pts, RN = rpts.length;
-  for (let k = 0; k < RN; k++) {
-    const a = rpts[(k - 1 + RN) % RN], b = rpts[k], c = rpts[(k + 1) % RN];
-    const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
-    if (l1 < 0.5 || l2 < 0.5) continue;
-    if ((c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) foldTotal++;
-  }
-  for (let k = 0; k < RN; k++) {
-    const a = rpts[k], b = rpts[(k + 3) % RN];
-    if (Math.hypot(b.x - a.x, b.z - a.z) > 12) continue;
-    let dh = b.h - a.h;
-    while (dh > Math.PI) dh -= Math.PI * 2;
-    while (dh < -Math.PI) dh += Math.PI * 2;
-    if (Math.abs(dh) > (120 * Math.PI) / 180) foldTotal++;
+  for (const route of net.lines) {
+    const rpts = route.pts, RN = rpts.length;
+    for (let k = 1; k < RN - 1; k++) {
+      const a = rpts[k - 1], b = rpts[k], c = rpts[k + 1];
+      const l1 = Math.hypot(b.x - a.x, b.z - a.z), l2 = Math.hypot(c.x - b.x, c.z - b.z);
+      if (l1 < 0.5 || l2 < 0.5) continue;
+      if ((c.x - b.x) * (b.x - a.x) + (c.z - b.z) * (b.z - a.z) < 0) foldTotal++;
+    }
+    for (let k = 0; k + 3 < RN; k++) {
+      const a = rpts[k], b = rpts[k + 3];
+      if (Math.hypot(b.x - a.x, b.z - a.z) > 12) continue;
+      let dh = b.h - a.h;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      if (Math.abs(dh) > (120 * Math.PI) / 180) foldTotal++;
+    }
   }
 
+  // R30: the portal contract — each line starts on the north / west rim and
+  // ends on the neighbour's rim across our strait, both stems dead straight
+  // on the shared portal coordinate, so neighbouring lines weld end to end
+  {
+    const P = railPortals(bx, by);
+    const [ns, ew] = net.lines;
+    const bad = (m: string): void => { portalFaults++; console.log(`  R30 detail: city ${bx},${by} ${m}`); };
+    const ends: Array<[typeof ns, number, number, number, number, boolean]> = [
+      [ns, P.xN, 0, P.xS, CITY_PITCH, true], [ew, P.zW, 0, P.zE, CITY_PITCH, false],
+    ];
+    for (const [L, v0, u0, v1, u1, vert] of ends) {
+      const a = L.pts[0], b = L.pts[L.pts.length - 1];
+      const [av, au, bv, bu] = vert ? [a.x, a.z, b.x, b.z] : [a.z, a.x, b.z, b.x];
+      if (Math.abs(av - v0) > 0.01 || Math.abs(au - u0) > 0.01 || Math.abs(bv - v1) > 0.01 || Math.abs(bu - u1) > 0.01) {
+        bad(`${L.kind} ends at (${a.x.toFixed(1)},${a.z.toFixed(1)})..(${b.x.toFixed(1)},${b.z.toFixed(1)})`);
+      }
+      for (const p of L.pts) {
+        const u = vert ? p.z : p.x, v = vert ? p.x : p.z;
+        if (u <= STEM && Math.abs(v - v0) > 0.01) { bad(`${L.kind} north/west stem off by ${(v - v0).toFixed(2)} m`); break; }
+        if (u >= ISLAND - STEM && Math.abs(v - v1) > 0.01) { bad(`${L.kind} south/east stem off by ${(v - v1).toFixed(2)} m`); break; }
+      }
+    }
+    // the neighbour's line starts exactly where ours ends (portal coords)
+    if (Math.abs(railPortals(bx, by + 1).xN - P.xS) > 0.01) bad('south portal disagrees with the southern neighbour');
+    if (Math.abs(railPortals(bx + 1, by).zW - P.zE) > 0.01) bad('east portal disagrees with the eastern neighbour');
+  }
+
+  // R31: the two lines cross exactly once, at the diamond, square, and never
+  // come within a bed width of each other anywhere else
+  {
+    const [ns, ew] = net.lines;
+    const D = net.diamond;
+    let hits = 0, atD = 0;
+    for (let i = 0; i + 1 < ns.pts.length; i++) {
+      const p = ns.pts[i], q = ns.pts[i + 1];
+      for (let k = 0; k + 1 < ew.pts.length; k++) {
+        const r = ew.pts[k], t = ew.pts[k + 1];
+        const d1x = q.x - p.x, d1z = q.z - p.z, d2x = t.x - r.x, d2z = t.z - r.z;
+        const den = d1x * d2z - d1z * d2x;
+        if (Math.abs(den) < 1e-9) continue;
+        const u = ((r.x - p.x) * d2z - (r.z - p.z) * d2x) / den;
+        const w = ((r.x - p.x) * d1z - (r.z - p.z) * d1x) / den;
+        if (u < 0 || u >= 1 || w < 0 || w >= 1) continue;
+        hits++;
+        if (Math.hypot(p.x + d1x * u - D.x, p.z + d1z * u - D.z) < 3) atD++;
+      }
+    }
+    const hn = ns.headingAt(D.x, D.z), he = ew.headingAt(D.x, D.z);
+    let ang = Math.abs(hn - he) % Math.PI;
+    if (ang > Math.PI / 2) ang = Math.PI - ang;
+    const skewDeg = Math.abs(90 - (ang * 180) / Math.PI);
+    if (hits !== 1 || atD !== 1 || skewDeg > 3) {
+      diamondFaults++;
+      console.log(`  R31 detail: city ${bx},${by} line crossings ${hits} (at diamond ${atD}), diamond skew ${skewDeg.toFixed(1)} deg`);
+    }
+    for (let k = 0; k < ns.pts.length; k += 2) {
+      const p = ns.pts[k];
+      if (Math.hypot(p.x - D.x, p.z - D.z) < 12) continue;
+      if (ew.near(p.x, p.z, 3.6)) { lineOverlap++; break; }
+    }
+  }
 
   // R1b: ONE connected street web — the R22/R22b vetoes used to strand
   // little "private" roads away from the network
@@ -205,10 +280,10 @@ for (const [bx, by] of cells) {
   // no barrierless bumps where the track meets asphalt. A rail vertex
   // pinned exactly ON the street line counts as a crossing too (the
   // deformers land pins dead-centre; a strict sign test misses those).
-  {
+  for (const route of net.lines) {
     const pts = route.pts;
-    for (let k = 0; k < pts.length; k++) {
-      const p = pts[k], q = pts[(k + 1) % pts.length];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const p = pts[k], q = pts[k + 1];
       for (let j = 0; j <= W; j++) {
         const c = j * 64;
         if (p.z !== q.z && (p.z - c) * (q.z - c) <= 0) {
@@ -234,7 +309,7 @@ for (const [bx, by] of cells) {
   // crossing or riding beneath a N-S street), and flows due south across
   // every E-W street line so bridges meet it at a right angle
   {
-    const river = riverFor(citySeed(bx, by));
+    const river = riverFor(bx, by);
     let zmin = Infinity, zmax = -Infinity, laneMin = Infinity, hDev = 0;
     for (const p of river.pts) {
       zmin = Math.min(zmin, p.z); zmax = Math.max(zmax, p.z);
@@ -250,7 +325,7 @@ for (const [bx, by] of cells) {
     }
     // R27: trestles meet the water at a right angle too
     let skew = 0;
-    for (const p of route.pts) {
+    for (const p of net.lines.flatMap(L => L.pts)) {
       if (!river.inWater(p.x, p.z)) continue;
       const near = river.path.nearest(p.x, p.z);
       const nx = river.pts[near.i].h + Math.PI / 2;
@@ -258,7 +333,7 @@ for (const [bx, by] of cells) {
       if (d > Math.PI / 2) d = Math.PI - d;
       skew = Math.max(skew, (d * 180) / Math.PI);
     }
-    if (skew > 30) console.log(`  R27 detail: city ${bx},${by} trestle skew ${skew.toFixed(1)} deg near (${route.pts.find(p => river.inWater(p.x, p.z))?.x.toFixed(0)},${route.pts.find(p => river.inWater(p.x, p.z))?.z.toFixed(0)})`);
+    if (skew > 30) console.log(`  R27 detail: city ${bx},${by} trestle skew ${skew.toFixed(1)} deg`);
     worstTrestleSkew = Math.max(worstTrestleSkew, skew);
   }
 
@@ -323,8 +398,58 @@ for (const [bx, by] of cells) {
     if ((b & ROAD) && (b & RAIL) && (b & RIVER)) railRiverRoadTotal++;
     if ((b & LOT) && (b & (ROAD | RAIL | RIVER | PLAZA))) lotClashTotal++;
     // R29: the sea carries nothing built but the causeway decks
-    if ((b & SEA) && (b & (LOT | RAIL | PLAZA))) seaBuiltTotal++;
+    if ((b & SEA) && (b & (LOT | PLAZA))) seaBuiltTotal++;
+    if ((b & SEA) && (b & RAIL) && !(b & DECK)) seaBuiltTotal++;
     if ((b & SEA) && (b & ROAD) && !(b & DECK)) seaRoadTotal++;
+  }
+}
+
+// R31b: the timetable never puts two trains on a diamond at once (the
+// west-east line holds for the north-south one), and R30b: train heads move
+// continuously along a line across the portals — nothing ever teleports
+{
+  const rw = new Railway(new THREE.Scene());
+  for (const [bx, by] of cells) {
+    const D = railNetFor(bx, by).diamond;
+    for (let t = 0; t < HEADWAY * 3; t += 0.5) {
+      if (rw.distTo(bx, by, 0, D.d[0], t) < 3 && rw.distTo(bx, by, 1, D.d[1], t) < 3) { diamondClashes++; break; }
+    }
+    // consecutive trains on a line keep a train length + 12 m apart
+    for (const kind of ['ns', 'ew'] as const) {
+      for (let t = 0; t < HEADWAY * 3; t += 1) {
+        const hs = timetableHeads(bx, by, kind, t);
+        let bad = false;
+        for (let i = 0; i < hs.length && !bad; i++) for (let k = i + 1; k < hs.length; k++) {
+          if (Math.hypot(hs[i].x - hs[k].x, hs[i].z - hs[k].z) < 60) { bad = true; break; }
+        }
+        if (bad) { tailgates++; console.log(`  R31 detail: city ${bx},${by} ${kind} trains closer than 60 m at t=${t}`); break; }
+      }
+    }
+  }
+  for (const kind of ['ns', 'ew'] as const) {
+    const chain = [-2, -1, 0, 1, 2].map(k => (kind === 'ns' ? [0, k] : [k, 0]) as [number, number]);
+    const heads = (t: number): Array<{ x: number; z: number; mid: boolean }> =>
+      chain.flatMap(([bx, by], i) => timetableHeads(bx, by, kind, t).map(h => ({ x: h.x, z: h.z, mid: i >= 1 && i <= 3 })));
+    let prev = heads(0);
+    for (let t = 0.5; t < HEADWAY * 4; t += 0.5) {
+      const cur = heads(t);
+      for (const h of cur) {
+        if (!h.mid) continue;
+        let best = Infinity;
+        for (const q of prev) best = Math.min(best, Math.hypot(q.x - h.x, q.z - h.z));
+        if (best > 12) { teleports++; console.log(`  R30 detail: ${kind} line head at (${h.x.toFixed(0)},${h.z.toFixed(0)}) t=${t} jumped ${best.toFixed(0)} m`); }
+      }
+      prev = cur;
+    }
+  }
+}
+
+// R29b: the boat lane swings out under the causeways' raised spans — it
+// never meets a deck too low to sail beneath
+for (const [bx, by] of cells) {
+  for (const p of boatLoop(bx, by)) {
+    const dk = deckAt(p.x + bx * CITY_PITCH, p.z + by * CITY_PITCH);
+    if (dk && dk.y < BOAT_CLEAR) lowDecks++;
   }
 }
 
@@ -334,32 +459,27 @@ for (const [bx, by] of cells) {
 // (rail routes only), so it runs over a much wider city ring than the
 // rest of the audit.
 for (let wx = -4; wx <= 4; wx++) for (let wy = -4; wy <= 4; wy++) {
-  const route = railRouteFor(wx, wy);
-  const rpts = route.pts, RN = rpts.length;
-  const cell = 8;
-  const cum: number[] = [0];
-  for (let k = 1; k <= RN; k++) {
-    const a = rpts[k - 1], b = rpts[k % RN];
-    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
-  }
-  const total = cum[RN];
-  const grid = new Map<string, number[]>();
-  for (let k = 0; k < RN; k++) {
-    const kk = `${Math.floor(rpts[k].x / cell)},${Math.floor(rpts[k].z / cell)}`;
-    if (!grid.has(kk)) grid.set(kk, []);
-    grid.get(kk)!.push(k);
-  }
-  for (let k = 0; k < RN; k++) {
-    const gx = Math.floor(rpts[k].x / cell), gz = Math.floor(rpts[k].z / cell);
-    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
-      const arr = grid.get(`${gx + ox},${gz + oz}`);
-      if (!arr) continue;
-      for (const m of arr) {
-        const darc = Math.abs(cum[k] - cum[m]);
-        const sep = Math.min(darc, total - darc);
-        if (sep < 14) continue; // neighbours along the loop
-        const d = Math.hypot(rpts[m].x - rpts[k].x, rpts[m].z - rpts[k].z);
-        if (d < 3.6) selfOverlap++; // beds are 3.4 m wide: closer means they intersect
+  for (const route of railNetFor(wx, wy).lines) {
+    const rpts = route.pts, RN = rpts.length;
+    const cell = 8;
+    const cum: number[] = [0];
+    for (let k = 1; k < RN; k++) cum.push(cum[k - 1] + Math.hypot(rpts[k].x - rpts[k - 1].x, rpts[k].z - rpts[k - 1].z));
+    const grid = new Map<string, number[]>();
+    for (let k = 0; k < RN; k++) {
+      const kk = `${Math.floor(rpts[k].x / cell)},${Math.floor(rpts[k].z / cell)}`;
+      if (!grid.has(kk)) grid.set(kk, []);
+      grid.get(kk)!.push(k);
+    }
+    for (let k = 0; k < RN; k++) {
+      const gx = Math.floor(rpts[k].x / cell), gz = Math.floor(rpts[k].z / cell);
+      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+        const arr = grid.get(`${gx + ox},${gz + oz}`);
+        if (!arr) continue;
+        for (const m of arr) {
+          if (Math.abs(cum[k] - cum[m]) < 14) continue; // neighbours along the line
+          const d = Math.hypot(rpts[m].x - rpts[k].x, rpts[m].z - rpts[k].z);
+          if (d < 3.6) selfOverlap++; // beds are 3.4 m wide: closer means they intersect
+        }
       }
     }
   }
@@ -384,6 +504,13 @@ if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestl
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
 if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);
+if (portalFaults > 0) fail('R30', `${portalFaults} railway portal faults (lines must end on the shared rim portals with straight stems)`);
+if (diamondFaults > 0) fail('R31', `${diamondFaults} islands whose two lines don't cross exactly once, square, at the diamond`);
+if (diamondClashes > 0) fail('R31', `${diamondClashes} islands where two timetable trains share the diamond`);
+if (lowDecks > 0) fail('R29', `${lowDecks} boat-lane points run under a causeway deck too low to clear`);
+if (tailgates > 0) fail('R31', `${tailgates} lines where timetable trains tailgate each other`);
+if (teleports > 0) fail('R30', `${teleports} timetable train heads jumped (trains must flow continuously across portals)`);
+if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on each other away from the diamond`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.
 // The hash tail used to leave adjacent integers partially correlated, and
@@ -399,13 +526,13 @@ const jac = (a: Set<string>, b: Set<string>): number => {
 const fingerprint = (bx: number, by: number) => {
   const { H, V } = streetLinesFor(bx, by);
   const plan = cityPlanFor(bx, by);
-  const route = railRouteFor(bx, by);
+  const rail = railNetFor(bx, by).lines.flatMap(L => L.pts);
   const segs = new Set<string>();
   for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs.add(`h${j},${i}`);
   for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs.add(`v${i},${j}`);
   const dists = new Set<string>();
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) dists.add(`${cx},${cz}:${plan.district(cx, cz)}`);
-  return { H: new Set(H.map(String)), V: new Set(V.map(String)), segs, dists, rail: route.pts };
+  return { H: new Set(H.map(String)), V: new Set(V.map(String)), segs, dists, rail };
 };
 for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] as Array<[number, number]>) {
   for (const [bx, by] of [[0, 0], [1, 1]] as Array<[number, number]>) {
@@ -438,7 +565,7 @@ console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} cr
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
   `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg, ` +
-  `road overlaps ${roadOverlaps}, road gaps ${roadGaps}`);
+  `road overlaps ${roadOverlaps}, road gaps ${roadGaps}, portal faults ${portalFaults}, diamond faults ${diamondFaults}`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

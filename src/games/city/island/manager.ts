@@ -31,12 +31,6 @@ export class IslandManager {
     return s;
   }
 
-  /** railway of city "bx,by" if its island is awake (level crossings ask) */
-  trainsFor(key: string): IslandSim['trains'] | null {
-    const s = this.sims.get(key);
-    return s && s.active ? s.trains : null;
-  }
-
   /** the islands that should be awake around world point (x, z) */
   private wanted(x: number, z: number): Array<[number, number]> {
     const here = cityAt(x, z);

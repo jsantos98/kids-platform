@@ -3,11 +3,10 @@
 // canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
-import { railRouteFor } from '../../worlds/railRoute.js';
+import { railNetFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { graphFor } from '../../worlds/streetGraph.js';
-import { citySeed } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
 import { bridgeLayout } from './bridge.js';
@@ -42,7 +41,6 @@ export class Minimap {
 
   update(playerX: number, playerZ: number, heading: number, elapsed: number): void {
     const plan = cityPlanFor(this.bx, this.by);
-    const seed = citySeed(this.bx, this.by);
     const px = playerX - this.ox, pz = playerZ - this.oz; // city-local
     const ctx = this.ctx;
     const s = SIZE;
@@ -83,7 +81,7 @@ export class Minimap {
     ctx.stroke();
 
     // the river, ribbon-width
-    const river = riverFor(seed);
+    const river = riverFor(this.bx, this.by);
     ctx.strokeStyle = '#5fadc9';
     ctx.lineWidth = 11 * scale;
     ctx.lineCap = 'round';
@@ -95,15 +93,20 @@ export class Minimap {
     ctx.stroke();
     ctx.lineCap = 'butt';
 
-    // the railway: the seeded procedural loop
+    // the railway: this island's two through lines, plus the neighbours'
+    // lines arriving over our north and west straits
     ctx.strokeStyle = '#7a6248';
     ctx.lineWidth = 3.4 * scale;
     ctx.beginPath();
-    routePts(this.bx, this.by).forEach((p, k) => {
-      const x = tx(p.x), y = ty(p.z);
-      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
+    for (const [nbx, nby, dx, dz] of [[this.bx, this.by, 0, 0], [this.bx, this.by - 1, 0, -CITY_PITCH], [this.bx - 1, this.by, -CITY_PITCH, 0]]) {
+      for (const L of railNetFor(nbx, nby).lines) {
+        L.pts.forEach((p, k) => {
+          if (k % 3 && k !== L.pts.length - 1) return;
+          const x = tx(p.x + dx), y = ty(p.z + dz);
+          if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+      }
+    }
     ctx.stroke();
 
     // train stations: blue platforms
@@ -205,8 +208,3 @@ export class Minimap {
   }
 }
 
-// per-chunk ground colour for the minimap (slab colour per island biome)
-function routePts(bx: number, by: number): Array<{ x: number; z: number }> {
-  const pts = railRouteFor(bx, by).pts;
-  return pts.filter((_, k) => k % 3 === 0);
-}

@@ -24,7 +24,9 @@ import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
-import { railRouteFor } from '../../worlds/railRoute.js';
+import { railNetFor } from '../../worlds/railRoute.js';
+import { deckAt } from '../../worlds/causeway.js';
+import { Railway, lineDir } from './railway.js';
 import { Missions } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
 import { Director } from './activity/director.js';
@@ -66,8 +68,8 @@ function pickSpawn(bx: number, by: number): { x: number; z: number; heading: num
   const seed = citySeed(bx, by);
   const sr = rng(chunkSeed(seed, 0x5b0, 3));
   const g = graphFor(bx, by);
-  const river = riverFor(seed);
-  const rail = railRouteFor(bx, by);
+  const river = riverFor(bx, by);
+  const rail = railNetFor(bx, by);
   const spots: Array<{ x: number; z: number; heading: number }> = [];
   const byCentre = g.edges
     .filter(e => !g.nodes[e.a].mouth && !g.nodes[e.b].mouth && !g.nodes[e.a].plaza && !g.nodes[e.b].plaza)
@@ -99,13 +101,22 @@ function seaSpawn(bx: number, by: number): { x: number; z: number; heading: numb
   return { x: a.x, z: a.z, heading: Math.atan2(b.x - a.x, b.z - a.z) };
 }
 
+/** the kid's train starts on the island's north-south line, 150 m in from
+ * the portal it runs away from (the line's travel direction is seeded) */
+function trainStart(bx: number, by: number): { arc: number; x: number; z: number; h: number } {
+  const L = railNetFor(bx, by).lines[0];
+  const fwd = lineDir({ kind: 'ns', idx: bx }) > 0;
+  const arc = fwd ? 150 : L.rimOut - 150;
+  const p = L.sample(arc);
+  return { arc, x: p.x, z: p.z, h: fwd ? p.h : p.h + Math.PI };
+}
+
 /** where a mode starts in city (bx, by) — city-local */
 function modeSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
   if (MODE.spawn === 'sea') return seaSpawn(bx, by);
   if (MODE.spawn === 'rail') {
-    const r = railRouteFor(bx, by);
-    const p = r.sample(r.total / 6); // where Trains.addPlayer puts the kid's train
-    return { x: p.x, z: p.z, heading: p.h };
+    const r = trainStart(bx, by);
+    return { x: r.x, z: r.z, heading: r.h };
   }
   return pickSpawn(bx, by);
 }
@@ -189,7 +200,7 @@ if (q.get('debugbake') === '1') {
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
 const chunks = new ChunkManager(scene, 64, 4);
-let river = riverFor(citySeed(0, 0));
+let river = riverFor(0, 0);
 chunks.ensure(999, spawn.x, spawn.z);
 if (q.get('buildall') === '1') {
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
@@ -230,17 +241,19 @@ const pickTpl = (n: string) => {
   if (!t) console.warn('missing baked template:', n);
   return t;
 };
+// the world's trains: endless through lines on a timetable (railway.ts)
+const railway = new Railway(scene);
 const islands = new IslandManager(scene, {
+  railway,
   // unless the kid drives it, one of the AI vehicles is the fire truck
   extraCars: MODE.id !== 'truck' ? ['/assets/kenney/firetruck.glb'] : [],
   pets: PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
   people: PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
 });
-// the kid's own train runs on the start island's railway
-const homeTrains = islands.sim(0, 0).trains;
-if (V.kind === 'rail') homeTrains.addPlayer();
-/** the train: index of the station to stop at next (into homeTrains.stationArcs) */
-let stationNext = -1;
+// the kid's own train runs on the start island's north-south line
+if (V.kind === 'rail') railway.addPlayer(0, 0, trainStart(0, 0).arc);
+/** the platform the kid's train last stopped at (the goal moves on) */
+let stationDone: { x: number; z: number } | null = null;
 const transit = new Transit(scene);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
@@ -251,7 +264,8 @@ if (q.get('debugsea') === '1') {
     scene,
     camera,
     renderer,
-    get trains() { return homeTrains; },
+    railway,
+    trains: () => railway.list(curCity.bx, curCity.by),
     islands,
     /** the current island's car fleet */
     get traffic() { return islands.sim(curCity.bx, curCity.by).cars; },
@@ -260,7 +274,7 @@ if (q.get('debugsea') === '1') {
     course: () => course,
     transit: () => transit.list(),
     river: () => river,
-    route: () => railRouteFor(curCity.bx, curCity.by),
+    route: () => railNetFor(curCity.bx, curCity.by),
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
       return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
@@ -295,7 +309,7 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
 let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
 function applyCity(c: CityRef): void {
   curCity = c;
-  river = riverFor(citySeed(c.bx, c.by));
+  river = riverFor(c.bx, c.by);
   transit.setCity(c.bx, c.by, c.ox, c.oz);
   sea.setCity(c.ox, c.oz);
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
@@ -304,7 +318,7 @@ function applyCity(c: CityRef): void {
   const s = modeSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
-  stationNext = -1;
+  stationDone = null;
 }
 applyCity(curCity);
 const hud = makeHUD();
@@ -438,27 +452,12 @@ function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: nu
   return { x: g.nodes[best[k]].x + ox, z: g.nodes[best[k]].z + oz };
 }
 
-/** the train's next station: world position + arc gap ahead of the train */
+/** the train's next station: world position + track gap ahead of the train
+ * (the platform just stopped at no longer counts) */
 function nextStation(): { x: number; z: number; gap: number } | null {
-  const arcs = homeTrains.stationArcs;
-  const pose = homeTrains.playerPose();
-  if (!arcs.length || !pose) return null;
-  const total = homeTrains.loopLength;
-  const ahead = (d: number): number => ((d - pose.s) % total + total) % total;
-  if (stationNext < 0 || stationNext >= arcs.length) {
-    // the first station ahead of the train
-    let best = 0;
-    arcs.forEach((d, k) => { if (ahead(d) < ahead(arcs[best])) best = k; });
-    stationNext = best;
-  }
-  let gap = ahead(arcs[stationNext]);
-  // overshot the platform: the next station becomes the goal
-  if (gap > total - 12) {
-    stationNext = (stationNext + 1) % arcs.length;
-    gap = ahead(arcs[stationNext]);
-  }
-  const p = homeTrains.at(arcs[stationNext]);
-  return { x: p.x + curCity.ox, z: p.z + curCity.oz, gap: gap > total - 12 ? 0 : gap };
+  let st = railway.nextStation(0);
+  if (st && stationDone && Math.hypot(st.x - stationDone.x, st.z - stationDone.z) < 1) st = railway.nextStation(1);
+  return st;
 }
 
 // ---- main loop ----
@@ -475,11 +474,11 @@ const tick = (): void => {
   // until the fire is out / the cat is down)
   if (V.kind === 'rail') {
     // the kid's train: wheel pedals drive it, the pose comes from the rails
-    homeTrains.setControls(mode === 'drive' ? input.gas : 0, mode === 'drive' ? input.brake : 1, nextStation()?.gap ?? Infinity);
-    const pose = homeTrains.playerPose();
+    railway.setControls(mode === 'drive' ? input.gas : 0, mode === 'drive' ? input.brake : 1, nextStation()?.gap ?? Infinity);
+    const pose = railway.playerPose();
     if (pose) {
-      st.x = pose.x + curCity.ox; st.z = pose.z + curCity.oz;
-      st.heading = pose.h; st.v = pose.v;
+      st.x = pose.x; st.z = pose.z;
+      st.heading = pose.h; st.v = pose.v; st.alt = pose.y;
     }
   } else if (mode === 'drive' || player.crashT > 0) {
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
@@ -509,6 +508,17 @@ const tick = (): void => {
     Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
   }
 
+  // road vehicles ride the causeway decks up over the raised span
+  let deckPitch = 0;
+  if (V.kind === 'ground') {
+    const dk = deckAt(st.x, st.z);
+    st.alt = dk && dk.kind === 'road' ? dk.y : 0;
+    if (dk && dk.kind === 'road') {
+      const hx = Math.sin(st.heading) * 1.5, hz = Math.cos(st.heading) * 1.5;
+      const yf = deckAt(st.x + hx, st.z + hz)?.y ?? 0, yb = deckAt(st.x - hx, st.z - hz)?.y ?? 0;
+      deckPitch = -Math.atan2(yf - yb, 3);
+    }
+  }
   const bob = V.kind === 'heli' ? Math.sin(elapsed * 1.3) * 0.7 : V.kind === 'boat' ? waveAt(st.x, st.z, elapsed) * 1.6 : 0;
   player.car.position.set(st.x, st.alt + bob, st.z);
   player.car.rotation.y = st.heading;
@@ -529,6 +539,7 @@ const tick = (): void => {
     player.car.rotation.x = -Math.min(0.12, Math.abs(st.v) * 0.008) + Math.sin(elapsed * 1.7) * 0.03;
     player.car.rotation.z = -input.steer * 0.08 * Math.min(1, Math.abs(st.v) / 8) + Math.sin(elapsed * 1.3) * 0.03;
   } else {
+    player.car.rotation.x = deckPitch;
     player.car.rotation.z = -input.steer * Math.min(Math.abs(st.v) / 16, 1) * 0.04;
     for (const w of player.wheels) (w as THREE.Object3D).rotation.x += (st.v * dt) / 0.42;
   }
@@ -541,7 +552,8 @@ const tick = (): void => {
   searchlight?.update(st.x, st.alt + bob, st.z, st.heading);
 
   // camera (flying vehicles keep the camera near their altitude)
-  const flyY = V.kind === 'plane' ? st.alt : V.kind === 'heli' ? HELI_ALT : 0;
+  // (road vehicles and the train ride the causeway decks, so they follow st.alt too)
+  const flyY = V.kind === 'heli' ? HELI_ALT : V.kind === 'boat' ? 0 : st.alt;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
   if (camMode === 'cab') {
     camera.position.set(st.x + fwd.x * V.cabF, flyY + V.cabY, st.z + fwd.z * V.cabF);
@@ -574,7 +586,8 @@ const tick = (): void => {
   // from vehicles on the ground)
   islands.update(dt, elapsed, player.car.position,
     airborne || V.kind === 'boat' ? null : player.car.position);
-  transit.update(dt, elapsed, key => islands.trainsFor(key));
+  railway.update(dt, elapsed, st.x, st.z);
+  transit.update(dt, elapsed, railway);
   sea.update(elapsed);
   scenery.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
@@ -676,7 +689,7 @@ const tick = (): void => {
     }
   } else if (station) {
     // ---- the train: stop at the platform ----
-    const pose = homeTrains.playerPose()!;
+    const pose = railway.playerPose()!;
     const gap = station.gap;
     showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
     promptFill.style.width = '0%';
@@ -684,7 +697,7 @@ const tick = (): void => {
       : gap < 70 ? 'SLOW DOWN…' : 'DRIVE TO THE STATION';
     if (gap < 12 && pose.v < 0.5) {
       earnStar('🚉 STATION STOP!', new THREE.Vector3(st.x, 3, st.z));
-      stationNext = (stationNext + 1) % homeTrains.stationArcs.length;
+      stationDone = { x: station.x, z: station.z };
     }
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----

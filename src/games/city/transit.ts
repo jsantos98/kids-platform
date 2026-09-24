@@ -1,17 +1,19 @@
-// Street-level transit furniture, built per city: gated level crossings where
-// the railway meets a road (twin flashing red signals — the car AI stops for
-// them), the station platforms where trains dwell, and the river trestles
-// under the rails. A city builds its set the first time the player arrives;
+// Street-level transit furniture, built per city: the track of both railway
+// lines (the land part — the causeway decks carry their own), the square
+// diamond where they cross, gated level crossings where a line meets a road
+// (twin flashing red signals — the car AI stops for them), the station
+// platforms where trains dwell, and the river trestles under the rails. A city builds its set the first time the player arrives;
 // the four most recent stay alive so nothing pops when crossing a strait.
 import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
-import { RAIL_Y, railRouteFor, type RailRoute } from '../../worlds/railRoute.js';
+import { RAIL_Y, railNetFor, layRails, railTile, type RailRoute } from '../../worlds/railRoute.js';
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
+import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor, type Crossing, type Station } from '../../worlds/cityPlan.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
-import type { Trains } from './train.js';
+import type { Railway } from './railway.js';
 
 const LIT_RED = new THREE.MeshBasicMaterial({ color: 0xff3b30 });
 const DIM_RED = new THREE.MeshBasicMaterial({ color: 0x4a2226 });
@@ -36,9 +38,13 @@ interface Signal {
 }
 
 interface CityInst {
+  bx: number;
+  by: number;
   ox: number;
   oz: number;
   mesh: THREE.Mesh;
+  /** both lines' track (city-local, placed at the origin) */
+  rails: THREE.Mesh;
   /** dynamic per-city props (signal lamps) */
   dyn: THREE.Group;
   signals: Signal[];
@@ -67,7 +73,9 @@ export class Transit {
       const inst = this.cities.get(oldest)!;
       this.scene.remove(inst.mesh);
       this.scene.remove(inst.dyn);
+      this.scene.remove(inst.rails);
       inst.mesh.geometry.dispose();
+      inst.rails.geometry.dispose();
       inst.dyn.traverse(o => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.geometry.dispose();
@@ -78,18 +86,37 @@ export class Transit {
 
   private buildCity(bx: number, by: number, ox: number, oz: number, key: string): void {
     const seed = citySeed(bx, by);
-    const route = railRouteFor(bx, by);
-    const river = riverFor(seed);
+    const net = railNetFor(bx, by);
+    const river = riverFor(bx, by);
+    const coast = coastFor(bx, by);
+    const D = net.diamond;
     const plan = cityPlanFor(bx, by);
     const r = rng(chunkSeed(seed, 0x7b2, 9));
     const B = new Baked();
+    // the track: both lines on dry land (the decks lay their own), broken
+    // at the diamond, where one square plate carries all four rails
+    const keep = (x: number, z: number): boolean => coast.inLand(x, z, 1) && Math.hypot(x - D.x, z - D.z) > 2.7;
+    const RB = new Baked();
+    for (const L of net.lines) layRails(RB, L, railTile(), keep);
+    RB.box(5.6, 0.1, 5.6, 0xb9a88c, D.x, RAIL_Y + 0.05, D.z);
+    for (const s of [-0.72, 0.72]) {
+      RB.box(0.12, 0.14, 5.6, 0x8d939e, D.x + s, RAIL_Y + 0.17, D.z);
+      RB.box(5.6, 0.14, 0.12, 0x8d939e, D.x, RAIL_Y + 0.17, D.z + s);
+    }
+    for (const [dx, dz] of [[-2.2, -2.2], [2.2, -2.2], [-2.2, 2.2], [2.2, 2.2]]) {
+      RB.box(0.5, 0.14, 0.5, 0x6e5238, D.x + dx, RAIL_Y + 0.12, D.z + dz);
+    }
+    const rails = RB.build();
+    rails.receiveShadow = true;
+    rails.position.set(ox, 0, oz);
+    this.scene.add(rails);
     const inst: CityInst = {
-      ox, oz, mesh: null as unknown as THREE.Mesh, dyn: new THREE.Group(),
+      bx, by, ox, oz, mesh: null as unknown as THREE.Mesh, rails, dyn: new THREE.Group(),
       signals: [], boxes: [],
     };
     let baked = 0;
     for (const st of plan.stations) { this.bakeStation(B, st, r, ox, oz, inst); baked++; }
-    baked += this.bakeTrestles(B, route, river, ox, oz);
+    for (const L of net.lines) baked += this.bakeTrestles(B, L, river, ox, oz);
     for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; }
     if (baked > 0) {
       inst.mesh = B.build();
@@ -217,19 +244,17 @@ export class Transit {
 
   /** true while a train is near enough that the barriers close and the
    * lamps warn (the car AI holds at the same distance) */
-  blocked(c: Crossing, trains: Trains): boolean {
-    return trains.distTo(c.d) < CROSSING_WARN_DIST;
+  blocked(inst: CityInst, c: Crossing, rail: Railway): boolean {
+    return rail.distTo(inst.bx, inst.by, c.line, c.d) < CROSSING_WARN_DIST;
   }
 
-  /** `trainsFor(key)` is the railway of city "bx,by" (null: its island is
-   * dormant — no train can be near, the booms stay up) */
-  update(dt: number, elapsed: number, trainsFor: (key: string) => Trains | null): void {
-    for (const [key, inst] of this.cities) {
-      const trains = trainsFor(key);
+  /** the lamps + booms of every built city follow the world's trains */
+  update(dt: number, elapsed: number, rail: Railway): void {
+    for (const inst of this.cities.values()) {
       // crossing lamps: alternate flash while a train is near, dim otherwise;
       // the booms swing down for the train and lift again once it is past
       for (const sig of inst.signals) {
-        const warn = !!trains && this.blocked(sig.c, trains);
+        const warn = this.blocked(inst, sig.c, rail);
         const phase = Math.floor(elapsed * 2.6) % 2;
         for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
         for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;

@@ -1,13 +1,16 @@
-// Checkpoint courses: a seeded chain of 6 gates to pass in order — arches over
-// the streets for the police car, rings in the sky for the police helicopter
-// and the plane, buoy pairs off the shore for the boat. The next gate glows
-// and carries a beacon; the guide arrows point at it. Pass them all and a new
-// course is laid.
+// Checkpoint courses: 6 seeded gates, all live at once and passed in any
+// order — arches over the streets, rings in the sky over the island for the
+// plane, buoy pairs along the sailing lane for the boat. Every gate still to
+// pass glows (the arches and buoys carry a beacon each); the guide arrows
+// point at the nearest one — for the plane the nearest AHEAD, held until it
+// is passed or another is much nearer, so its auto-climb doesn't flip-flop
+// between rings. Pass them all and a new course is laid (G3).
 import * as THREE from 'three';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { citySeed, type CityRef } from '../../worlds/cityGrid.js';
 import { graphFor, leaving, type SEdge } from '../../worlds/streetGraph.js';
 import { ISLAND } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
 import { boatLoop, hullObject } from './sea.js';
 import { makeBeacon, pulseBeacon } from './guide3d.js';
 import { HELI_ALT } from './player.js';
@@ -26,6 +29,8 @@ export interface Gate {
   yaw: number;
   group: THREE.Group;
   paint: THREE.Mesh[];
+  beacon: THREE.Mesh | null;
+  passed: boolean;
 }
 
 const litMat = new THREE.MeshLambertMaterial({ color: LIT, emissive: 0x6b4a00 });
@@ -37,69 +42,84 @@ const bannerGeo = new THREE.BoxGeometry(16.2, 1.1, 0.35);
 
 export class Course {
   gates: Gate[] = [];
-  next = 0;
-  private beacon: THREE.Mesh;
   private chain = 0;
+  /** the gate the guide (and the plane's auto-climb) aims at */
+  private aimed: Gate | null = null;
 
-  constructor(private scene: THREE.Scene, readonly kind: CourseKind, private plane = false) {
-    this.beacon = makeBeacon(LIT);
-    this.beacon.visible = false;
-    scene.add(this.beacon);
+  constructor(private scene: THREE.Scene, readonly kind: CourseKind, private plane = false) {}
+
+  /** gates passed so far */
+  get passedCount(): number { return this.gates.reduce((n, g) => n + (g.passed ? 1 : 0), 0); }
+
+  /** every gate passed (or no course laid) */
+  get done(): boolean { return this.gates.every(g => g.passed); }
+
+  /** the gate to aim for from (x, z) heading `heading` (world): the nearest
+   * unpassed one, weighted toward the ones ahead, and kept until it's
+   * passed or another scores a third better */
+  aim(x: number, z: number, heading: number): Gate | null {
+    const score = (g: Gate): number => {
+      const d = Math.hypot(g.x - x, g.z - z);
+      const c = d > 1 ? (Math.sin(heading) * (g.x - x) + Math.cos(heading) * (g.z - z)) / d : 1;
+      return d * (1.6 - 0.6 * c);
+    };
+    let best: Gate | null = null, bs = Infinity;
+    for (const g of this.gates) {
+      if (g.passed) continue;
+      const sc = score(g);
+      if (sc < bs) { bs = sc; best = g; }
+    }
+    if (!this.aimed || this.aimed.passed || (best && bs < 0.67 * score(this.aimed))) this.aimed = best;
+    return this.aimed;
   }
 
-  /** gates still to pass */
-  get remaining(): number { return this.gates.length - this.next; }
+  /** the gate aimed at last (see aim) */
+  get target(): Gate | null { return this.aimed && !this.aimed.passed ? this.aimed : null; }
 
-  /** the gate to fly/drive/sail through next */
-  target(): Gate | null { return this.gates[this.next] ?? null; }
-
-  /** lay a fresh course in the player's city, starting ahead of them */
+  /** lay a fresh course in the player's city, around them */
   start(city: CityRef, x: number, z: number, heading: number): void {
     this.clear();
     const r = rng(chunkSeed(citySeed(city.bx, city.by), 0xc0c5e, this.chain++));
     const spots = this.kind === 'gates' ? this.streetSpots(r, city, x, z, heading)
-      : this.kind === 'rings' ? this.skySpots(r, city, x, z, heading)
+      : this.kind === 'rings' ? this.skySpots(r, city, x, z)
         : this.seaSpots(city, x, z, heading);
     for (const s of spots) this.gates.push(this.makeGate(s.x, s.z, s.y, s.yaw));
-    this.next = 0;
     this.paint();
   }
 
   clear(): void {
-    for (const g of this.gates) this.scene.remove(g.group);
+    for (const g of this.gates) {
+      this.scene.remove(g.group);
+      if (g.beacon) this.scene.remove(g.beacon);
+    }
     this.gates = [];
-    this.next = 0;
-    this.beacon.visible = false;
+    this.aimed = null;
   }
 
-  /** advance when the vehicle (centre at x, y, z) passes the next gate;
-   * returns 'passed' / 'finished' on those frames */
+  /** pass any gate the vehicle (centre at x, y, z) is in; returns 'passed' /
+   * 'finished' on those frames */
   update(elapsed: number, x: number, y: number, z: number): 'passed' | 'finished' | null {
-    const g = this.target();
-    if (!g) return null;
+    let out: 'passed' | 'finished' | null = null;
     for (const [k, gate] of this.gates.entries()) {
+      if (gate.passed) continue;
       if (this.kind === 'rings') gate.group.rotation.z = Math.sin(elapsed * 1.5 + k) * 0.05;
       else gate.group.position.y = this.kind === 'buoys' ? Math.sin(elapsed * 1.3 + k) * 0.15 : 0;
+      const flat = Math.hypot(x - gate.x, z - gate.z);
+      if (gate.beacon) pulseBeacon(gate.beacon, elapsed, k, flat + 20);
+      const d = this.kind === 'rings' ? Math.hypot(x - gate.x, (y - gate.y) * 0.8, z - gate.z) : flat;
+      if (d > (this.kind === 'rings' ? 6 : 8.5)) continue;
+      gate.passed = true;
+      this.scene.remove(gate.group);
+      if (gate.beacon) this.scene.remove(gate.beacon);
+      out = 'passed';
     }
-    const d = this.kind === 'rings'
-      ? Math.hypot(x - g.x, (y - g.y) * 0.8, z - g.z)
-      : Math.hypot(x - g.x, z - g.z);
-    pulseBeacon(this.beacon, elapsed, 0, Math.hypot(x - g.x, z - g.z) + 20);
-    if (d > (this.kind === 'rings' ? 6 : 8.5)) return null;
-    this.scene.remove(g.group);
-    this.next++;
-    this.paint();
-    return this.next >= this.gates.length ? 'finished' : 'passed';
+    if (out && this.done) out = 'finished';
+    return out;
   }
 
-  /** the next gate glows and wears the beacon; the rest wait, pale */
+  /** every gate still to pass glows */
   private paint(): void {
-    this.gates.forEach((g, k) => {
-      for (const m of g.paint) m.material = k === this.next ? litMat : dimMat;
-    });
-    const t = this.target();
-    this.beacon.visible = !!t && this.kind !== 'rings';
-    if (t) this.beacon.position.set(t.x, 0, t.z);
+    for (const g of this.gates) for (const m of g.paint) m.material = g.passed ? dimMat : litMat;
   }
 
   private makeGate(x: number, z: number, y: number, yaw: number): Gate {
@@ -143,7 +163,14 @@ export class Course {
     }
     group.rotation.y = yaw;
     this.scene.add(group);
-    return { x, z, y, yaw, group, paint };
+    // the arches and buoys carry a tall beacon each (rings hang in the sky)
+    let beacon: THREE.Mesh | null = null;
+    if (this.kind !== 'rings') {
+      beacon = makeBeacon(LIT);
+      beacon.position.set(x, 0, z);
+      this.scene.add(beacon);
+    }
+    return { x, z, y, yaw, group, paint, beacon, passed: false };
   }
 
   /** gates at street mid-blocks along a random drive (no U-turns, clear of
@@ -174,27 +201,25 @@ export class Course {
     return out;
   }
 
-  /** rings on a meandering flight over the island, 110-170 m apart */
-  private skySpots(r: Rng, city: CityRef, x: number, z: number, heading: number): Array<{ x: number; z: number; y: number; yaw: number }> {
+  /** rings spread over the island around the plane: over land, at least
+   * 120 m apart and 90-420 m from it, each facing the plane */
+  private skySpots(r: Rng, city: CityRef, x: number, z: number): Array<{ x: number; z: number; y: number; yaw: number }> {
+    const coast = coastFor(city.bx, city.by);
+    const px = x - city.ox, pz = z - city.oz;
     const out: Array<{ x: number; z: number; y: number; yaw: number }> = [];
-    let px = x - city.ox, pz = z - city.oz, h = heading;
-    for (let k = 0; k < GATES; k++) {
-      h += (r() - 0.5) * 2 * (0.35 + 0.8 * r());
-      const step = 110 + r() * 60;
-      let nx = px + Math.sin(h) * step, nz = pz + Math.cos(h) * step;
-      // bounce off the island's edge so the course stays over the city
-      if (nx < 70 || nx > ISLAND - 70) { h = -h; nx = Math.max(70, Math.min(ISLAND - 70, nx)); }
-      if (nz < 70 || nz > ISLAND - 70) { h = Math.PI - h; nz = Math.max(70, Math.min(ISLAND - 70, nz)); }
-      const yaw = Math.atan2(nx - px, nz - pz);
+    for (let tries = 0; tries < 400 && out.length < GATES; tries++) {
+      const a = r() * Math.PI * 2, d = 90 + r() * 330;
+      const nx = px + Math.sin(a) * d, nz = pz + Math.cos(a) * d;
+      if (nx < 70 || nx > ISLAND - 70 || nz < 70 || nz > ISLAND - 70 || !coast.inLand(nx, nz, 40)) continue;
+      if (out.some(o => Math.hypot(o.x - city.ox - nx, o.z - city.oz - nz) < 120)) continue;
       const y = this.plane ? 24 + r() * 22 : HELI_ALT + 2;
-      out.push({ x: nx + city.ox, z: nz + city.oz, y, yaw });
-      px = nx; pz = nz; h = yaw;
+      out.push({ x: nx + city.ox, z: nz + city.oz, y, yaw: Math.atan2(nx - px, nz - pz) });
     }
     return out;
   }
 
-  /** buoy gates along the offshore sailing lane, ~110 m apart, heading the
-   * way the boat is pointing */
+  /** buoy gates along the offshore sailing lane, ~110 m apart, both ways
+   * from the boat, facing along the lane */
   private seaSpots(city: CityRef, x: number, z: number, heading: number): Array<{ x: number; z: number; y: number; yaw: number }> {
     const loop = boatLoop(city.bx, city.by);
     const n = loop.length;
@@ -205,7 +230,9 @@ export class Course {
     const dir = Math.sin(heading) * (b.x - a.x) + Math.cos(heading) * (b.z - a.z) >= 0 ? 1 : -1;
     const out: Array<{ x: number; z: number; y: number; yaw: number }> = [];
     for (let k = 1; k <= GATES; k++) {
-      const i = (((k0 + dir * k * 36) % n) + n) % n;
+      // alternating ahead / behind: 1, -1, 2, -2, 3, -3 lane steps
+      const step = (k % 2 ? 1 : -1) * Math.ceil(k / 2);
+      const i = (((k0 + dir * step * 36) % n) + n) % n;
       const p = loop[i], q = loop[(i + dir + n) % n];
       out.push({ x: p.x + city.ox, z: p.z + city.oz, y: 0, yaw: Math.atan2(q.x - p.x, q.z - p.z) });
     }

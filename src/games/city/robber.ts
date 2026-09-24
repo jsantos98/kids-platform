@@ -6,6 +6,7 @@
 // the police car flat out, so a kid who keeps after it always catches it.
 // Catching: the police car stays within CATCH_R of it for CATCH_T seconds
 // in all; the helicopter keeps it inside its searchlight for as long.
+// Several are on the run at once (ROBBERS); each keeps its own progress.
 import * as THREE from 'three';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
@@ -13,6 +14,8 @@ import { graphFor, type StreetGraph, type SEdge } from '../../worlds/streetGraph
 
 export const CATCH_R = 9;
 export const CATCH_T = 4;
+/** getaway cars on the run at once (G7) */
+export const ROBBERS = 3;
 const FLEE_R = 90;
 const V_FLEE = 9.5, V_CRUISE = 5.5; // m/s (the police car tops out at 12.5)
 const LANE = 3.5;
@@ -52,8 +55,10 @@ export class Robber {
   }
 
   /** start a getaway on island (bx, by) (world offset ox, oz), on a street
-   * 120-260 m from the police at (px, pz) */
-  spawn(bx: number, by: number, ox: number, oz: number, px: number, pz: number, seed: number): void {
+   * 120-260 m from the police at (px, pz) and 80 m from the other getaway
+   * cars (`avoid`, world) */
+  spawn(bx: number, by: number, ox: number, oz: number, px: number, pz: number, seed: number,
+        avoid: Array<{ x: number; z: number }> = []): void {
     this.graph = graphFor(bx, by);
     this.ox = ox; this.oz = oz;
     this.r = rng(seed);
@@ -62,7 +67,7 @@ export class Robber {
       if (g.nodes[e.a].mouth || g.nodes[e.b].mouth || e.len < 30) return false;
       const m = g.sample(e, e.len / 2);
       const d = Math.hypot(m.x + ox - px, m.z + oz - pz);
-      return d > 120 && d < 260;
+      return d > 120 && d < 260 && avoid.every(q => Math.hypot(m.x + ox - q.x, m.z + oz - q.z) > 80);
     });
     const pool = ok.length ? ok : g.edges.filter(e => !g.nodes[e.a].mouth && !g.nodes[e.b].mouth);
     this.edge = pool[(this.r() * pool.length) | 0];

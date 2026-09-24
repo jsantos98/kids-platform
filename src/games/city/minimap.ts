@@ -34,7 +34,9 @@ export class Minimap {
   }
 
   constructor(canvas: HTMLCanvasElement, private missions: Missions,
-              private seaBoats: () => Array<{ x: number; z: number }> = () => []) {
+              private seaBoats: () => Array<{ x: number; z: number }> = () => [],
+              /** other live targets (getaway cars, course gates), world */
+              private goals: () => Array<{ x: number; z: number; color: string }> = () => []) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
@@ -194,6 +196,22 @@ export class Minimap {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(tx(o.pos.x), ty(o.pos.z), 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // getaway cars, course gates
+    // (bigger than the light dots, ringed dark and white so they stand out)
+    for (const gl of this.goals()) {
+      ctx.beginPath();
+      ctx.arc(tx(gl.x), ty(gl.z), 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#2d3142';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(tx(gl.x), ty(gl.z), 5.2, 0, Math.PI * 2);
+      ctx.fillStyle = gl.color;
+      ctx.strokeStyle = '#fffdf8';
+      ctx.lineWidth = 1.5;
       ctx.fill();
       ctx.stroke();
     }

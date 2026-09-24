@@ -30,7 +30,7 @@ import { Boarding } from './boarding.js';
 import { IslandPrefetch } from './prefetch.js';
 import { exportBakedTemplates } from '../../engine/assets.js';
 import { buildIslandData, islandReady, type IslandData } from '../../worlds/islandData.js';
-import { Robber, CATCH_R, CATCH_T } from './robber.js';
+import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
 import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
@@ -326,7 +326,7 @@ if (q.get('debugsea') === '1') {
     /** islands the world worker has built so far */
     prefetched: () => prefetch.done,
     /** police modes: the getaway car */
-    robber: () => robber,
+    robbers: () => robbers,
     /** the platforms' passengers */
     boarding: () => boarding.list(),
     /** race mode: the race on this island */
@@ -355,7 +355,11 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => islands.boatDots());
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => islands.boatDots(),
+  () => [
+    ...robbers.filter(r => r.active).map(r => ({ x: r.x, z: r.z, color: '#7fb453' })),
+    ...(course?.gates ?? []).filter(g => !g.passed).map(g => ({ x: g.x, z: g.z, color: '#ffd35c' })),
+  ]);
 
 // ---- the city grid: drive across a strait and the next city wakes up.
 // The per-city systems (plan, shore scenery, transit furniture, minimap,
@@ -363,11 +367,25 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
 // already awake as we approached (islands); the seed is derived from the
 // city's coordinates, so city (3, -2) is always the same city. ----
 let curCity: CityRef = cityAt(spawn.x, spawn.z);
-/** police modes: the getaway car on this island */
-const robber = MODE.chase ? new Robber(scene) : null;
-let robberWait = 0, robberCount = 0;
-const newRobber = (c: CityRef): void => {
-  robber?.spawn(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z, citySeed(c.bx, c.by) + 7919 * ++robberCount);
+/** police modes: the getaway cars on this island (several on the run at
+ * once; the guide points at the nearest) */
+const robbers: Robber[] = MODE.chase ? Array.from({ length: ROBBERS }, () => new Robber(scene)) : [];
+const robberWait = robbers.map(() => 0);
+let robberCount = 0;
+/** put getaway car k on the run on island c, away from the others */
+const newRobber = (k: number, c: CityRef): void => {
+  const others = robbers.filter((o, j) => j !== k && o.active).map(o => ({ x: o.x, z: o.z }));
+  robbers[k].spawn(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z, citySeed(c.bx, c.by) + 7919 * ++robberCount, others);
+};
+/** the nearest getaway car on the run, or null */
+const nearestRobber = (x: number, z: number): Robber | null => {
+  let best: Robber | null = null, bd = Infinity;
+  for (const r of robbers) {
+    if (!r.active) continue;
+    const d = Math.hypot(r.x - x, r.z - z);
+    if (d < bd) { bd = d; best = r; }
+  }
+  return best;
 };
 /** race mode: the race on this island's circuit (none elsewhere) */
 let race: Race | null = null;
@@ -394,7 +412,8 @@ function applyCity(c: CityRef): void {
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
   missions.setCity(c.bx, c.by, c.ox, c.oz);
   boarding.setCity(c.bx, c.by, c.ox, c.oz);
-  if (robber) newRobber(c);
+  for (const r of robbers) r.hide();
+  robbers.forEach((_, k) => newRobber(k, c));
   const s = modeSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
@@ -592,7 +611,7 @@ const tick = (): void => {
     if (race?.frozen) { input.gas = 0; input.brake = 0; input.steer = 0; st.v = 0; }
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
     const wasCrashing = player.crashT > 0;
-    const ring = course?.target();
+    const ring = course?.aim(st.x, st.z, st.heading);
     const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
       audio.thud();
@@ -649,28 +668,29 @@ const tick = (): void => {
 
   // the robber chase: the police car stays close, the helicopter keeps the
   // getaway car in its searchlight — CATCH_T seconds in all and it's caught
-  if (robber) {
-    if (robber.active) {
-      robber.update(dt, elapsed, st.x, st.z, director.busy);
+  // (each keeps its own progress; a caught one is replaced 3 s after its scene)
+  robbers.forEach((rb, k) => {
+    if (rb.active) {
+      rb.update(dt, elapsed, st.x, st.z, director.busy);
       const lit = V.kind === 'heli'
-        ? Math.hypot(robber.x - (st.x + Math.sin(st.heading) * 7), robber.z - (st.z + Math.cos(st.heading) * 7)) < 8
-        : Math.hypot(robber.x - st.x, robber.z - st.z) < CATCH_R;
-      if (lit && mode === 'drive' && player.crashT <= 0) robber.caught += dt;
-      if (robber.caught >= CATCH_T && mode === 'drive') {
-        robber.hide();
+        ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * 7), rb.z - (st.z + Math.cos(st.heading) * 7)) < 8
+        : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
+      if (lit && mode === 'drive' && player.crashT <= 0) rb.caught += dt;
+      if (rb.caught >= CATCH_T && mode === 'drive') {
+        rb.hide();
         mode = 'activity';
-        const seed = robberCount;
+        const seed = robberCount + k;
         director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
           earnStar('🚓 ROBBER CAUGHT!', player.car.position.clone());
           mode = 'drive';
-          robberWait = 3;
+          robberWait[k] = 3;
         });
       }
     } else if (!director.busy) {
-      robberWait -= dt;
-      if (robberWait <= 0) newRobber(curCity);
+      robberWait[k] -= dt;
+      if (robberWait[k] <= 0) newRobber(k, curCity);
     }
-  }
+  });
 
   // road vehicles ride the causeway decks up over the raised span
   let deckPitch = 0;
@@ -695,7 +715,7 @@ const tick = (): void => {
   } else if (V.kind === 'plane') {
     // bank into the turn, nose follows the climb, propeller spins
     player.car.rotation.z = input.steer * 0.45;
-    const ring = course?.target();
+    const ring = course?.target;
     player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
     (player.car.userData.prop as THREE.Object3D | undefined)!.rotation.z = elapsed * 40;
   } else if (V.kind === 'boat') {
@@ -795,7 +815,7 @@ const tick = (): void => {
   document.body.classList.toggle('in-scene', !!view.scene);
 
   // a finished course is followed by a fresh one after a short cheer
-  if (course && !course.target()) {
+  if (course && course.done) {
     courseWait -= dt;
     if (courseWait <= 0) course.start(curCity, st.x, st.z, st.heading);
   }
@@ -821,9 +841,10 @@ const tick = (): void => {
     pulseBeacon(o.beacon, elapsed, o.index, busy ? 0 : o.d);
   }
   // the course gate / station the mode is heading for (when it has one)
-  const gate = course?.target() ?? null;
+  const gate = course?.target ?? null;
   const station = V.kind === 'rail' ? nextStation() : null;
-  const goal = robber?.active ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
+  const robber = nearestRobber(st.x, st.z);
+  const goal = robber ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
     : near ? { x: near.pos.x, z: near.pos.z } : null;
   const goalD = goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
   // where the guidance points: straight at the goal when flying or close,
@@ -851,8 +872,8 @@ const tick = (): void => {
     promptEl.style.display = view.scene ? 'block' : 'none';
     promptText.textContent = view.prompt;
     promptFill.style.width = `${Math.min(100, view.progress * 100)}%`;
-  } else if (robber?.active) {
-    // ---- the chase ----
+  } else if (robber) {
+    // ---- the chase: the nearest getaway car ----
     const rd = Math.hypot(robber.x - st.x, robber.z - st.z);
     showGuide('🦹', rd, Math.round((5 * robber.caught) / CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
@@ -877,12 +898,12 @@ const tick = (): void => {
       : rv.phase === 'finished' ? (rv.finalPlace === 1 ? '🏆 YOU WON!' : `🏁 ${ordinal(rv.finalPlace)} PLACE!`)
       : raceMsgT > 0 ? raceMsg : `LAP ${rv.lap}/${LAPS} — ${ordinal(rv.place)}`;
   } else if (course && gate) {
-    // ---- checkpoint course: through the glowing gate, then the next ----
+    // ---- checkpoint course: every glowing gate, in any order ----
     showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,
-      Math.round((5 * course.next) / course.gates.length));
+      Math.round((5 * course.passedCount) / course.gates.length));
     promptText.textContent = course.kind === 'gates' ? 'DRIVE THROUGH THE GATES!'
       : course.kind === 'rings' ? 'FLY THROUGH THE RINGS!' : 'SAIL THROUGH THE BUOYS!';
-    promptFill.style.width = `${(100 * course.next) / course.gates.length}%`;
+    promptFill.style.width = `${(100 * course.passedCount) / course.gates.length}%`;
     const res = course.update(elapsed, st.x, st.alt + 2, st.z);
     if (res === 'passed') particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z));
     if (res === 'finished') {

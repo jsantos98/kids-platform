@@ -139,8 +139,14 @@ const BRIDGE_STEEL = 0x8f97a3;
 const SIDEWALK = 0xa1a9c9; // the road kit's pavement (tile-low) colour
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
-/** the kit road's asphalt, for the procedural polygon pads */
-const ROAD_ASPHALT = 0x5b6170;
+/** the kit road's own palette (city-roads colormap), for the procedural
+ * polygon pads: asphalt, the darker gutter band, the kerb's top and face */
+const ROAD_ASPHALT = 0x666b80;
+const ROAD_GUTTER = 0x515566;
+const ROAD_KERB = 0xbdc6ee;
+const ROAD_KERB_FACE = 0x9da4c4;
+/** the kit straight's cross-section (m from its edge): kerb, then gutter */
+const KERB_W = 1.4, GUTTER_W = 1.4;
 
 export function slabColor(d: District): number {
   switch (d) {
@@ -361,7 +367,9 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
   // (RAIL_TOP) still ride above it.
   const ROAD_Y = 0.1;                // kit pieces rest on the slab top
   const ROAD_THICK = 4;
-  const PAD_Y = 0.18;                // polygon pads: flush with the kit asphalt
+  // polygon pads: flush with the kit asphalt (0.01 native units x4 up from
+  // ROAD_Y), the kerb band 4 cm higher, like the kit's
+  const PAD_Y = ROAD_Y + 0.04, KERB_Y = ROAD_Y + 0.08;
   const R = TPL.road;
   const hasRoadKit = !!(R.straight && R.cross && R.tee && R.bend && R.end && R.round);
   const inChunk = (x: number, z: number): boolean => x >= X0 && x < X0 + CH && z >= Z0 && z < Z0 + CH;
@@ -385,20 +393,74 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     if (len < 0.05) return;
     B.box(w, h, len, color, (p.x + q.x) / 2, y, (p.z + q.z) / 2, 0, Math.atan2(q.x - p.x, q.z - p.z), 0);
   };
+  /** an oblique pad dressed as the kit straight is across: the kit's
+   * asphalt, and along every kerb edge (all but the 14 m arm mouths) the
+   * gutter band and the raised kerb, mitred where two kerbs meet — so the
+   * straights' kerbs run on round the corner instead of stopping at a bare
+   * slab */
+  function padSurface(raw: Array<{ x: number; z: number }>): void {
+    const poly = raw.filter((q, i) => Math.hypot(q.x - raw[(i + 1) % raw.length].x, q.z - raw[(i + 1) % raw.length].z) > 0.05);
+    const N = poly.length;
+    if (N < 3) return;
+    flat(poly, ROAD_ASPHALT, PAD_Y);
+    let area = 0;
+    for (let i = 0; i < N; i++) { const a = poly[i], b = poly[(i + 1) % N]; area += a.x * b.z - b.x * a.z; }
+    const inSg = area > 0 ? 1 : -1; // which side of each edge is inside
+    const kerb = poly.map((a, i) => {
+      const b = poly[(i + 1) % N];
+      return Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - ROAD_HALF * 2) >= 0.05;
+    });
+    /** vertex i moved in by w off every kerb edge meeting it (the mouths stay put) */
+    const inset = (i: number, w: number): { x: number; z: number } => {
+      const lines = [(i - 1 + N) % N, i].map(k => {
+        const a = poly[k], b = poly[(k + 1) % N];
+        const L = Math.hypot(b.x - a.x, b.z - a.z);
+        const u = { x: (b.x - a.x) / L, z: (b.z - a.z) / L };
+        const o = kerb[k] ? w : 0;
+        // the edge's line moved in by o, through the moved vertex i
+        return { p: { x: poly[i].x - u.z * inSg * o, z: poly[i].z + u.x * inSg * o }, u };
+      });
+      const [l1, l2] = lines;
+      const den = l1.u.x * l2.u.z - l1.u.z * l2.u.x;
+      // (in line: both moved the same way; take the one that moved)
+      if (Math.abs(den) < 1e-6) return kerb[i] ? l2.p : l1.p;
+      const t = ((l2.p.x - l1.p.x) * l2.u.z - (l2.p.z - l1.p.z) * l2.u.x) / den;
+      return { x: l1.p.x + l1.u.x * t, z: l1.p.z + l1.u.z * t };
+    };
+    const k1 = poly.map((_, i) => inset(i, KERB_W));
+    const k2 = poly.map((_, i) => inset(i, KERB_W + GUTTER_W));
+    for (let i = 0; i < N; i++) {
+      if (!kerb[i]) continue;
+      const j = (i + 1) % N;
+      flat([k1[i], k1[j], k2[j], k2[i]], ROAD_GUTTER, PAD_Y + 0.004);
+      flat([poly[i], poly[j], k1[j], k1[i]], ROAD_KERB, KERB_Y);
+      // the kerb's face, down to the gutter
+      const a = k1[i], b = k1[j];
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([
+        a.x, PAD_Y, a.z, b.x, PAD_Y, b.z, b.x, KERB_Y, b.z,
+        a.x, PAD_Y, a.z, b.x, KERB_Y, b.z, a.x, KERB_Y, a.z,
+      ], 3));
+      g.computeVertexNormals();
+      // (face the pad's middle, whichever way the quad wound)
+      const nrm = g.attributes.normal as THREE.BufferAttribute;
+      const toIn = { x: k2[i].x - a.x, z: k2[i].z - a.z };
+      if (nrm.getX(0) * toIn.x + nrm.getZ(0) * toIn.z < 0) {
+        g.setAttribute('position', new THREE.Float32BufferAttribute([
+          a.x, PAD_Y, a.z, b.x, KERB_Y, b.z, b.x, PAD_Y, b.z,
+          a.x, PAD_Y, a.z, a.x, KERB_Y, a.z, b.x, KERB_Y, b.z,
+        ], 3));
+        g.computeVertexNormals();
+      }
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2)); // (merged with the rest)
+      B.add(g, ROAD_KERB_FACE);
+    }
+  }
   for (const p of chunkRoadPieces(plan, cx, cz)) {
     // past the shore a causeway avenue is a deck, not road tiles
     if (occ.bits(p.x, p.z) & SEA) continue;
     if (p.kind === 'pad') {
-      flat(p.poly!, ROAD_ASPHALT, PAD_Y);
-      // kerb strips along the corners between arms
-      const poly = p.poly!;
-      for (let i = 0; i < poly.length; i++) {
-        const a = poly[i], b = poly[(i + 1) % poly.length];
-        // the arm ends (carriageway mouths) carry no kerb: they are exactly
-        // 14 m across and look out along an arm
-        if (Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - ROAD_HALF * 2) < 0.05) continue;
-        strip(a, b, 0.45, 0.12, CAUSEWAY_CURB, PAD_Y + 0.02);
-      }
+      padSurface(p.poly!);
       continue;
     }
     if (hasRoadKit) {

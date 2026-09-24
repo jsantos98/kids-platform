@@ -60,6 +60,8 @@ export interface RailRoute {
    * crossing hard by a junction, a long hug) — the plan drops them */
   vetoed: number[];
   control: Array<{ x: number; z: number }>;
+  /** the line as plain data (absent on a fallback that never shipped) */
+  data?: RailRouteData;
 }
 
 /** both lines of one island + the diamond where they cross */
@@ -72,6 +74,8 @@ export interface RailNet {
   near(x: number, z: number, r: number): boolean;
   /** heading of the nearest line at (x, z) */
   headingAt(x: number, z: number): number;
+  /** the net as plain data (the world worker sends this) */
+  data: RailNetData;
 }
 
 /** where the two lines enter / leave the island: the stems' across-axis
@@ -96,6 +100,9 @@ export function clearRailCache(): void { cache.clear(); }
 export function railNetFor(bx: number, by: number): RailNet {
   const key = `${bx},${by}`;
   let net = cache.get(key);
+  // (least recently used goes first: a hit moves to the back, so the
+  // island the kid is on is never the one evicted)
+  if (net) { cache.delete(key); cache.set(key, net); }
   if (!net) {
     net = buildNet(bx, by);
     cache.set(key, net);
@@ -420,15 +427,7 @@ function buildNet(bx: number, by: number): RailNet {
   const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z };
   const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
   const ew = buildLine(seed, fEW, streets, river, zones, coast, ns);
-  const both: [RailRoute, RailRoute] = [ns, ew];
-  return {
-    lines: both,
-    vetoed: new Set([...ns.vetoed, ...ew.vetoed]),
-    diamond: { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] },
-    distTo: (x, z) => Math.min(ns.distTo(x, z), ew.distTo(x, z)),
-    near: (x, z, rr) => ns.near(x, z, rr) || ew.near(x, z, rr),
-    headingAt: (x, z) => (ns.distTo(x, z) <= ew.distTo(x, z) ? ns : ew).headingAt(x, z),
-  };
+  return makeNet(ns, ew, { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] }, bx, by);
 }
 
 function buildLine(
@@ -1032,12 +1031,28 @@ function finalize(
       s += seg;
     }
   }
+  return makeRoute({ kind: f.kind, raw: shaped, rimOut, vetoed: [...veto].sort((p, q) => p - q), control });
+}
+
+/** a line as plain data: its final polyline and bookkeeping */
+export interface RailRouteData {
+  kind: LineKind;
+  raw: Array<{ x: number; z: number }>;
+  rimOut: number;
+  vetoed: number[];
+  control: Array<{ x: number; z: number }>;
+}
+
+/** the line's queries over its polyline (the generator and an installed
+ * worker result share this) */
+function makeRoute(d: RailRouteData): RailRoute {
+  const p2 = polyPath(d.raw);
   return {
-    kind: f.kind,
+    kind: d.kind,
     path: p2,
     total: p2.total,
     pts: p2.pts,
-    sample: d => p2.sample(d),
+    sample: dd => p2.sample(dd),
     distTo(x, z) { return Math.sqrt(p2.nearest(x, z).d2); },
     near(x, z, r) { return p2.within(x, z, r); },
     headingAt(x, z) { return p2.nearest(x, z).p.h; },
@@ -1047,10 +1062,42 @@ function finalize(
       for (let k = 1; k <= n.i; k++) s += Math.hypot(p2.pts[k].x - p2.pts[k - 1].x, p2.pts[k].z - p2.pts[k - 1].z);
       return s + Math.hypot(n.p.x - p2.pts[n.i].x, n.p.z - p2.pts[n.i].z);
     },
-    rimOut,
-    vetoed: [...veto].sort((p, q) => p - q),
-    control,
+    rimOut: d.rimOut,
+    vetoed: d.vetoed,
+    control: d.control,
+    data: d,
   };
+}
+
+/** both lines + the diamond as plain data (the world worker sends this) */
+export interface RailNetData {
+  bx: number;
+  by: number;
+  lines: [RailRouteData, RailRouteData];
+  diamond: { x: number; z: number; d: [number, number] };
+}
+
+function makeNet(ns: RailRoute, ew: RailRoute, diamond: RailNetData['diamond'], bx: number, by: number): RailNet {
+  return {
+    lines: [ns, ew],
+    vetoed: new Set([...ns.vetoed, ...ew.vetoed]),
+    diamond,
+    distTo: (x, z) => Math.min(ns.distTo(x, z), ew.distTo(x, z)),
+    near: (x, z, rr) => ns.near(x, z, rr) || ew.near(x, z, rr),
+    headingAt: (x, z) => (ns.distTo(x, z) <= ew.distTo(x, z) ? ns : ew).headingAt(x, z),
+    data: { bx, by, lines: [ns.data!, ew.data!], diamond },
+  };
+}
+
+/** is island (bx, by)'s rail net already built? */
+export function hasRailNet(bx: number, by: number): boolean { return cache.has(`${bx},${by}`); }
+
+/** install a rail net the world worker built (a no-op if one is here) */
+export function installRailNet(d: RailNetData): void {
+  const k = `${d.bx},${d.by}`;
+  if (cache.has(k)) return;
+  cache.set(k, makeNet(makeRoute(d.lines[0]), makeRoute(d.lines[1]), d.diamond, d.bx, d.by));
+  if (cache.size > 48) cache.delete(cache.keys().next().value as string);
 }
 
 /** half-length of the straightened approach either side of a crossing (m) */

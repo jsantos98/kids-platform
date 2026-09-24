@@ -15,6 +15,10 @@ import type { Railway } from '../railway.js';
 /** a dormant island catches up this much on waking, at most (seconds) */
 const CATCH_UP = 90;
 const STEP = 0.25;
+/** the catch-up runs a few milliseconds a frame, not all in the waking
+ * frame (a full 90 s catch-up is ~3 s of work): the island is still ~200 m
+ * away when it wakes, and it steps exactly as it would have in one go */
+const CATCH_UP_BUDGET_MS = 4;
 
 export interface SimOptions {
   /** extra car models in the fleet (the fire truck when the kid isn't driving it) */
@@ -38,6 +42,8 @@ export class IslandSim {
   active = false;
   /** the game's elapsed time when this island went dormant */
   private sleptAt = 0;
+  /** still catching up after waking (not drawn until it has) */
+  private lagging = false;
 
   constructor(scene: THREE.Scene, readonly bx: number, readonly by: number, private opts: SimOptions) {
     this.key = `${bx},${by}`;
@@ -60,15 +66,30 @@ export class IslandSim {
       return;
     }
     // catch up: whatever happened while nobody was watching, fast (the
-    // last CATCH_UP seconds of it, on the game clock)
+    // last CATCH_UP seconds of it, on the game clock) — spread over the
+    // next frames (update)
     const gap = Math.min(CATCH_UP, elapsed - this.sleptAt);
-    for (let t = elapsed - gap; t < elapsed; t += STEP) this.tick(STEP, t, null, null, false);
+    // (the first catch-up step lands on elapsed - gap, as a single loop would)
+    this.simTime = elapsed - gap - STEP;
+    this.lagging = gap >= STEP;
   }
+
+  /** still catching up after waking */
+  get catchingUp(): boolean { return this.lagging; }
 
   /** one frame: `player` is where the kid is (world), `threat` the ground
    * vehicle people scurry from (null when flying/sailing) */
   update(dt: number, elapsed: number, player: THREE.Vector3, threat: THREE.Vector3 | null): void {
     if (!this.active) return;
+    if (this.lagging) {
+      const t0 = performance.now();
+      while (this.simTime + STEP < elapsed && performance.now() - t0 < CATCH_UP_BUDGET_MS) {
+        this.tick(STEP, this.simTime + STEP, null, null, false);
+      }
+      if (this.simTime + STEP < elapsed) return;
+      this.lagging = false;
+      dt = elapsed - this.simTime;
+    }
     this.tick(dt, elapsed, player, threat, true);
   }
 

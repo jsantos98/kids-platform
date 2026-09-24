@@ -55,28 +55,45 @@ const MAX_CITIES = 4;
 
 export class Transit {
   private cities = new Map<string, CityInst>();
+  /** sets being built a few milliseconds a frame (prepare / pump) */
+  private pending = new Map<string, Generator<void, CityInst>>();
+  /** the island the kid is on: never the one evicted */
+  private current = '';
 
   constructor(private scene: THREE.Scene) {}
 
-  /** build this city's transit furniture if it's the first visit */
-  setCity(bx: number, by: number, ox: number, oz: number): void {
+  /** start building island (bx, by)'s set in the background (a woken
+   * neighbour): pump() advances it a little each frame */
+  prepare(bx: number, by: number, ox: number, oz: number): void {
     const key = `${bx},${by}`;
-    const have = this.cities.get(key);
-    if (have) {
-      this.cities.delete(key);
-      this.cities.set(key, have); // LRU touch
-      return;
+    if (this.cities.has(key) || this.pending.has(key)) return;
+    this.pending.set(key, this.buildSteps(bx, by, ox, oz));
+  }
+
+  /** advance the background builds for up to `budgetMs` */
+  pump(budgetMs: number): void {
+    const t0 = performance.now();
+    for (const [key, gen] of this.pending) {
+      while (performance.now() - t0 < budgetMs) {
+        const r = gen.next();
+        if (r.done) { this.pending.delete(key); this.add(key, r.value); break; }
+      }
+      if (performance.now() - t0 >= budgetMs) return;
     }
-    this.buildCity(bx, by, ox, oz, key);
+  }
+
+  private add(key: string, inst: CityInst): void {
+    this.cities.set(key, inst);
     while (this.cities.size > MAX_CITIES) {
-      const oldest = this.cities.keys().next().value as string;
-      const inst = this.cities.get(oldest)!;
-      this.scene.remove(inst.mesh);
-      this.scene.remove(inst.dyn);
-      this.scene.remove(inst.rails);
-      inst.mesh.geometry.dispose();
-      inst.rails.geometry.dispose();
-      inst.dyn.traverse(o => {
+      const oldest = [...this.cities.keys()].find(k => k !== this.current && k !== key);
+      if (!oldest) break;
+      const old = this.cities.get(oldest)!;
+      this.scene.remove(old.mesh);
+      this.scene.remove(old.dyn);
+      this.scene.remove(old.rails);
+      old.mesh.geometry.dispose();
+      old.rails.geometry.dispose();
+      old.dyn.traverse(o => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.geometry.dispose();
       });
@@ -84,7 +101,26 @@ export class Transit {
     }
   }
 
-  private buildCity(bx: number, by: number, ox: number, oz: number, key: string): void {
+  /** build this city's transit furniture if it's the first visit */
+  setCity(bx: number, by: number, ox: number, oz: number): void {
+    const key = `${bx},${by}`;
+    this.current = key;
+    const have = this.cities.get(key);
+    if (have) {
+      this.cities.delete(key);
+      this.cities.set(key, have); // LRU touch
+      return;
+    }
+    // finish a background build now, or build it all at once
+    const gen = this.pending.get(key) ?? this.buildSteps(bx, by, ox, oz);
+    this.pending.delete(key);
+    let r = gen.next();
+    while (!r.done) r = gen.next();
+    this.add(key, r.value);
+  }
+
+  /** build one island's set, yielding between the pieces */
+  private *buildSteps(bx: number, by: number, ox: number, oz: number): Generator<void, CityInst> {
     const seed = citySeed(bx, by);
     const net = railNetFor(bx, by);
     const river = riverFor(bx, by);
@@ -97,7 +133,7 @@ export class Transit {
     // at the diamond, where one square plate carries all four rails
     const keep = (x: number, z: number): boolean => coast.inLand(x, z, 1) && Math.hypot(x - D.x, z - D.z) > 2.7;
     const RB = new Baked();
-    for (const L of net.lines) layRails(RB, L, railTile(), keep);
+    for (const L of net.lines) { layRails(RB, L, railTile(), keep); yield; }
     RB.box(5.6, 0.1, 5.6, 0xb9a88c, D.x, RAIL_Y + 0.05, D.z);
     for (const s of [-0.72, 0.72]) {
       RB.box(0.12, 0.14, 5.6, 0x8d939e, D.x + s, RAIL_Y + 0.17, D.z);
@@ -110,14 +146,16 @@ export class Transit {
     rails.receiveShadow = true;
     rails.position.set(ox, 0, oz);
     this.scene.add(rails);
+    yield;
     const inst: CityInst = {
       bx, by, ox, oz, mesh: null as unknown as THREE.Mesh, rails, dyn: new THREE.Group(),
       signals: [], boxes: [],
     };
     let baked = 0;
     for (const st of plan.stations) { this.bakeStation(B, st, r, ox, oz, inst); baked++; }
-    for (const L of net.lines) baked += this.bakeTrestles(B, L, river, ox, oz);
-    for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; }
+    yield;
+    for (const L of net.lines) { baked += this.bakeTrestles(B, L, river, ox, oz); yield; }
+    for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; yield; }
     if (baked > 0) {
       inst.mesh = B.build();
       inst.mesh.receiveShadow = true;
@@ -126,7 +164,7 @@ export class Transit {
       inst.mesh = new THREE.Mesh(); // nothing to draw in this city
     }
     this.scene.add(inst.dyn);
-    this.cities.set(key, inst);
+    return inst;
   }
 
   // ---- station platform beside a straight stretch of the line ----

@@ -143,12 +143,30 @@ const cache = new Map<string, Occupancy>();
 /** test/audit hook: occupancy caches are keyed by cell only, so switching
  * the city base seed requires a flush or stale cities come back */
 export function clearOccupancyCache(): void { cache.clear(); }
-const CACHE_MAX = 6;
+/** the current island + the twelve the world worker prefetches round it */
+const CACHE_MAX = 16;
+
+/** is island (bx, by)'s grid already painted? */
+export function hasOccupancy(bx: number, by: number): boolean { return cache.has(`${bx},${by}`); }
+
+/** install a grid the world worker painted (a no-op if one is here) */
+export function installOccupancy(bx: number, by: number, raw: Uint8Array): void {
+  const key = `${bx},${by}`;
+  if (cache.has(key)) return;
+  const g = new CityGrid() as Occupancy;
+  g.raw.set(raw);
+  g.bx = bx;
+  g.by = by;
+  cache.set(key, g);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
+}
 
 export function occupancyFor(bx: number, by: number): Occupancy {
   const key = `${bx},${by}`;
   let occ = cache.get(key);
-  if (occ) return occ;
+  // (least recently used goes first: a hit moves to the back, so the
+  // island the kid is on is never the one evicted)
+  if (occ) { cache.delete(key); cache.set(key, occ); return occ; }
   occ = paint(bx, by) as Occupancy;
   occ.bx = bx;
   occ.by = by;

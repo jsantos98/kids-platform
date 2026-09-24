@@ -78,10 +78,24 @@ type P = { x: number; z: number };
 const cache = new Map<string, StreetNet>();
 export function clearStreetNetCache(): void { cache.clear(); }
 
+/** is island (bx, by)'s street net already built? */
+export function hasStreetNet(bx: number, by: number): boolean { return cache.has(`${bx},${by},${citySeed(bx, by)}`); }
+
+/** install a street net the world worker built (a no-op if one is here) */
+export function installStreetNet(bx: number, by: number, net: StreetNet): void {
+  const key = `${bx},${by},${citySeed(bx, by)}`;
+  if (cache.has(key)) return;
+  cache.set(key, net);
+  if (cache.size > 48) cache.delete(cache.keys().next().value as string);
+}
+
 /** city (bx, by)'s candidate street network (before the plan's vetoes) */
 export function streetNetFor(bx: number, by: number): StreetNet {
   const key = `${bx},${by},${citySeed(bx, by)}`;
   let n = cache.get(key);
+  // (least recently used goes first: a hit moves to the back, so the
+  // island the kid is on is never the one evicted)
+  if (n) { cache.delete(key); cache.set(key, n); }
   if (!n) {
     n = generate(bx, by);
     cache.set(key, n);

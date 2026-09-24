@@ -21,12 +21,13 @@ import { IslandManager } from './island/manager.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
-import { CENTER } from '../../worlds/world.js';
+import { CENTER, ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
 import { raceTrackFor } from '../../worlds/raceIsland.js';
 import { Race, LAPS } from './race.js';
 import { Boarding } from './boarding.js';
+import { IslandPrefetch } from './prefetch.js';
 import { Robber, CATCH_R, CATCH_T } from './robber.js';
 import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
@@ -298,6 +299,8 @@ if (q.get('debugsea') === '1') {
     transit: () => transit.list(),
     river: () => river,
     route: () => railNetFor(curCity.bx, curCity.by),
+    /** islands the world worker has built so far */
+    prefetched: () => prefetch.done,
     /** police modes: the getaway car */
     robber: () => robber,
     /** the platforms' passengers */
@@ -346,8 +349,15 @@ const newRobber = (c: CityRef): void => {
 let race: Race | null = null;
 let raceCheer = 0, raceMsg = '', raceMsgT = 0;
 const ordinal = (n: number): string => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
+/** the world worker builds the neighbouring islands ahead of the kid */
+const prefetch = new IslandPrefetch();
 function applyCity(c: CityRef): void {
   curCity = c;
+  // (?noprefetch=1: build on demand, as before — to measure the difference)
+  if (q.get('noprefetch') !== '1') {
+    prefetch.want(IslandPrefetch.around(c.bx, c.by));
+    prefetch.rank(player.state.x, player.state.z);
+  }
   river = riverFor(c.bx, c.by);
   transit.setCity(c.bx, c.by, c.ox, c.oz);
   sea.setCity(c.ox, c.oz);
@@ -522,6 +532,20 @@ const tick = (): void => {
   // crossed into a neighbouring city?
   const here = cityAt(st.x, st.z);
   if (here.key !== curCity.key) applyCity(here);
+  // the world worker builds whichever island is nearest the kid next; the
+  // level crossings, platforms and track of a neighbour the kid is within
+  // 300 m of are built a few milliseconds a frame before they arrive
+  if (Math.floor(elapsed) !== Math.floor(elapsed - dt)) {
+    prefetch.rank(st.x, st.z);
+    const lx = st.x - here.ox, lz = st.z - here.oz;
+    for (const [nbx, nby, gap] of [
+      [here.bx + 1, here.by, CITY_PITCH - lx], [here.bx - 1, here.by, lx + (CITY_PITCH - ISLAND)],
+      [here.bx, here.by + 1, CITY_PITCH - lz], [here.bx, here.by - 1, lz + (CITY_PITCH - ISLAND)],
+    ] as Array<[number, number, number]>) {
+      if (gap < 300) transit.prepare(nbx, nby, nbx * CITY_PITCH, nby * CITY_PITCH);
+    }
+  }
+  transit.pump(3);
 
   // physics + collision (frozen during the mini-scenes: the truck stays put
   // until the fire is out / the cat is down)
@@ -689,7 +713,9 @@ const tick = (): void => {
   followSky(st.x, st.z);
 
   // the archipelago is endless; stray into the sea and R brings you back
-  chunks.ensure(2, st.x, st.z);
+  // (one chunk a frame: a bake is 20-35 ms, and a new row of the view only
+  // needs a handful every few seconds)
+  chunks.ensure(1, st.x, st.z);
 
   // ambient life: the trains, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly

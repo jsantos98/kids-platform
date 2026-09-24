@@ -87,6 +87,8 @@ export interface RaceTrack {
   nearest(x: number, z: number): { s: number; d: number };
   /** the centreline point at arc s (wrapping) */
   sample(s: number): { x: number; z: number; h: number };
+  /** the circuit as plain data (the world worker sends this) */
+  data: RaceData;
 }
 
 /** does island (bx, by) hold a race circuit? */
@@ -206,9 +208,34 @@ function build(bx: number, by: number): RaceTrack | null {
       }
     }
     if (!best) continue;
-    return finish(bx, by, nA, small ? R_SMALL : R_LARGE, L, lcx, lcz, hx, hz, best.cx, best.cz, best.ry);
+    return fromData({ bx, by, nA, nB, small, cx: best.cx, cz: best.cz, ry: best.ry });
   }
   return null;
+}
+
+/** a circuit as plain data: its loop size and where it was placed */
+export interface RaceData { bx: number; by: number; nA: number; nB: number; small: boolean; cx: number; cz: number; ry: number }
+
+function fromData(d: RaceData): RaceTrack {
+  const L = layout(d.nA, d.nB, d.small);
+  const hx = (L.bx1 - L.bx0) / 2 + APRON, hz = (L.bz1 - L.bz0) / 2 + APRON;
+  const lcx = (L.bx0 + L.bx1) / 2, lcz = (L.bz0 + L.bz1) / 2;
+  const T = finish(d.bx, d.by, d.nA, d.small ? R_SMALL : R_LARGE, L, lcx, lcz, hx, hz, d.cx, d.cz, d.ry);
+  T.data = d;
+  return T;
+}
+
+/** has island (bx, by)'s circuit been decided (circuit or none)? */
+export function hasRaceTrack(bx: number, by: number): boolean {
+  return !isRaceIsland(bx, by) || cache.has(`${bx},${by},${citySeed(bx, by)}`);
+}
+
+/** install a circuit (or its absence) the world worker decided */
+export function installRaceTrack(bx: number, by: number, d: RaceData | null): void {
+  const key = `${bx},${by},${citySeed(bx, by)}`;
+  if (!isRaceIsland(bx, by) || cache.has(key)) return;
+  cache.set(key, d ? fromData(d) : null);
+  if (cache.size > 16) cache.delete(cache.keys().next().value as string);
 }
 
 function finish(
@@ -292,5 +319,5 @@ function finish(
     }
     return { s: path[bi].s, d: Math.sqrt(bd) };
   };
-  return { bx, by, cx, cz, hx, hz, ry, pieces, path, length, startS, grid, inZone, outline, nearest, sample };
+  return { bx, by, cx, cz, hx, hz, ry, pieces, path, length, startS, grid, inZone, outline, nearest, sample, data: null as unknown as RaceData };
 }

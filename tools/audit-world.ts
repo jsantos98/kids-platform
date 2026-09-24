@@ -12,6 +12,8 @@ import type { CityGrid } from '../src/worlds/grid.js';
 import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK, RACE } from '../src/worlds/grid.js';
 import { isRaceIsland, raceTrackFor, clearRaceCache, UNIT } from '../src/worlds/raceIsland.js';
+import { buildIslandData, installIslandData } from '../src/worlds/islandData.js';
+import { createHash } from 'node:crypto';
 import { clearCoastCache } from '../src/worlds/coast.js'; // (coastFor imported above)
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, edgePieces, pieceOutline, nodeReach } from '../src/worlds/roadLayout.js';
@@ -80,6 +82,7 @@ let worstFill = 1;
 let districtFaults = 0;
 let polesInLots = 0;
 let raceFaults = 0;
+let workerFaults = 0;
 let graphFaults = 0;
 let roadGaps = 0;
 let portalFaults = 0;
@@ -633,6 +636,37 @@ if (lowDecks > 0) fail('R29', `${lowDecks} boat-lane points run under a causeway
 if (tailgates > 0) fail('R31', `${tailgates} lines where timetable trains tailgate each other`);
 if (teleports > 0) fail('R30', `${teleports} timetable train heads jumped (trains must flow continuously across portals)`);
 if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on each other away from the diamond`);
+
+// R38: an island the world worker builds is the island. Build two islands
+// (one of them the race island), pass them through structured clone as the
+// worker's message does, install them into empty caches and compare every
+// query against a local build.
+{
+  const W = 14;
+  const fingerprint = (bx: number, by: number): string => {
+    const p = cityPlanFor(bx, by), net = railNetFor(bx, by), g = occupancyFor(bx, by), r = raceTrackFor(bx, by), gr = graphFor(bx, by);
+    const out: string[] = [JSON.stringify(p.nodes), JSON.stringify(p.edges), JSON.stringify(p.crossings), JSON.stringify(p.riverBridges), JSON.stringify(p.stations), JSON.stringify(p.exits)];
+    for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) out.push(p.district(cx, cz), String(p.nature(cx, cz)), JSON.stringify(p.lots(cx, cz)));
+    for (let x = 5; x < ISLAND; x += 37) for (let z = 3; z < ISLAND; z += 41) out.push(p.districtAt(x, z) + (p.blockAt(x, z)?.id ?? '-'));
+    for (const L of net.lines) out.push(JSON.stringify(L.pts), String(L.total), String(L.rimOut), String(L.arcAt(400, 300)), String(L.distTo(123, 456)));
+    out.push(JSON.stringify(net.diamond), String(net.distTo(300, 300)), String(net.headingAt(500, 200)));
+    out.push(createHash('sha1').update(g.raw).digest('hex'));
+    out.push(r ? JSON.stringify(r.pieces) + JSON.stringify(r.path) + r.startS + JSON.stringify(r.grid) : 'none');
+    out.push(JSON.stringify(riverFor(bx, by).pts), String(gr.edges.length), String(gr.totalLen));
+    return createHash('sha1').update(out.join('|')).digest('hex');
+  };
+  for (const [bx, by] of [[1, 0], [0, 0]] as Array<[number, number]>) {
+    clearAllWorldCaches();
+    const direct = fingerprint(bx, by);
+    clearAllWorldCaches();
+    const data = structuredClone(buildIslandData(bx, by));
+    clearAllWorldCaches();
+    installIslandData(data);
+    if (fingerprint(bx, by) !== direct) { workerFaults++; console.log(`  R38 detail: island ${bx},${by} built by the worker differs from a local build`); }
+  }
+  clearAllWorldCaches();
+}
+if (workerFaults > 0) fail('R38', `${workerFaults} islands differ when built by the world worker`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.
 // The hash tail used to leave adjacent integers partially correlated, and

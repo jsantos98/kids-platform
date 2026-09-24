@@ -173,6 +173,8 @@ export interface CityPlan {
   exits: CityExits;
   /** the other end of edge e from node n */
   other(e: PEdge, n: number): PNode;
+  /** the plan as plain data (the world worker sends this) */
+  data: PlanData;
 }
 
 /**
@@ -213,6 +215,9 @@ export function clearCityPlanCache(): void { cache.clear(); }
 export function cityPlanFor(bx: number, by: number): CityPlan {
   const k = `${bx},${by}`;
   let plan = cache.get(k);
+  // (least recently used goes first: a hit moves to the back, so the
+  // island the kid is on is never the one evicted)
+  if (plan) { cache.delete(k); cache.set(k, plan); }
   if (!plan) {
     plan = buildPlan(bx, by);
     cache.set(k, plan);
@@ -791,15 +796,92 @@ function buildPlan(bx: number, by: number): CityPlan {
     });
   }
 
+  void district; void other;
+  return assemblePlan({
+    seed, bx, by, nodes, edges, blocks, lots, crossings, riverBridges, stations,
+    exits: exitLines,
+    nat: natGrid.flat(),
+    race: race ? { cx: race.cx, cz: race.cz, hx: race.hx, hz: race.hz, ry: race.ry } : null,
+  });
+}
+
+/** a plan as plain data: what the world worker sends back (worldWorker.ts) */
+export interface PlanData {
+  seed: number;
+  bx: number;
+  by: number;
+  nodes: PNode[];
+  edges: PEdge[];
+  blocks: CityBlock[];
+  /** every lot, in the order they were laid */
+  lots: Lot[];
+  crossings: Crossing[];
+  riverBridges: RiverBridge[];
+  stations: Station[];
+  exits: CityExits;
+  /** nature corners, chunk by chunk (column-major, W x W) */
+  nat: Array<District | null>;
+  /** the race circuit's zone, if any */
+  race: { cx: number; cz: number; hx: number; hz: number; ry: number } | null;
+}
+
+/** the plan's queries over its data — the generator and an installed
+ * worker result both go through here, so the two can never disagree */
+function assemblePlan(d: PlanData): CityPlan {
+  const { nodes, edges, blocks } = d;
+  const natureAt = (x: number, z: number): District | null => {
+    const cx = Math.floor(x / CH), cz = Math.floor(z / CH);
+    return cx < 0 || cz < 0 || cx >= W || cz >= W ? null : d.nat[cx * W + cz];
+  };
+  const inRace = (x: number, z: number): boolean => {
+    const r = d.race;
+    if (!r) return false;
+    const c = Math.cos(r.ry), s = Math.sin(r.ry), dx = x - r.cx, dz = z - r.cz;
+    const m = ZONE_ROAD - 2;
+    return Math.abs(dx * c - dz * s) < r.hx + m && Math.abs(dx * s + dz * c) < r.hz + m;
+  };
+  const blockBucket = new Map<string, CityBlock[]>();
+  for (const b of blocks) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of b.poly) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+    for (let gx = Math.floor(x0 / CH); gx <= Math.floor(x1 / CH); gx++) for (let gz = Math.floor(z0 / CH); gz <= Math.floor(z1 / CH); gz++) {
+      const k = key(gx, gz);
+      if (!blockBucket.has(k)) blockBucket.set(k, []);
+      blockBucket.get(k)!.push(b);
+    }
+  }
+  const blockAt = (x: number, z: number): CityBlock | null =>
+    (blockBucket.get(key(Math.floor(x / CH), Math.floor(z / CH))) ?? []).find(b => inBlock(b, x, z)) ?? null;
+  const districtAt = (x: number, z: number): District =>
+    blockAt(x, z)?.district ?? (inRace(x, z) ? 'raceway' : null) ?? natureAt(x, z) ?? 'green';
+  const lotsByChunk = new Map<string, Lot[]>();
+  for (const lot of d.lots) {
+    const ck = key(Math.floor(lot.x / CH), Math.floor(lot.z / CH));
+    if (!lotsByChunk.has(ck)) lotsByChunk.set(ck, []);
+    lotsByChunk.get(ck)!.push(lot);
+  }
   return {
-    seed, bx, by, nodes, edges,
-    district, districtAt, blocks, blockAt,
+    seed: d.seed, bx: d.bx, by: d.by, nodes, edges,
+    district: (cx, cz) => districtAt(cx * CH + CH / 2, cz * CH + CH / 2),
+    districtAt, blocks, blockAt,
     nature: (cx, cz) => natureAt(cx * CH + CH / 2, cz * CH + CH / 2),
     lots: (cx, cz) => lotsByChunk.get(key(cx, cz)) ?? [],
-    crossings, riverBridges, stations,
-    exits: exitLines,
-    other,
+    crossings: d.crossings, riverBridges: d.riverBridges, stations: d.stations,
+    exits: d.exits,
+    other: (e, n) => nodes[e.a === n ? e.b : e.a],
+    data: d,
   };
+}
+
+/** is island (bx, by)'s plan already built? */
+export function hasCityPlan(bx: number, by: number): boolean { return cache.has(`${bx},${by}`); }
+
+/** install a plan the world worker built (a no-op if one is already here) */
+export function installCityPlan(d: PlanData): void {
+  const k = `${d.bx},${d.by}`;
+  if (cache.has(k)) return;
+  cache.set(k, assemblePlan(d));
+  if (cache.size > 32) cache.delete(cache.keys().next().value as string);
 }
 
 /** which side of the track a station's platform stands: +1 = right of the

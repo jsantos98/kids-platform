@@ -51,6 +51,15 @@ interface Car {
   h: number;
 }
 
+/** the procedural stand-in shown until a car's kit model streams in: built
+ * once per colour and cloned (a clone shares its geometry) — building one
+ * per car cost ~6 ms each, ~150 ms per island waking */
+const fallbacks: THREE.Group[] = [];
+function fallbackCar(k: number): THREE.Group {
+  fallbacks[k] ??= makeCar({ body: FALLBACK_COLORS[k] });
+  return fallbacks[k].clone();
+}
+
 const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz, z: hx });
 
 export class IslandCars {
@@ -69,7 +78,7 @@ export class IslandCars {
       const r = rng(chunkSeed(citySeed(bx, by), 0x7af, k));
       const e = edges[(r() * edges.length) | 0];
       const obj = new THREE.Group();
-      obj.add(makeCar({ body: FALLBACK_COLORS[k % 4] }));
+      obj.add(fallbackCar(k % 4));
       obj.visible = false;
       scene.add(obj);
       const car: Car = {

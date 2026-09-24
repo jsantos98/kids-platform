@@ -17,9 +17,10 @@
 // proper bridges carry the streets across.
 import { rng, chunkSeed } from '../engine/rng.js';
 import { makePath, type WorldPath } from './spline.js';
-import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X } from './world.js';
+import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X, SCALE } from './world.js';
 import { citySeed, southExit } from './cityGrid.js';
 import { streetNetFor } from './streetGen.js';
+import { STEM } from './railRoute.js';
 
 const SPAWN = { x: CENTER, z: CENTER };
 const LANE = 64; // lattice spacing
@@ -131,7 +132,10 @@ function pickCorridor(seed: number, avoid: number[]): number {
     // the west-east railway runs straight in 140 m beside the west and
     // east causeway avenues: the river keeps out of those stems, or a trestle
     // would share the water with the avenue's bridge (R22)
-    if (cx < 200 || cx > ISLAND - 200) continue;
+    if (cx < STEM + 20 || cx > ISLAND - STEM - 20) continue;
+    // and it runs through the island's middle, not along a flank where the
+    // shore bends in (the central 496 m on an 896 m island)
+    if (Math.abs(cx - CENTER) > 248 * SCALE) continue;
     if (Math.abs(cx - SPAWN.x) < 60) continue;
     lanes.push(k);
   }

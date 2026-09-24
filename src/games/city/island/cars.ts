@@ -10,6 +10,7 @@ import { rng, chunkSeed, type Rng } from '../../../engine/rng.js';
 import { makeCar } from '../../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../../engine/assets.js';
 import { citySeed } from '../../../worlds/cityGrid.js';
+import { SCALE } from '../../../worlds/world.js';
 import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
 import { lightState, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST } from '../transit.js';
@@ -74,7 +75,8 @@ export class IslandCars {
     const g = this.graph;
     const models = [...MODELS, ...extraModels];
     // a fixed fleet sized to the island's streets, seeded per island
-    const count = Math.max(8, Math.min(24, Math.round(g.totalLen / 160)));
+    // (8-24 on an 896 m island; the cap grows with the island's area)
+    const count = Math.max(8, Math.min(Math.round(24 * SCALE * SCALE), Math.round(g.totalLen / 160)));
     const edges = g.edges.filter(e => !g.nodes[e.a].plaza && !g.nodes[e.b].plaza);
     for (let k = 0; k < count && edges.length; k++) {
       const r = rng(chunkSeed(citySeed(bx, by), 0x7af, k));

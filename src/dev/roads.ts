@@ -45,8 +45,11 @@ scene.add(new THREE.HemisphereLight(0xdfeaff, 0xc9bda0, 0.9));
 
 // bake a 4x4-chunk window of city (0,0) centred on the requested target
 const wxq = Number(q.get('x')), wzq = Number(q.get('z'));
-const cx0 = Math.max(0, Math.min(WORLD_CHUNKS - 4, ((Number.isFinite(wxq) ? wxq : (Number(q.get('cx')) || 5)) / 64 - 2) | 0));
-const cz0 = Math.max(0, Math.min(WORLD_CHUNKS - 4, ((Number.isFinite(wzq) ? wzq : (Number(q.get('cz')) || 5)) / 64 - 2) | 0));
+// (x/z in metres, or cx/cz in chunks; the island's centre by default)
+const mx = Number.isFinite(wxq) && q.has('x') ? wxq : (Number(q.get('cx')) || WORLD_CHUNKS / 2) * 64;
+const mz = Number.isFinite(wzq) && q.has('z') ? wzq : (Number(q.get('cz')) || WORLD_CHUNKS / 2) * 64;
+const cx0 = Math.max(0, Math.min(WORLD_CHUNKS - 4, (mx / 64 - 2) | 0));
+const cz0 = Math.max(0, Math.min(WORLD_CHUNKS - 4, (mz / 64 - 2) | 0));
 for (let cx = cx0; cx < cx0 + 4; cx++) {
   for (let cz = cz0; cz < cz0 + 4; cz++) {
     const { mesh } = generateCityChunk(0, 0, cx, cz);

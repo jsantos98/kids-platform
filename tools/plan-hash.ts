@@ -5,12 +5,13 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setCityBase } from '../src/worlds/cityGrid.js';
+import { WORLD_CHUNKS } from '../src/worlds/world.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railNetFor, clearRailCache } from '../src/worlds/railRoute.js';
 import { clearOccupancyCache } from '../src/worlds/grid.js';
 import { clearRiverCache } from '../src/worlds/riverRoute.js';
 
-const W = 14;
+const W = WORLD_CHUNKS;
 const args = process.argv.slice(2);
 let dumpDir: string | null = null;
 const seeds: number[] = [];

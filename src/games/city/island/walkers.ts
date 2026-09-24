@@ -13,6 +13,7 @@ import { rng, chunkSeed, type Rng } from '../../../engine/rng.js';
 import { makeVillager } from '../../../kit/index.js';
 import { bakeObjectToMesh, templateToMesh } from '../../../engine/baked.js';
 import { citySeed } from '../../../worlds/cityGrid.js';
+import { SCALE } from '../../../worlds/world.js';
 import { occupancyFor, LOT, PLAZA, SEA, RIVER, RAIL, type Occupancy } from '../../../worlds/grid.js';
 import { coastFor, type Coast } from '../../../worlds/coast.js';
 import { ROUNDABOUT_REACH } from '../../../worlds/cityPlan.js';
@@ -77,7 +78,7 @@ export class IslandWalkers {
       ? peopleTpls.map(t => { const m = templateToMesh(t); m.geometry.scale(PED_SCALE, PED_SCALE, PED_SCALE); return m; })
       : [0, 1, 2, 3].map(() => bakeObjectToMesh(makeVillager()));
     const pets = petTpls.map(t => templateToMesh(t));
-    const nPeople = Math.max(10, Math.min(30, Math.round(g.totalLen / 280)));
+    const nPeople = Math.max(10, Math.min(Math.round(30 * SCALE * SCALE), Math.round(g.totalLen / 280)));
     const nPets = pets.length ? Math.round(nPeople / 2) : 0;
     const base = chunkSeed(citySeed(bx, by), 0xbeef, 1);
     for (let k = 0; k < nPeople + nPets; k++) {

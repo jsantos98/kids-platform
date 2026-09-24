@@ -8,7 +8,7 @@ import { C, mat } from '../../engine/stage.js';
 import { bakedModel, prepBakedModels, type BakeDef } from '../../engine/assets.js';
 import { templateToMesh } from '../../engine/baked.js';
 import { makeSailboat, makeTugboat, makeRowboat } from '../../kit/boats.js';
-import { ISLAND, CENTER } from '../../worlds/world.js';
+import { ISLAND, CENTER, SCALE } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { southExit, eastExit } from '../../worlds/cityGrid.js';
 import { RAIL_OFFSET } from '../../worlds/railRoute.js';
@@ -149,7 +149,10 @@ export class Fleet {
   constructor(private scene: THREE.Scene, private ox: number, private oz: number, seed: number, bx: number, by: number) {
     this.loop = boatLoop(bx, by);
     const LOOP = this.loop;
-    FLEET.forEach((d, i) => {
+    // (six boats round an 896 m island; more round a bigger one's longer lane)
+    const count = Math.round(FLEET.length * SCALE);
+    for (let i = 0; i < count; i++) {
+      const d = FLEET[i % FLEET.length];
       const g = new THREE.Group();
       g.add(hullObject(d.tpl, d.len, d.fb));
       // foam wake trailing the stern
@@ -163,9 +166,9 @@ export class Fleet {
       g.rotation.order = 'YXZ';
       scene.add(g);
       // each island's fleet starts at its own seeded spots on the loop
-      const off = ((i / FLEET.length) + ((seed >>> (i * 3)) & 7) / 64) * LOOP.length;
+      const off = ((i / count) + ((seed >>> (i * 3)) & 7) / 64) * LOOP.length;
       this.boats.push({ mesh: g, offset: off, speed: d.speed, dir: d.dir, phase: i * 1.7 });
-    });
+    }
   }
 
   hide(): void { for (const b of this.boats) b.mesh.visible = false; }

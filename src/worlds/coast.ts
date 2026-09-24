@@ -9,9 +9,9 @@
 // to the shore; boats sail an offshore lane that follows it.
 import { rng, chunkSeed } from '../engine/rng.js';
 import { citySeed, southExit, eastExit, STRAIT } from './cityGrid.js';
-import { ISLAND, CENTER } from './world.js';
+import { ISLAND, CENTER, SCALE } from './world.js';
 
-const N = 256;              // polygon vertices
+const N = Math.round(256 * SCALE); // polygon vertices (~10 m apart)
 const HEADLAND_GAP = 8;     // a headland stops this far short of the cell edge
 const RIM_MARGIN = 14;      // elsewhere the shore keeps this far inside
 
@@ -41,7 +41,7 @@ export function coastFor(bx: number, by: number): Coast {
   let c = cache.get(key);
   if (c) return c;
   const r = rng(chunkSeed(key, 0xc0a57, 1));
-  const R0 = 360 + r() * 70;
+  const R0 = (360 + r() * 70) * SCALE;
   const harm = [2, 3, 4, 5].map((k, i) => ({
     k, a: (r() - 0.5) * 2 * [0.06, 0.045, 0.03, 0.02][i], ph: r() * Math.PI * 2,
   }));
@@ -62,7 +62,8 @@ export function coastFor(bx: number, by: number): Coast {
     for (const tp of portals) {
       let d = Math.abs(th - tp);
       if (d > Math.PI) d = Math.PI * 2 - d;
-      const w = Math.exp(-((d / 0.3) ** 2));
+      // (~120 m wide at the shore whatever the island's size)
+      const w = Math.exp(-((d / (0.3 / SCALE)) ** 2));
       const tip = rim - HEADLAND_GAP;
       if (tip > rr) rr += (tip - rr) * w;
     }

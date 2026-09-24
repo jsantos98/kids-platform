@@ -28,7 +28,7 @@
 // river bed), streetGraph (everything that navigates), transit (crossings,
 // stations), the occupancy grid and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
-import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
+import { WORLD_CHUNKS, ISLAND, CENTER, SCALE } from './world.js';
 import { blocksOf, inBlock, type Block } from './blocks.js';
 import { raceTrackFor, ZONE_ROAD } from './raceIsland.js';
 import { fillBlock, LotRaster, LOT_GAP, R_EDGE, R_CENTRE, R_LOT, R_NEAR_C, R_NEAR_E } from './blockFill.js';
@@ -421,16 +421,19 @@ function buildPlan(bx: number, by: number): CityPlan {
   // road) is green. ----
   const natGrid: Array<Array<District | null>> = Array.from({ length: W }, () => Array<District | null>(W).fill(null));
   const KINDS: District[] = ['forest', 'desert', 'meadow'];
-  const corners: Array<[number, number]> = [[0, 0], [W - 3, 0], [0, W - 3]];
+  // (3 x 3 chunks on a 14-chunk island: the same share of a bigger one)
+  const NC = Math.round((W * 3) / 14);
+  const corners: Array<[number, number]> = [[0, 0], [W - NC, 0], [0, W - NC]];
   corners.forEach(([cx0, cz0]) => {
     const kind: District | null = r() < 0.18 ? null : KINDS[(r() * 3) | 0];
-    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) natGrid[cx0 + dx][cz0 + dz] = kind;
+    for (let dx = 0; dx < NC; dx++) for (let dz = 0; dz < NC; dz++) natGrid[cx0 + dx][cz0 + dz] = kind;
   });
   const natureAt = (x: number, z: number): District | null => {
     const cx = Math.floor(x / CH), cz = Math.floor(z / CH);
     return cx < 0 || cz < 0 || cx >= W || cz >= W ? null : natGrid[cx][cz];
   };
-  const downtownR = 140 + r() * 40, mixedR = downtownR + 110 + r() * 40;
+  // (proportions of the island: 140-180 m and +110-150 m on an 896 m island)
+  const downtownR = (140 + r() * 40) * SCALE, mixedR = downtownR + (110 + r() * 40) * SCALE;
   // a race island's circuit is its own district: the track and its apron
   const race = raceTrackFor(bx, by);
   const inRace = (x: number, z: number): boolean => !!race && race.inZone(x, z, ZONE_ROAD - 2);
@@ -457,7 +460,7 @@ function buildPlan(bx: number, by: number): CityPlan {
     const anchor = railside[(r() * Math.min(2, railside.length)) | 0];
     if (anchor) {
       const zone = new Set<CityBlock>([anchor]);
-      const want = 2 + ((r() * 3) | 0);
+      const want = Math.floor((2 + r() * 3) * SCALE); // (the track grows with the island)
       while (zone.size < want) {
         const next = railside.filter(b => !zone.has(b) && [...zone].some(z => z.edges.some(e => b.edges.includes(e))));
         if (!next.length) break;
@@ -550,7 +553,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       const m = (r() * (k + 1)) | 0;
       [cands[k], cands[m]] = [cands[m], cands[k]];
     }
-    const want = cands.length ? 2 + ((r() * 2) | 0) : 0;
+    const want = cands.length ? Math.floor((2 + r() * 2) * SCALE * SCALE) : 0;
     for (const n of cands.slice(0, want)) n.plaza = true;
   }
   for (const n of nodes) {
@@ -806,8 +809,12 @@ function buildPlan(bx: number, by: number): CityPlan {
       }
       if (!cand.length) return;
       const chosen: number[] = [cand[(rs() * cand.length) | 0]];
-      const next = cand.find(c => chosen.every(cd => Math.abs(c - cd) > 220));
-      if (next !== undefined) chosen.push(next);
+      // (two a line on an 896 m island, more on a longer line)
+      for (let more = Math.round(2 * SCALE) - 1; more > 0; more--) {
+        const next = cand.find(c => chosen.every(cd => Math.abs(c - cd) > 220));
+        if (next === undefined) break;
+        chosen.push(next);
+      }
       chosen.sort((p, q) => p - q);
       for (const d of chosen) stations.push(mkStation(L, li, d));
     });

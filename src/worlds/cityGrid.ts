@@ -63,7 +63,9 @@ export function cityAt(x: number, z: number): CityRef {
  * the corridor and the headland stay aligned, so the causeway stays short */
 function exitCandidates(): number[] {
   const out: number[] = [];
-  for (let l = 4; l <= WORLD_CHUNKS - 4; l++) out.push(l);
+  // the central lines: the middle one +-3 (4..10 on a 14-chunk island)
+  const mid = Math.floor(WORLD_CHUNKS / 2);
+  for (let l = mid - 3; l <= mid + 3; l++) out.push(l);
   return out;
 }
 

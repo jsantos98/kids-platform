@@ -2,6 +2,7 @@
 // Run: npx tsx tools/audit-world.ts [baseSeed]
 // Every check maps to a rule in AGENTS.md; a FAIL means the change that
 // caused it must be fixed before commit.
+import { WORLD_CHUNKS, ISLAND } from '../src/worlds/world.js';
 import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache, builtD, polePoints, type CityPlan, type CityBlock } from '../src/worlds/cityPlan.js';
 import { inBlock } from '../src/worlds/blocks.js';
@@ -41,10 +42,9 @@ const clearAllWorldCaches = (): void => {
   clearRaceCache();
 };
 
-const W = 14;
+const W = WORLD_CHUNKS;
 /** the crossing's street runs east-west */
 const horizCross = (c: { heading: number }): boolean => Math.abs(Math.sin(c.heading)) > 0.5;
-const ISLAND = 14 * 64; // city side length in metres
 const baseSeed = Number(process.argv[2] ?? 4242) | 0;
 setCityBase(baseSeed);
 
@@ -653,7 +653,6 @@ if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on 
 // worker's message does, install them into empty caches and compare every
 // query against a local build.
 {
-  const W = 14;
   const fingerprint = (bx: number, by: number): string => {
     const p = cityPlanFor(bx, by), net = railNetFor(bx, by), g = occupancyFor(bx, by), r = raceTrackFor(bx, by), gr = graphFor(bx, by);
     const out: string[] = [JSON.stringify(p.nodes), JSON.stringify(p.edges), JSON.stringify(p.crossings), JSON.stringify(p.riverBridges), JSON.stringify(p.stations), JSON.stringify(p.exits)];

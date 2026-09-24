@@ -21,12 +21,12 @@
 //
 // Edges are straight; curves happen only at nodes (the road layout's pads).
 import { rng, chunkSeed } from '../engine/rng.js';
-import { citySeed, southExit, eastExit } from './cityGrid.js';
+import { citySeed, southExit, eastExit, STRAIT } from './cityGrid.js';
 import { coastFor, insetShore } from './coast.js';
 import { baseRiverFor, type RiverRoute } from './riverRoute.js';
 import { railNetFor, STEM } from './railRoute.js';
 import { EXIT_IN } from './streetLines.js';
-import { ISLAND, CENTER } from './world.js';
+import { ISLAND, CENTER, SCALE } from './world.js';
 import { blocksOf, type Block } from './blocks.js';
 import { ringPolygon, RING_INSET } from './ringRoad.js';
 import { raceTrackFor, ZONE_ROAD } from './raceIsland.js';
@@ -1264,7 +1264,8 @@ function generate(bx: number, by: number): StreetNet {
   });
 
   // ---- 3. patches: Voronoi sites, one rotated lattice each ----
-  const K = 3 + ((r() * 3) | 0);
+  // (3-5 on an 896 m island; the same patch size on a bigger one)
+  const K = Math.floor((3 + r() * 3) * SCALE * SCALE);
   const sites: Array<P & { th: number; sp: number; ph: [number, number] }> = [];
   const ANGLES = [0, 15, -15, 30, -30, 45].map(a => (a * Math.PI) / 180);
   for (let tries = 0; tries < 400 && sites.length < K; tries++) {
@@ -1307,7 +1308,9 @@ function generate(bx: number, by: number): StreetNet {
       const th = s.th + (fam ? Math.PI / 2 : 0);
       const ux = Math.sin(th), uz = Math.cos(th), nx = uz, nz = -ux;
       const R = ISLAND * 1.5;
-      for (let k = -24; k <= 24; k++) {
+      // (lines out past the far corner of the island from any site)
+      const KR = Math.ceil((ISLAND * 1.6) / 58);
+      for (let k = -KR; k <= KR; k++) {
         const off = (k + s.ph[fam]) * s.sp;
         const c = { x: s.x + nx * off, z: s.z + nz * off };
         const a = { x: c.x - ux * R, z: c.z - uz * R }, b = { x: c.x + ux * R, z: c.z + uz * R };
@@ -1417,7 +1420,8 @@ function generate(bx: number, by: number): StreetNet {
   B.prune(keepCircuit);
   let circuitJoined = joinCircuit() > 0;
   const tried = new Set<string>();
-  for (let round = 0; round < 160; round++) {
+  // (one cut a round: the rounds grow with the island's area)
+  for (let round = 0; round < Math.round(160 * SCALE * SCALE); round++) {
     const faces = blocksOf(B.result()).sort((p, q) => q.area - p.area);
     let did = false;
     for (const f of faces) {
@@ -1540,14 +1544,14 @@ function generate(bx: number, by: number): StreetNet {
     for (const c of cands) {
       const ux = Math.sin(c.h), uz = Math.cos(c.h);
       const cut = { x: uz, z: -ux }; // the cut runs square to the side
-      for (const frac of [0.5, 0.44, 0.56, 0.38, 0.62, 0.32, 0.68, 0.26, 0.74]) {
+      for (const frac of [0.5, 0.44, 0.56, 0.38, 0.62, 0.32, 0.68, 0.26, 0.74, 0.2, 0.8, 0.14, 0.86]) {
         const t = c.lo + c.len * frac;
         // the line (p . u = t), clipped to the block: the piece nearest the centre
         const o = { x: f.cx + ux * (t - (f.cx * ux + f.cz * uz)), z: f.cz + uz * (t - (f.cx * ux + f.cz * uz)) };
-        const R = 2000;
+        const R = Math.max(2000, ISLAND * 2.3);
         const pieces = clipToPoly({ x: o.x - cut.x * R, z: o.z - cut.z * R }, { x: o.x + cut.x * R, z: o.z + cut.z * R }, poly);
         pieces.sort((m, n) => segDist(o, m[0], m[1]) - segDist(o, n[0], n[1]));
-        for (const [p, q] of pieces.slice(0, 2)) if (tryCut(poly, p, q)) return true;
+        for (const [p, q] of pieces.slice(0, 4)) if (tryCut(poly, p, q)) return true;
       }
     }
     // cuts THROUGH the track (or the river) where it runs through the block,
@@ -1558,7 +1562,7 @@ function generate(bx: number, by: number): StreetNet {
     for (let k = 0; k < river.pts.length; k += 5) if (inPoly(river.pts[k], poly)) through.push(river.pts[k]);
     for (const tp of through) {
       const cut = { x: Math.cos(tp.h), z: -Math.sin(tp.h) };
-      const R = 2000;
+      const R = Math.max(2000, ISLAND * 2.3);
       const pieces = clipToPoly({ x: tp.x - cut.x * R, z: tp.z - cut.z * R }, { x: tp.x + cut.x * R, z: tp.z + cut.z * R }, poly);
       const piece = pieces.find(([p, q]) => segDist(tp, p, q) < 1);
       if (piece && tryCut(poly, piece[0], piece[1])) return true;
@@ -1627,7 +1631,9 @@ function generate(bx: number, by: number): StreetNet {
  * (+ each point's own `extra`) from every point of the polyline `pts` —
  * the exact distance queries run only where it says true */
 function proxMask(pts: Array<{ x: number; z: number }>, r: (k: number) => number): (x: number, z: number) => boolean {
-  const C = 4, O = -512, N = 480; // cells cover -512 .. 1408 m
+  // cells cover -512 m .. the far side of the strait + 384 m (1408 m on an
+  // 896 m island)
+  const C = 4, O = -512, N = Math.ceil((ISLAND + STRAIT + 384 - O) / C);
   const bits = new Uint8Array(N * N);
   let gap = 0;
   for (let k = 0; k + 1 < pts.length; k++) gap = Math.max(gap, dist(pts[k], pts[k + 1]));

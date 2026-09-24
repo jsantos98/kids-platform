@@ -23,7 +23,7 @@ import {
   type StreetLine, type StreetCandidates,
 } from './streetLines.js';
 import { baseRiverFor, type RiverRoute } from './riverRoute.js';
-import { ISLAND } from './world.js';
+import { ISLAND, CENTER, SCALE } from './world.js';
 import { coastFor, type Coast } from './coast.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
@@ -400,7 +400,8 @@ function pickDiamond(bx: number, by: number, river: RiverRoute, coast: Coast, st
   const r = rng(chunkSeed(citySeed(bx, by), 0xd1a, 7));
   for (const need of [30, 26, 22, 18]) {
     const opts: Array<{ x: number; z: number }> = [];
-    for (let x = 256; x <= ISLAND - 256; x += 8) for (let z = 256; z <= ISLAND - 256; z += 8) {
+    // (the central 384 m square)
+    for (let x = CENTER - 192; x <= CENTER + 192; x += 8) for (let z = CENTER - 192; z <= CENTER + 192; z += 8) {
       if (river.distTo(x, z) < 44) continue;
       if (!coast.inLand(x, z, 140)) continue;
       if (streets.near(x, z, need).length) continue;
@@ -408,7 +409,7 @@ function pickDiamond(bx: number, by: number, river: RiverRoute, coast: Coast, st
     }
     if (opts.length) return opts[(r() * opts.length) | 0];
   }
-  return { x: 5 * 64 + 32, z: 6 * 64 + 32 };
+  return { x: CENTER - 96, z: CENTER - 32 };
 }
 
 function buildNet(bx: number, by: number): RailNet {
@@ -506,7 +507,8 @@ function tryLine(
   // free control points between the stems and the diamond: evenly spaced in
   // u, wandering in v around the straight chord
   const free = (u0: number, v0: number, u1: number, v1: number): Array<{ x: number; z: number }> => {
-    const n = 1 + ((r() * 2) | 0);
+    // (1-2 on an 896 m island, more on a bigger one: the same wander per metre)
+    const n = Math.floor((1 + r() * 2) * SCALE);
     const amp = 20 + r() * 50; // gentle: every street is laid around it
     const out: Array<{ x: number; z: number }> = [];
     for (let k = 1; k <= n; k++) {

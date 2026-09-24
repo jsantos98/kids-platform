@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Endless City — Fire Missions</title>
+<title>Endless City</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #fdf4e3; }
   canvas { display: block; }
@@ -70,11 +70,12 @@
   #guideDist:empty, #guideWait:empty { display: none; }
   #prompt {
     position: fixed; bottom: 13vh; left: 50%; transform: translateX(-50%); z-index: 8; display: none;
-    padding: 26px 52px; border-radius: 32px; background: var(--cream);
-    font: 800 52px 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; color: var(--ink); text-align: center; pointer-events: none;
+    padding: clamp(10px, 2.6vh, 26px) clamp(20px, 4vw, 52px); border-radius: clamp(16px, 3vh, 32px); background: var(--cream);
+    font: 800 clamp(20px, 5.2vh, 52px) 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; color: var(--ink); text-align: center; pointer-events: none;
+    white-space: nowrap;
     box-shadow: 0 5px 0 rgba(74, 80, 88, .16);
   }
-  #prompt .bar { width: 560px; height: 32px; background: rgba(74, 80, 88, .12); border-radius: 16px; margin-top: 16px; overflow: hidden; }
+  #prompt .bar { width: min(560px, 56vw); height: clamp(12px, 3vh, 32px); background: rgba(74, 80, 88, .12); border-radius: 16px; margin-top: clamp(6px, 1.6vh, 16px); overflow: hidden; }
   #prompt .bar > div { height: 100%; background: var(--teal); width: 0%; }
   #camLabel {
     position: fixed; bottom: 4vh; left: 50%; transform: translateX(-50%); z-index: 9;

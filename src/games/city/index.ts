@@ -1,4 +1,5 @@
-// The Endless City fire-truck game: boot, frame loop and mode orchestration.
+// The Endless City: boot, frame loop and play-mode orchestration (fire truck,
+// police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
 import { createStage, makeHUD } from '../../engine/stage.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
@@ -6,20 +7,23 @@ import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
-import { VEHICLES, createPlayer, physicsStep, startCrash } from './player.js';
+import { createPlayer, physicsStep, startCrash, HELI_ALT, PLANE_ALT } from './player.js';
+import { modeFromURL } from './modes.js';
+import { Course } from './course.js';
+import { Searchlight, Winch } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
 import { GuideArrow, pulseBeacon } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
-import { createSea } from './sea.js';
+import { createSea, boatLoop, waveAt } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
-import { CENTER } from '../../worlds/world.js';
+import { CENTER, ISLAND } from '../../worlds/world.js';
 import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
@@ -41,8 +45,8 @@ const P = {
   seed: seedParam !== null && Number.isFinite(Number(seedParam)) && seedParam !== ''
     ? Number(seedParam)
     : 1 + ((Math.random() * 999999999) | 0),
-  vehicle: q.get('vehicle') ?? 'heli',
 };
+const MODE = modeFromURL(q);
 if (seedParam === null) {
   const u = new URL(location.href);
   u.searchParams.set('seed', String(P.seed));
@@ -76,6 +80,30 @@ function pickSpawn(bx: number, by: number): { x: number; z: number; heading: num
   return spots.length ? spots[(sr() * spots.length) | 0] : { x: CENTER, z: CENTER, heading: 0 };
 }
 
+/** the boat starts on the offshore sailing lane off the pier (south-east),
+ * pointing along the lane */
+function seaSpawn(): { x: number; z: number; heading: number } {
+  const loop = boatLoop();
+  let k0 = 0, best = Infinity;
+  loop.forEach((p, k) => {
+    const d = (p.x - (ISLAND - 50)) ** 2 + (p.z - (ISLAND + 26)) ** 2;
+    if (d < best) { best = d; k0 = k; }
+  });
+  const a = loop[k0], b = loop[(k0 + 1) % loop.length];
+  return { x: a.x, z: a.z, heading: Math.atan2(b.x - a.x, b.z - a.z) };
+}
+
+/** where a mode starts in city (bx, by) — city-local */
+function modeSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
+  if (MODE.spawn === 'sea') return seaSpawn();
+  if (MODE.spawn === 'rail') {
+    const r = railRouteFor(bx, by);
+    const p = r.sample(r.total / 6); // where Trains.addPlayer puts the kid's train
+    return { x: p.x, z: p.z, heading: p.h };
+  }
+  return pickSpawn(bx, by);
+}
+
 // ---- stage & world dressing ----
 const stage = createStage({
   sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: 70, fogFar: 260,
@@ -93,8 +121,9 @@ groundFollower.receiveShadow = true;
 scene.add(groundFollower);
 
 // ---- player vehicle ----
-const V = VEHICLES[P.vehicle] ?? VEHICLES.truck;
-let spawn = pickSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
+const V = MODE.vehicle;
+const airborne = V.kind === 'heli' || V.kind === 'plane';
+let spawn = modeSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
@@ -110,8 +139,8 @@ initInput(code => {
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
   if (code === 'KeyE') setSiren(!sirenOn);
-  if (code === 'KeyR') {
-    Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: 0 });
+  if (code === 'KeyR' && V.kind !== 'rail') {
+    Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: V.kind === 'plane' ? 11 : 0 });
     crumbs.clear();
   }
 });
@@ -122,10 +151,17 @@ addEventListener('pointerdown', () => audio.unlock());
 const sirenBtn = document.getElementById('sirenBtn') as HTMLButtonElement;
 let sirenOn = false;
 const sirenBar = makeSirenBar();
-sirenBar.group.position.set(0, V.fly ? 3.1 : (P.vehicle === 'kart' ? 1.25 : 2.5), V.fly ? 1.5 : 0.8);
+sirenBar.group.position.set(0, V.fly ? 3.1 : 2.5, V.fly ? 1.5 : 0.8);
 sirenBar.group.visible = false;
+sirenBar.group.userData.extra = true;
 player.car.add(sirenBar.group);
+// modes without a lightbar (plane, boat, train) have no siren button
+if (!MODE.lightbar) sirenBtn.style.display = 'none';
+// police helicopter searchlight / medical helicopter winch
+const searchlight = MODE.searchlight ? new Searchlight(scene) : null;
+const winch = MODE.winch ? new Winch(player.car, V.scale ?? 1) : null;
 function setSiren(on: boolean): void {
+  if (!MODE.lightbar) return;
   sirenOn = on;
   sirenBtn.classList.toggle('on', on);
   sirenBar.group.visible = on;
@@ -176,10 +212,12 @@ scene.add(steamPuff);
 scene.add(ladderMod.getLadderMesh());
 
 // ---- missions ----
-const heliMode = P.vehicle === 'heli';
-const missions = new Missions(scene, heliMode);
-const MAX_ACTIVE = 3;
-for (let i = 0; i < 3; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
+const missions = new Missions(scene, MODE.calls);
+const MAX_ACTIVE = MODE.calls.length ? 3 : 0;
+for (let i = 0; i < MAX_ACTIVE; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
+// checkpoint course (police car gates, sky rings, sea buoys)
+const course = MODE.course ? new Course(scene, MODE.course, V.kind === 'plane') : null;
+let courseWait = 0;
 
 // ?spraytest=1: teleport next to the first fire -> spray scene
 if (q.get('spraytest') === '1') {
@@ -191,9 +229,12 @@ if (q.get('spraytest') === '1') {
 // the level crossings that hold the cars, a patrol
 // heli circling the neighbourhood while the kid plays the fire truck ----
 const trains = new Trains(scene, 0, 0);
+if (V.kind === 'rail') trains.addPlayer();
+/** the train: index of the station to stop at next (into trains.stationArcs) */
+let stationNext = -1;
 const transit = new Transit(scene);
-// in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
+// unless the kid drives it, one of the AI vehicles is the fire truck
+const traffic = new Traffic(scene, 12, MODE.id !== 'truck' ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -207,6 +248,7 @@ if (q.get('debugsea') === '1') {
     traffic,
     chunks,
     player,
+    course: () => course,
     transit: () => transit.list(),
     river: () => river,
     route: () => railRouteFor(curCity.bx, curCity.by),
@@ -216,7 +258,7 @@ if (q.get('debugsea') === '1') {
     },
   };
 }
-const patrol = V.fly ? null : new PatrolHeli(scene);
+const patrol = airborne ? null : new PatrolHeli(scene);
 // ---- pets + pedestrians: cube pets and Kenney mini-characters share the
 // sidewalks; everyone strolls until the fire truck scares them ----
 const PET_NAMES = ['pet-dog', 'pet-cat', 'pet-bunny', 'pet-chick', 'pet-pig', 'pet-fox', 'pet-panda', 'pet-penguin'];
@@ -265,13 +307,27 @@ function applyCity(c: CityRef): void {
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
   missions.setCity(c.bx, c.by, c.ox, c.oz);
-  const s = pickSpawn(c.bx, c.by);
+  const s = modeSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
+  course?.start(c, player.state.x, player.state.z, player.state.heading);
+  stationNext = -1;
 }
 applyCity(curCity);
 const hud = makeHUD();
+let runStars = 0;
 function updateMissionPanel(): void {
-  missionEl.innerHTML = `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`;
+  missionEl.innerHTML = MODE.id === 'truck'
+    ? `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`
+    : `<span style="color:#e25c5c;font-weight:800">${MODE.icon} this run: ${runStars} ⭐</span><br>all time: ${totals.stars} ⭐`;
+}
+/** a finished task outside the fire truck's fires/cats */
+function earnStar(msg: string, at: THREE.Vector3): void {
+  particles.burstConfetti(at);
+  runStars++;
+  totals.stars++;
+  saveTotals(totals);
+  toast = msg;
+  updateMissionPanel();
 }
 
 // ---- camera modes ----
@@ -323,7 +379,7 @@ if (tp) {
  * shortest open-street route from whichever end of the player's street
  * gets there first */
 function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: number } {
-  if (V.fly || dist < 45) return { x: tx, z: tz };
+  if (V.kind !== 'ground' || dist < 45) return { x: tx, z: tz };
   const ox = curCity.ox, oz = curCity.oz;
   const g = graphFor(curCity.bx, curCity.by);
   const lx = player.state.x - ox, lz = player.state.z - oz;
@@ -352,6 +408,29 @@ function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: nu
   return { x: g.nodes[best[k]].x + ox, z: g.nodes[best[k]].z + oz };
 }
 
+/** the train's next station: world position + arc gap ahead of the train */
+function nextStation(): { x: number; z: number; gap: number } | null {
+  const arcs = trains.stationArcs;
+  const pose = trains.playerPose();
+  if (!arcs.length || !pose) return null;
+  const total = trains.loopLength;
+  const ahead = (d: number): number => ((d - pose.s) % total + total) % total;
+  if (stationNext < 0 || stationNext >= arcs.length) {
+    // the first station ahead of the train
+    let best = 0;
+    arcs.forEach((d, k) => { if (ahead(d) < ahead(arcs[best])) best = k; });
+    stationNext = best;
+  }
+  let gap = ahead(arcs[stationNext]);
+  // overshot the platform: the next station becomes the goal
+  if (gap > total - 12) {
+    stationNext = (stationNext + 1) % arcs.length;
+    gap = ahead(arcs[stationNext]);
+  }
+  const p = trains.at(arcs[stationNext]);
+  return { x: p.x + curCity.ox, z: p.z + curCity.oz, gap: gap > total - 12 ? 0 : gap };
+}
+
 // ---- main loop ----
 const tick = (): void => {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -364,15 +443,24 @@ const tick = (): void => {
 
   // physics + collision (frozen during the mini-scenes: the truck stays put
   // until the fire is out / the cat is down)
-  if (mode === 'drive' || player.crashT > 0) {
+  if (V.kind === 'rail') {
+    // the kid's train: wheel pedals drive it, the pose comes from the rails
+    trains.setControls(mode === 'drive' ? input.gas : 0, mode === 'drive' ? input.brake : 1, nextStation()?.gap ?? Infinity);
+    const pose = trains.playerPose();
+    if (pose) {
+      st.x = pose.x + curCity.ox; st.z = pose.z + curCity.oz;
+      st.heading = pose.h; st.v = pose.v;
+    }
+  } else if (mode === 'drive' || player.crashT > 0) {
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
     const wasCrashing = player.crashT > 0;
-    const step = physicsStep(player, input, dt, boxes);
+    const ring = course?.target();
+    const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
       audio.thud();
       toast = '';
       Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
-    } else if (!wasCrashing && !V.fly && mode === 'drive') {
+    } else if (!wasCrashing && V.kind === 'ground' && mode === 'drive') {
       crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
       // stuck detector: gas held the whole window yet the truck went nowhere
       // (wedged against something the crash test forgives) -> same resume
@@ -391,21 +479,39 @@ const tick = (): void => {
     Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
   }
 
-  player.car.position.set(st.x, V.fly ? 16 + Math.sin(elapsed * 1.3) * 0.7 : 0, st.z);
+  const bob = V.kind === 'heli' ? Math.sin(elapsed * 1.3) * 0.7 : V.kind === 'boat' ? waveAt(st.x, st.z, elapsed) * 1.6 : 0;
+  player.car.position.set(st.x, st.alt + bob, st.z);
   player.car.rotation.y = st.heading;
-  if (V.fly) {
+  if (V.kind === 'heli') {
     // hover-flight life: nose dips with speed, banks into turns, rotors spin
     player.car.rotation.x = -(st.v / V.maxF) * 0.16;
     player.car.rotation.z = input.steer * 0.12 * Math.min(1, Math.abs(st.v) / V.maxF);
     (player.car.userData.mainRotor as THREE.Object3D | undefined)!.rotation.y = elapsed * 22;
     (player.car.userData.tailRotor as THREE.Object3D | undefined)!.rotation.x = elapsed * 30;
+  } else if (V.kind === 'plane') {
+    // bank into the turn, nose follows the climb, propeller spins
+    player.car.rotation.z = input.steer * 0.45;
+    const ring = course?.target();
+    player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
+    (player.car.userData.prop as THREE.Object3D | undefined)!.rotation.z = elapsed * 40;
+  } else if (V.kind === 'boat') {
+    // pitch up on the plane at speed, rock with the swell
+    player.car.rotation.x = -Math.min(0.12, Math.abs(st.v) * 0.008) + Math.sin(elapsed * 1.7) * 0.03;
+    player.car.rotation.z = -input.steer * 0.08 * Math.min(1, Math.abs(st.v) / 8) + Math.sin(elapsed * 1.3) * 0.03;
   } else {
     player.car.rotation.z = -input.steer * Math.min(Math.abs(st.v) / 16, 1) * 0.04;
     for (const w of player.wheels) (w as THREE.Object3D).rotation.x += (st.v * dt) / 0.42;
   }
 
+  // the lightbar sits on the kit model's roof once it has loaded
+  if (!airborne && player.car.userData.top && !sirenBar.group.userData.placed) {
+    sirenBar.group.position.y = player.car.userData.top as number;
+    sirenBar.group.userData.placed = true;
+  }
+  searchlight?.update(st.x, st.alt + bob, st.z, st.heading);
+
   // camera (flying vehicles keep the camera near their altitude)
-  const flyY = V.fly ? 16 : 0;
+  const flyY = V.kind === 'plane' ? st.alt : V.kind === 'heli' ? HELI_ALT : 0;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
   if (mode === 'spray' && spraySession) {
     const fp = spraySession.obj.pos;
@@ -457,8 +563,10 @@ const tick = (): void => {
   sea.update(elapsed);
   scenery.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
-  pedestrians.update(dt, st.x, st.z, st.x, st.z);
-  if (!V.fly && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
+  // people only scatter from vehicles on the ground
+  if (airborne || V.kind === 'boat') pedestrians.update(dt, 1e9, 1e9, st.x, st.z);
+  else pedestrians.update(dt, st.x, st.z, st.x, st.z);
+  if (V.kind === 'ground' && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);
     splashTimer -= dt;
     if (Math.abs(st.v) > 1.5 && splashTimer <= 0) {
@@ -483,6 +591,12 @@ const tick = (): void => {
   if (mode === 'spray') hoseAim += (Math.max(-1, Math.min(1, aimIn)) - hoseAim) * Math.min(1, dt * 4);
   if (mode === 'ladder') ladderAim += (Math.max(-1, Math.min(1, aimIn)) - ladderAim) * Math.min(1, dt * 5);
 
+  // a finished course is followed by a fresh one after a short cheer
+  if (course && !course.target()) {
+    courseWait -= dt;
+    if (courseWait <= 0) course.start(curCity, st.x, st.z, st.heading);
+  }
+
   // missions: keep several rescue calls alive
   missions.cooldown -= dt;
   while (missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
@@ -490,6 +604,8 @@ const tick = (): void => {
     missions.cooldown = 0.5;
   }
   const { o: near, d: nd } = missions.nearest(st.x, st.z);
+  // the medical helicopter's winch reels in unless it's lifting someone
+  if (winch && !(near && near.type === 'patient' && nd < 9)) winch.update(dt, 1.2, V.scale ?? 1);
   for (const o of missions.objectives) {
     if (!o.marker) continue;
     // hover marker over the call; the tall beacon pillar does the
@@ -501,11 +617,30 @@ const tick = (): void => {
     o.marker.rotation.y += dt * 1.2;
     pulseBeacon(o.beacon, elapsed, o.index, busy ? 0 : o.d);
   }
-  // where the guidance points: straight at the call when flying or close,
+  // the course gate / station the mode is heading for (when it has one)
+  const gate = course?.target() ?? null;
+  const station = V.kind === 'rail' ? nextStation() : null;
+  const goal = gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
+    : near ? { x: near.pos.x, z: near.pos.z } : null;
+  const goalD = goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
+  // where the guidance points: straight at the goal when flying or close,
   // otherwise at the next junction of the shortest street route
-  const way = near && mode === 'drive' ? guideWaypoint(near.pos.x, near.pos.z, nd) : null;
+  const way = goal && mode === 'drive' ? guideWaypoint(goal.x, goal.z, goalD) : null;
   const bearing = way ? Math.atan2(way.x - st.x, way.z - st.z) : null;
-  guideArrow3d.update(dt, elapsed, player.car.position, V.fly ? 5.2 : 4.6, bearing);
+  guideArrow3d.update(dt, elapsed, player.car.position, airborne ? 5.2 : V.kind === 'rail' ? 7 : 4.6, bearing);
+  camera.getWorldDirection(camDir);
+  const camYaw = Math.atan2(camDir.x, camDir.z);
+  const showGuide = (icon: string, dist: number, dots: number): void => {
+    guideEl.style.opacity = '1';
+    guideIcon.textContent = icon;
+    // the badge arrow turns with the CAMERA: up = straight ahead on screen
+    guideArrow.style.transform = `rotate(${(camYaw - (bearing ?? camYaw)).toFixed(3)}rad)`;
+    guideArrow.style.display = '';
+    guideDist.innerHTML = '\u25CF'.repeat(dots) + '\u25CB'.repeat(5 - dots)
+      + `<span class="m">${Math.round(dist)} m</span>`;
+    guideWait.textContent = '';
+    promptEl.style.display = 'block';
+  };
 
   if (mode === 'spray' && spraySession) {
     guideEl.style.opacity = '0';
@@ -541,20 +676,36 @@ const tick = (): void => {
       ladderSession = null;
       mode = 'drive';
     }
+  } else if (course && gate) {
+    // ---- checkpoint course: through the glowing gate, then the next ----
+    showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,
+      Math.round((5 * course.next) / course.gates.length));
+    promptText.textContent = course.kind === 'gates' ? 'DRIVE THROUGH THE GATES!'
+      : course.kind === 'rings' ? 'FLY THROUGH THE RINGS!' : 'SAIL THROUGH THE BUOYS!';
+    promptFill.style.width = `${(100 * course.next) / course.gates.length}%`;
+    const res = course.update(elapsed, st.x, st.alt + 2, st.z);
+    if (res === 'passed') particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z));
+    if (res === 'finished') {
+      earnStar(course.kind === 'gates' ? '🏁 PATROL DONE!' : course.kind === 'rings' ? '⭕ ALL RINGS!' : '🚩 COURSE SAILED!',
+        new THREE.Vector3(st.x, st.alt + 2, st.z));
+      courseWait = 2.5;
+    }
+  } else if (station) {
+    // ---- the train: stop at the platform ----
+    const pose = trains.playerPose()!;
+    const gap = station.gap;
+    showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
+    promptFill.style.width = '0%';
+    promptText.textContent = gap < 12 ? (pose.v < 0.5 ? 'ALL ABOARD!' : 'STOP HERE!')
+      : gap < 70 ? 'SLOW DOWN…' : 'DRIVE TO THE STATION';
+    if (gap < 12 && pose.v < 0.5) {
+      earnStar('🚉 STATION STOP!', new THREE.Vector3(st.x, 3, st.z));
+      stationNext = (stationNext + 1) % trains.stationArcs.length;
+    }
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----
-    guideEl.style.opacity = '1';
-    guideIcon.textContent = near.type === 'fire' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱';
-    // the badge arrow turns with the CAMERA: up = straight ahead on screen
-    camera.getWorldDirection(camDir);
-    const camYaw = Math.atan2(camDir.x, camDir.z);
-    guideArrow.style.transform = `rotate(${(camYaw - (bearing ?? camYaw)).toFixed(3)}rad)`;
-    guideArrow.style.display = '';
-    const dots = Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240))));
-    guideDist.innerHTML = '\u25CF'.repeat(dots) + '\u25CB'.repeat(5 - dots)
-      + `<span class="m">${Math.round(nd)} m</span>`;
-    guideWait.textContent = '';
-    promptEl.style.display = 'block';
+    showGuide(near.type === 'fire' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱', nd,
+      Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240)))));
     if (near.type === 'fire') {
       promptText.textContent = nd < 15 ? 'STOP HERE!' : 'DRIVE TO THE FIRE';
       promptFill.style.width = '0%';
@@ -564,19 +715,19 @@ const tick = (): void => {
         promptText.textContent = 'SPRAY LEFT / RIGHT!';
       }
     } else if (near.type === 'patient') {
-      // helicopter: hover over the person to winch them up
-      const hovering = nd < 9 && Math.abs(st.v) < 4;
-      if (hovering) near.progress += dt / near.need;
+      // helicopter: hover over the person and the winch lifts them;
+      // ambulance: pull up beside them and they climb in
+      const heliMode = V.kind === 'heli';
+      const close = heliMode ? nd < 9 && Math.abs(st.v) < 4 : nd < 12 && Math.abs(st.v) < 1 && player.crashT <= 0;
+      if (close) near.progress += dt; // seconds held; done at `need`
       promptFill.style.width = `${Math.min(100, near.progress / near.need * 100)}%`;
-      promptText.textContent = hovering ? 'WINCHING…'
-        : (nd < 9 ? 'HOVER HERE!' : 'FLY TO THE PERSON');
+      promptText.textContent = close ? (heliMode ? 'WINCHING…' : 'HELPING THEM IN…')
+        : heliMode ? (nd < 9 ? 'HOVER HERE!' : 'FLY TO THE PERSON')
+          : (nd < 12 ? 'STOP HERE!' : 'DRIVE TO THE PERSON');
+      winch?.update(dt, close ? HELI_ALT - 1 : 1.2, V.scale ?? 1);
       if (near.progress >= near.need) {
-        particles.burstConfetti(near.pos);
         missions.remove(near);
-        missions.sCats++;
-        totals.cats++;
-        saveTotals(totals);
-        toast = '🆘 PERSON RESCUED!';
+        earnStar('🆘 PERSON RESCUED!', near.pos);
       }
     } else {
       promptText.textContent = nd < 12 ? 'STOP HERE!' : 'DRIVE TO THE CAT';
@@ -590,7 +741,7 @@ const tick = (): void => {
   } else {
     guideEl.style.opacity = '1';
     promptEl.style.display = 'none';
-    guideWait.textContent = toast || 'waiting for a call…';
+    guideWait.textContent = toast || (course ? 'new course coming…' : 'waiting for a call…');
     guideIcon.textContent = '🚨';
     guideArrow.style.transform = '';
     guideArrow.style.display = 'none';
@@ -618,7 +769,7 @@ const tick = (): void => {
     statTime = elapsed;
     const i = renderer.info.render;
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(`city ${curCity.bx},${curCity.by} · ${P.vehicle} · ${kmh} km/h · draw calls ${i.calls} · triangles ${i.triangles.toLocaleString('en-US')}`);
+    hud.set(`city ${curCity.bx},${curCity.by} · ${MODE.id} · ${kmh} km/h · draw calls ${i.calls} · triangles ${i.triangles.toLocaleString('en-US')}`);
     document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
   }

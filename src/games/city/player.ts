@@ -1,8 +1,14 @@
-// Player vehicle: configs, arcade physics, collision and crash-resume.
+// Player vehicle: configs, arcade physics per movement kind (ground, heli,
+// plane, boat), collision and crash-resume. The train is driven by Trains.
 import * as THREE from 'three';
-import { makeCar, makeFireTruck, makeHelicopter } from '../../kit/index.js';
+import { makeCar, makeFireTruck, makeHelicopter, makePlane } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
+import { cityAt } from '../../worlds/cityGrid.js';
+import { ISLAND } from '../../worlds/world.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
+
+/** how a vehicle moves: on the streets, hovering, flying, sailing or on rails */
+export type MoveKind = 'ground' | 'heli' | 'plane' | 'boat' | 'rail';
 
 export interface VehicleConfig {
   /** procedural fallback model (shown until the GLB streams in) */
@@ -10,7 +16,8 @@ export interface VehicleConfig {
   /** GLB swapped in when loaded ('' = procedural only) */
   glb: string;
   glbLen: number;
-  /** flying vehicles hover at a fixed altitude and ignore collisions */
+  kind: MoveKind;
+  /** airborne: ignores collisions, the camera rides at its altitude */
   fly: boolean;
   accel: number;
   brake: number;
@@ -29,44 +36,87 @@ export interface VehicleConfig {
   front: number;
   halfW: number;
   frontR: number;
+  /** model scale (procedural aircraft are drawn small) */
+  scale?: number;
 }
 
+const groundCar = (make: () => THREE.Group, glb: string, glbLen: number, over: Partial<VehicleConfig> = {}): VehicleConfig => ({
+  make, glb, glbLen, kind: 'ground', fly: false,
+  accel: 6.5, brake: 15, maxF: 12, maxR: 3, radius: 1.0,
+  camBack: 11, camUp: 5.2, highBack: 12, highUp: 11.5, highAhead: 6,
+  wheelbase: 2.7, steerMax: 0.5, cabF: 1.8, cabY: 1.6,
+  front: 1.5, halfW: 0.95, frontR: 0.95,
+  ...over,
+});
+
+const heli = (body: number, band: number): VehicleConfig => ({
+  make: () => makeHelicopter({ body, band }), glb: '', glbLen: 7.8, kind: 'heli', fly: true,
+  accel: 9, brake: 12, maxF: 13, maxR: 6, radius: 2.6,
+  camBack: 17, camUp: 8.5, highBack: 20, highUp: 15, highAhead: 8,
+  wheelbase: 4, steerMax: 1.0, cabF: 4.6, cabY: 3.4,
+  front: 3, halfW: 2.2, frontR: 2, scale: 1.5,
+});
+
 export const VEHICLES: Record<string, VehicleConfig> = {
-  truck: {
-    make: makeFireTruck, glb: '/assets/kenney/firetruck.glb', glbLen: 6.6, fly: false,
-    accel: 5, brake: 13, maxF: 9.5, maxR: 3, radius: 1.35,
-    camBack: 12.5, camUp: 5.6, highBack: 14, highUp: 13, highAhead: 6,
+  truck: groundCar(makeFireTruck, '/assets/kenney/firetruck.glb', 6.6, {
+    accel: 5, brake: 13, maxF: 9.5, radius: 1.35,
+    camBack: 12.5, camUp: 5.6, highBack: 14, highUp: 13,
     wheelbase: 3.6, steerMax: 0.46, cabF: 3.0, cabY: 2.9,
     front: 1.95, halfW: 1.15, frontR: 1.05,
+  }),
+  police: groundCar(() => makeCar({ body: 0x5a7fb5 }), '/assets/kenney/police.glb', 4.6, {
+    maxF: 12.5, radius: 1.05,
+  }),
+  ambulance: groundCar(() => makeCar({ body: 0xfaf7ef }), '/assets/kenney/ambulance.glb', 5.4, {
+    accel: 5.8, maxF: 11, radius: 1.2, camBack: 12, camUp: 5.4,
+    wheelbase: 3.1, steerMax: 0.48, cabF: 2.2, cabY: 2.3, front: 1.8, halfW: 1.05, frontR: 1.0,
+  }),
+  car: groundCar(() => makeCar({ body: 0x7fb2d9 }), '/assets/kenney/hatchback-sports.glb', 4.2),
+  heli: heli(0xfaf7ef, 0xe25c5c),
+  heliMedical: heli(0xfaf7ef, 0xe25c5c),
+  heliPolice: heli(0x5a7fb5, 0xfaf7ef),
+  plane: {
+    make: () => makePlane(), glb: '', glbLen: 8, kind: 'plane', fly: true,
+    accel: 6, brake: 7, maxF: 24, maxR: 0, radius: 3,
+    camBack: 22, camUp: 7.5, highBack: 28, highUp: 18, highAhead: 10,
+    wheelbase: 4, steerMax: 0.9, cabF: 2.4, cabY: 1.6,
+    front: 3, halfW: 3.6, frontR: 2, scale: 1.4,
   },
-  car: {
-    make: () => makeCar({ body: 0x7fb2d9 }), glb: '/assets/kenney/hatchback-sports.glb', glbLen: 4.2, fly: false,
-    accel: 6.5, brake: 15, maxF: 12, maxR: 3, radius: 1.0,
-    camBack: 11, camUp: 5.2, highBack: 12, highUp: 11.5, highAhead: 6,
-    wheelbase: 2.7, steerMax: 0.5, cabF: 1.8, cabY: 1.6,
-    front: 1.5, halfW: 0.95, frontR: 0.95,
+  boat: {
+    make: () => new THREE.Group(), glb: '/assets/kenney/watercraft/boat-speed-a.glb', glbLen: 6.5, kind: 'boat', fly: false,
+    accel: 6, brake: 8, maxF: 14, maxR: 3, radius: 2,
+    camBack: 15, camUp: 6.5, highBack: 18, highUp: 14, highAhead: 8,
+    wheelbase: 3.4, steerMax: 0.6, cabF: 1.2, cabY: 2.2,
+    front: 3, halfW: 1.4, frontR: 1.4,
   },
-  heli: {
-    make: makeHelicopter, glb: '', glbLen: 7.8, fly: true,
-    accel: 9, brake: 12, maxF: 13, maxR: 6, radius: 2.6,
-    camBack: 17, camUp: 8.5, highBack: 20, highUp: 15, highAhead: 8,
-    wheelbase: 4, steerMax: 1.0, cabF: 4.6, cabY: 3.4,
-    front: 3, halfW: 2.2, frontR: 2,
+  train: {
+    make: () => new THREE.Group(), glb: '', glbLen: 9, kind: 'rail', fly: false,
+    accel: 2.4, brake: 5.5, maxF: 12, maxR: 0, radius: 2,
+    // the kid's train is ~30 m long: the chase camera rides behind all of it
+    camBack: 40, camUp: 13, highBack: 48, highUp: 24, highAhead: 12,
+    wheelbase: 9, steerMax: 0, cabF: 3.5, cabY: 3.1,
+    front: 4.5, halfW: 1.6, frontR: 1.6,
   },
-  kart: {
-    make: makeCar, glb: '/assets/kenney/racing/vehicle-truck-red.glb', glbLen: 3.2, fly: false,
+  kart: groundCar(makeCar, '/assets/kenney/racing/vehicle-truck-red.glb', 3.2, {
     accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
-    camBack: 10, camUp: 4.6, highBack: 12, highUp: 11, highAhead: 6,
-    wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5,
-    front: 1.4, halfW: 0.9, frontR: 0.9,
-  },
+    camBack: 10, camUp: 4.6, highBack: 12, highUp: 11,
+    wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5, front: 1.4, halfW: 0.9, frontR: 0.9,
+  }),
 };
+
+/** cruise altitudes: the helicopter hovers low over the rooftops, the plane
+ * flies higher (it climbs/dives to each ring on its own) */
+export const HELI_ALT = 16;
+export const PLANE_ALT = 30;
+const PLANE_MIN_V = 11;
 
 export interface PlayerState {
   x: number;
   z: number;
   heading: number;
   v: number;
+  /** altitude of the vehicle's origin (0 on the ground) */
+  alt: number;
 }
 
 export interface Player {
@@ -90,10 +140,13 @@ const CRASH_FLASH = 1.6;
 
 export function createPlayer(V: VehicleConfig, x: number, z: number, heading: number): Player {
   const car = V.make();
-  car.scale.setScalar(V.fly ? 1.5 : 1);
+  car.scale.setScalar(V.scale ?? 1);
   const p: Player = {
     car, V,
-    state: { x, z, heading, v: 0 },
+    state: {
+      x, z, heading, v: V.kind === 'plane' ? PLANE_MIN_V : 0,
+      alt: V.kind === 'heli' ? HELI_ALT : V.kind === 'plane' ? PLANE_ALT : 0,
+    },
     wheels: [],
     crashT: 0,
     crash: { x: 0, z: 0, heading: 0 },
@@ -102,7 +155,11 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
     // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
     // (Kenney vehicles already face +Z — our forward — no flip needed)
     spawnVehicle(V.glb, { len: V.glbLen }).then(g => {
-      car.clear();
+      // keep any extras the game hung on the car (lightbar, winch)
+      for (const ch of [...car.children]) if (!ch.userData.extra) car.remove(ch);
+      // roof height of the kit model (measured before parenting, so in car
+      // space), so the lightbar can sit on it
+      car.userData.top = new THREE.Box3().setFromObject(g).max.y;
       car.add(g);
       p.wheels = wheelNodes(g) as THREE.Object3D[];
     }).catch(() => {});
@@ -125,10 +182,12 @@ export interface PhysicsStep {
 
 export function physicsStep(
   p: Player, input: PhysicsInput, dt: number, boxes: CollisionBox[],
+  /** plane only: the altitude to climb/dive toward (the next ring) */
+  altTarget = PLANE_ALT,
 ): PhysicsStep {
   const { state: st, V } = p;
 
-  if (V.fly) {
+  if (V.kind === 'heli') {
     // simplified helicopter: hover-drive at a fixed altitude, above it all
     if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
     if (input.brake) st.v = Math.max(-V.maxF * 0.5, st.v - V.brake * dt);
@@ -136,6 +195,40 @@ export function physicsStep(
     st.heading += input.steer * 1.0 * dt * (0.35 + Math.abs(st.v) / V.maxF);
     st.x += Math.sin(st.heading) * st.v * dt;
     st.z += Math.cos(st.heading) * st.v * dt;
+    st.alt = HELI_ALT;
+    return { crashed: false };
+  }
+
+  if (V.kind === 'plane') {
+    // the plane can never stall or crash: it always flies at least
+    // PLANE_MIN_V, gas speeds it up, brake slows it back down, the wheel
+    // banks it round, and it finds each ring's height by itself
+    if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
+    else if (input.brake) st.v = Math.max(PLANE_MIN_V, st.v - V.brake * dt);
+    else st.v += (Math.max(PLANE_MIN_V, Math.min(st.v, 18)) - st.v) * Math.min(1, dt * 0.3);
+    st.v = Math.max(PLANE_MIN_V, st.v);
+    st.heading += input.steer * V.steerMax * dt;
+    st.alt += Math.max(-6 * dt, Math.min(6 * dt, altTarget - st.alt));
+    st.x += Math.sin(st.heading) * st.v * dt;
+    st.z += Math.cos(st.heading) * st.v * dt;
+    return { crashed: false };
+  }
+
+  if (V.kind === 'boat') {
+    // on the water: gas/brake/steer like a light car with a long glide; the
+    // shore (any island) is a soft wall — the boat slides along it and slows,
+    // it never "crashes"
+    if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
+    if (input.brake) st.v = Math.max(-V.maxR, st.v - V.brake * dt);
+    if (!input.gas && !input.brake) st.v -= st.v * 0.6 * dt;
+    st.heading += input.steer * V.steerMax * dt * Math.min(1, 0.3 + Math.abs(st.v) / 6) * Math.sign(st.v || 1);
+    const nx = st.x + Math.sin(st.heading) * st.v * dt;
+    const nz = st.z + Math.cos(st.heading) * st.v * dt;
+    const blockX = onLand(nx, st.z, V.radius), blockZ = onLand(st.x, nz, V.radius);
+    if (!blockX) st.x = nx;
+    if (!blockZ) st.z = nz;
+    if (blockX || blockZ) st.v *= 1 - Math.min(0.9, dt * 3);
+    st.alt = 0;
     return { crashed: false };
   }
 
@@ -190,4 +283,14 @@ export function physicsStep(
     }
   }
   return { crashed };
+}
+
+/** would a boat of radius r at world (x, z) touch an island (beach
+ * included)? Islands are the city squares; the causeways are bridges the
+ * boat passes under. */
+export function onLand(x: number, z: number, r: number): boolean {
+  const c = cityAt(x, z);
+  const lx = x - c.ox, lz = z - c.oz;
+  const m = r + 1.5;
+  return lx > -m && lz > -m && lx < ISLAND + m && lz < ISLAND + m;
 }

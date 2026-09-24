@@ -38,7 +38,19 @@ interface Consist {
   hold: number;               // seconds spent at the current station stop
   next: number;               // index into the sorted station list
   units: Unit[];
+  /** the kid drives this one (throttle/brake), no automatic station stops */
+  player?: boolean;
 }
+
+/** the kid's passenger train: electric city set, cab front and back */
+const PLAYER_SET = [
+  '/assets/kenney/train/train-electric-city-a.glb',
+  '/assets/kenney/train/train-electric-city-b.glb',
+  '/assets/kenney/train/train-electric-city-c.glb',
+];
+const PLAYER_MAX = 12;   // m/s
+const PLAYER_ACCEL = 2.4;
+const PLAYER_BRAKE = 5.5;
 
 export class Trains {
   private route: RailRoute;
@@ -73,6 +85,47 @@ export class Trains {
   }
 
   private group: THREE.Group;
+  private controls = { gas: 0, brake: 0, stationGap: Infinity };
+
+  /** add the kid's train, halfway between the first two AI consists
+   * (playerPose / setControls drive it) */
+  addPlayer(): void {
+    const total = this.route.total;
+    // halfway between the first two AI consists (they start evenly spaced)
+    const consist: Consist = { s: total / 6, v: 0, hold: 0, next: 0, units: [], player: true };
+    let back = 0;
+    for (const url of PLAYER_SET) {
+      consist.units.push(this.makeUnit(url, CAR_LEN + 1.5, back));
+      back += CAR_LEN + 1.5 + GAP;
+    }
+    this.consists.push(consist);
+  }
+
+  /** the kid's wheel/pedals for their train this frame, and how far ahead
+   * the platform they're heading for is (the approach is speed-capped so a
+   * little driver can stop on it) */
+  setControls(gas: number, brake: number, stationGap = Infinity): void {
+    this.controls.gas = gas;
+    this.controls.brake = brake;
+    this.controls.stationGap = stationGap;
+  }
+
+  /** the kid's train: head position + heading (city-local), speed, arc s */
+  playerPose(): { x: number; z: number; h: number; v: number; s: number } | null {
+    const c = this.consists.find(q => q.player);
+    if (!c) return null;
+    const p = this.route.sample(c.s);
+    return { x: p.x, z: p.z, h: p.h, v: c.v, s: c.s };
+  }
+
+  /** arc distances of this city's stations, ascending */
+  get stationArcs(): number[] { return this.stations; }
+
+  /** loop length of this city's railway */
+  get loopLength(): number { return this.route.total; }
+
+  /** position of arc distance d (city-local) */
+  at(d: number): { x: number; z: number; h: number } { return this.route.sample(d); }
 
   /** move the whole railway (mesh + consists) to another city */
   setCity(scene: THREE.Scene, bx: number, by: number): void {
@@ -142,7 +195,15 @@ export class Trains {
     const total = this.route.total;
     for (const c of this.consists) {
       let vTarget = SPEED;
-      if (this.stations.length) {
+      if (c.player) {
+        // the kid's train: gas pulls, brake stops, coasting slowly bleeds
+        // speed — capped only by the train ahead (below)
+        const { gas, brake, stationGap } = this.controls;
+        vTarget = gas > 0.05 ? PLAYER_MAX : brake > 0.05 ? 0 : Math.max(0, c.v - 0.5);
+        // station approach assist: the top speed eases down toward a crawl
+        // at the platform, so letting go of the gas stops the train on it
+        if (stationGap < 80) vTarget = Math.min(vTarget, Math.max(1.6, stationGap * 0.3));
+      } else if (this.stations.length) {
         const gap = ((this.stations[c.next] - c.s) % total + total) % total;
         if (gap < 1.6) {
           // dwelling at the platform
@@ -166,7 +227,8 @@ export class Trains {
         }
       }
       const dv = vTarget - c.v;
-      c.v += Math.max(-BRAKE * dt, Math.min(ACCEL * dt, dv));
+      if (c.player) c.v += Math.max(-PLAYER_BRAKE * dt, Math.min(PLAYER_ACCEL * dt, dv));
+      else c.v += Math.max(-BRAKE * dt, Math.min(ACCEL * dt, dv));
       c.s += c.v * dt;
       for (const u of c.units) {
         if (!u.obj) continue;

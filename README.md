@@ -17,12 +17,13 @@ The garage at the root is the launcher — big buttons, no reading required.
 
 **Endless City** is an endless archipelago of seeded island cities joined by
 causeways. Every new game rolls a fresh seed and writes it into the URL, and
-`?seed=N` replays that world exactly. There are two playable vehicles: the
-helicopter (default) and the fire truck (`?vehicle=truck`, or its garage
-button). The world keeps running while you play: each city has a railway
+`?seed=N` replays that world exactly. Pick a mode from the garage (or
+`?mode=`): fire truck (fires + cats), police car (patrol gates), ambulance and
+medical helicopter (people to rescue), police helicopter and plane (sky
+rings), boat (buoy course) and train (station stops). The world keeps running while you play: each city has a railway
 loop with stations and gated level crossings that trains run on, traffic obeys
-the lights, an EMS helicopter patrols the sky, and in the helicopter the fire
-truck drives itself.
+the lights, an EMS helicopter patrols the sky, and whenever the kid isn't
+driving it the fire truck drives itself.
 
 ## Controls (Endless City)
 

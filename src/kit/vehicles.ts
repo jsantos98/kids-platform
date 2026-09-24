@@ -154,9 +154,11 @@ export function makeFireTruck(): THREE.Group {
   return g;
 }
 
-export function makeHelicopter(): THREE.Group {
+/** rescue helicopter; `body` is the main livery colour, `band` the trim
+ * (medical: white + red, police: blue + white) */
+export function makeHelicopter({ body = C.white, band = C.red }: { body?: number; band?: number } = {}): THREE.Group {
   const g = G();
-  const red = C.red, white = C.white;
+  const red = band, white = body;
   g.add(P.rbox(1.5, 1.5, 3.3, 0.42, white, 0, 1.62, 0.35));
   g.add(P.rbox(1.3, 1.0, 1.1, 0.3, white, 0, 1.5, 1.95));
   g.add(P.rbox(1.54, 0.35, 3.34, 0.16, red, 0, 1.08, 0.35)); // red belly band
@@ -268,6 +270,42 @@ export function makeTrainCar({ color = 0xf0ece2, band = 0xd9534f } = {}): THREE.
       g.add(wheel(0.31, 0.12, -0.72, 0.31, bz + wz));
       g.add(wheel(0.31, 0.12, 0.72, 0.31, bz + wz));
     }
+  }
+  return g;
+}
+
+/** a chunky pastel propeller plane (faces +Z); userData.prop spins */
+export function makePlane({ body = 0xf6c952, wing = 0xe25c5c }: { body?: number; wing?: number } = {}): THREE.Group {
+  const g = G();
+  const dark = 0x5a6472;
+  // fuselage: fat nose tapering to the tail
+  g.add(P.rbox(1.5, 1.4, 3.2, 0.5, body, 0, 1.3, 0.6));
+  const tailCone = P.cyl(0.35, 0.72, 2.6, 12, body, 0, 1.45, -2.1);
+  tailCone.rotation.x = Math.PI / 2;
+  g.add(tailCone);
+  // cockpit canopy
+  const canopy = P.sphere(0.62, C.glass, 0, 2.05, 0.55);
+  canopy.scale.set(0.9, 0.7, 1.4);
+  g.add(canopy);
+  // main wing + tips
+  g.add(P.rbox(7.4, 0.22, 1.5, 0.1, wing, 0, 1.0, 0.7));
+  for (const sx of [-3.6, 3.6]) g.add(P.rbox(0.3, 0.26, 1.2, 0.08, C.white, sx, 1.0, 0.7));
+  // tail plane + fin
+  g.add(P.rbox(2.8, 0.16, 0.9, 0.06, wing, 0, 1.5, -3.2));
+  g.add(P.rbox(0.16, 1.1, 1.0, 0.06, wing, 0, 2.1, -3.2));
+  // nose cone + propeller
+  g.add(P.cyl(0.42, 0.62, 0.5, 12, C.white, 0, 1.3, 2.35, Math.PI / 2, 0, 0));
+  const prop = G();
+  prop.add(P.box(0.18, 2.3, 0.08, dark, 0, 0, 0));
+  prop.add(P.box(2.3, 0.18, 0.08, dark, 0, 0, 0));
+  prop.add(P.sphere(0.16, C.red, 0, 0, 0.05));
+  prop.position.set(0, 1.3, 2.65);
+  g.add(prop);
+  g.userData.prop = prop;
+  // fixed landing gear
+  for (const sx of [-0.8, 0.8]) {
+    g.add(P.box(0.08, 0.6, 0.08, dark, sx, 0.45, 1.1));
+    g.add(wheel(0.24, 0.16, sx, 0.2, 1.1));
   }
   return g;
 }

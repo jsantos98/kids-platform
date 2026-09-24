@@ -46,7 +46,9 @@ export class Missions {
   private oz = 0;
   private graph: StreetGraph = graphFor(0, 0);
 
-  constructor(private scene: THREE.Scene, private heliMode = false) {}
+  /** `calls` is the rotation of emergency kinds this mode answers (the
+   * fire truck: fire, fire, cat; the ambulance: patients...) */
+  constructor(private scene: THREE.Scene, readonly calls: ObjectiveType[] = ['fire', 'fire', 'cat']) {}
 
   setCity(bx: number, by: number, ox: number, oz: number): void {
     this.graph = graphFor(bx, by);
@@ -59,9 +61,8 @@ export class Missions {
     const qType = new URLSearchParams(location.search).get('type');
     let type: ObjectiveType;
     if (forcedType) type = forcedType;
-    else if (qType === 'fire' || qType === 'cat') type = qType;
-    else if (this.heliMode) type = this.index % 3 === 2 ? 'cat' : 'patient';
-    else type = this.index % 3 === 2 ? 'cat' : 'fire';
+    else if ((qType === 'fire' || qType === 'cat' || qType === 'patient') && this.calls.includes(qType)) type = qType;
+    else type = this.calls[this.index % this.calls.length];
     const diff = Math.min(this.sFires + this.sCats, 10);
     const dist = this.index === 0 ? 26 + r() * 10 : Math.min(90 + diff * 10, 240) + r() * 60;
     const a = this.index === 0 ? player.heading + 0.5 : r() * Math.PI * 2;

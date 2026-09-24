@@ -15,17 +15,22 @@ npm run dev          # → http://localhost:8321
 The garage at the root is the launcher — big buttons, no reading required.
 `npm run build` produces a minified `dist/`; `npm run preview` serves it.
 
-**Endless City** is one shared world with two playable vehicles: the fire truck
-(default) and the helicopter (`?vehicle=heli` or straight from the garage).
-While you play one, the others stay alive — a train shuttles the rail corridor
-that crosses the city every 256 m (level crossings included), an EMS helicopter
-patrols the sky, and in the helicopter the fire truck drives itself.
+**Endless City** is an endless archipelago of seeded island cities joined by
+causeways. Every new game rolls a fresh seed and writes it into the URL, and
+`?seed=N` replays that world exactly. There are two playable vehicles: the
+helicopter (default) and the fire truck (`?vehicle=truck`, or its garage
+button). The world keeps running while you play: each city has a railway
+loop with stations and gated level crossings that trains run on, traffic obeys
+the lights, an EMS helicopter patrols the sky, and in the helicopter the fire
+truck drives itself.
 
 ## Controls (Endless City)
 
-WASD / arrow keys or the USB wheel (steering axis + triggers, A = action).
-`C` cycles chase / high / cab cameras (or `?cam=high`), `R` resets.
-Drive to the 🔥 / 🐱 marker, stop, then sweep the hose or slide the ladder.
+WASD / arrow keys or the USB wheel (steering axis + triggers).
+`E` toggles the siren, `C` cycles chase / high / cab cameras (or `?cam=high`),
+`R` resets. Drive to the 🔥 / 🐱 marker and stop, then sweep the hose or
+slide the ladder (A/D, the wheel or the mouse). In the helicopter, hover over
+the 🆘 person to winch them up.
 
 ## Project layout
 
@@ -40,6 +45,8 @@ Drive to the 🔥 / 🐱 marker, stop, then sweep the hose or slide the ladder.
 | `src/games/diorama/` | the three concept dioramas, now proper modules |
 | `public/assets/kenney/` | CC0 Kenney models (Car Kit, City Kit, Nature Kit) + licenses |
 | `docs/engine-notes.md` | engine decision record, measured perf, wheel plan |
+| `AGENTS.md` | the world-generation rules (R1–R28); read before touching world code |
+| `tools/audit-world.ts` | checks the world rules: `npm run audit:world -- <seed>` |
 
 ## Conventions
 

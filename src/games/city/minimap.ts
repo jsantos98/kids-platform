@@ -1,4 +1,5 @@
-// Minimap: the whole island at a glance — chunk biomes, roads,// circuit, traffic-light state, missions and the player arrow. Drawn on a 2D
+// Minimap: the whole island at a glance — chunk biomes, roads, river, railway,
+// traffic-light state, missions and the player arrow. Drawn on a 2D
 // canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
 import { chunkGroundColor } from '../../worlds/cityChunk.js';
@@ -61,7 +62,7 @@ export class Minimap {
     ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 12 * scale;
     ctx.beginPath();
-    for (let j = 0; j <= 5; j++) for (let i = 0; i <= 5; i++) {
+    for (let j = 0; j <= WORLD_CHUNKS; j++) for (let i = 0; i <= WORLD_CHUNKS; i++) {
       if (plan.segH(j, i)) {
         ctx.moveTo(tx(i * CH), ty(j * CH));
         ctx.lineTo(tx((i + 1) * CH), ty(j * CH));

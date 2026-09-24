@@ -433,6 +433,7 @@ const tick = (): void => {
   trains.setOrigin(curCity.ox, curCity.oz);
   transit.update(dt, elapsed, trains);
   sea.update(elapsed);
+  scenery.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
   pedestrians.update(dt, st.x, st.z, st.x, st.z);
   if (!V.fly && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {

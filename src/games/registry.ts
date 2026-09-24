@@ -14,7 +14,7 @@ export const GAMES: GameEntry[] = [
     title: 'Endless City — Fire Missions',
     icon: '🚒',
     blurb: 'Drive anywhere, the city generates around you. Put out fires, rescue cats!',
-    url: 'play/city.html',
+    url: 'play/city.html?vehicle=truck',
   },
   {
     id: 'heli-city',

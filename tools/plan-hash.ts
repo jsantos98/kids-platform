@@ -64,7 +64,10 @@ for (const seed of seeds) {
   setCityBase(seed);
   clearCityPlanCache(); clearRailCache(); clearOccupancyCache(); clearRiverCache();
   const parts: string[] = [];
-  for (const [bx, by] of [[0, 0], [1, 0], [0, 1], [-1, -1], [2, -1]] as Array<[number, number]>) parts.push(dumpCity(bx, by));
+  // the 3x3 ring around the origin plus four farther cities
+  const cells: Array<[number, number]> = [[2, -1], [-2, 1], [3, 3], [-3, -2]];
+  for (let bx = -1; bx <= 1; bx++) for (let by = -1; by <= 1; by++) cells.push([bx, by]);
+  for (const [bx, by] of cells) parts.push(dumpCity(bx, by));
   const text = parts.join('\n');
   const hash = createHash('sha256').update(text).digest('hex').slice(0, 16);
   console.log(`seed ${seed}: ${hash}`);

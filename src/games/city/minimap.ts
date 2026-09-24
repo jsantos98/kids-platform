@@ -6,6 +6,7 @@ import { chunkGroundColor } from '../../worlds/cityChunk.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { graphFor } from '../../worlds/streetGraph.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { STRAIT } from '../../worlds/cityGrid.js';
@@ -58,19 +59,15 @@ export class Minimap {
       }
     }
 
-    // streets: only the segments the plan kept open
+    // streets: every edge of the street graph
+    const graph = graphFor(this.bx, this.by);
     ctx.strokeStyle = '#8f97a3';
     ctx.lineWidth = 12 * scale;
     ctx.beginPath();
-    for (let j = 0; j <= WORLD_CHUNKS; j++) for (let i = 0; i <= WORLD_CHUNKS; i++) {
-      if (plan.segH(j, i)) {
-        ctx.moveTo(tx(i * CH), ty(j * CH));
-        ctx.lineTo(tx((i + 1) * CH), ty(j * CH));
-      }
-      if (plan.segV(i, j)) {
-        ctx.moveTo(tx(i * CH), ty(j * CH));
-        ctx.lineTo(tx(i * CH), ty((j + 1) * CH));
-      }
+    for (const e of graph.edges) {
+      const a = graph.nodes[e.a], b = graph.nodes[e.b];
+      ctx.moveTo(tx(a.x), ty(a.z));
+      ctx.lineTo(tx(b.x), ty(b.z));
     }
     ctx.stroke();
 
@@ -122,25 +119,23 @@ export class Minimap {
 
     // traffic lights: one dot per real intersection (plazas get an amber
     // one); level crossings get a white ×
-    for (let i = 1; i < WORLD_CHUNKS; i++) {
-      for (let j = 1; j < WORLD_CHUNKS; j++) {
-        if (plan.plaza(i, j)) {
-          ctx.fillStyle = '#f6c952';
-          ctx.beginPath();
-          ctx.arc(tx(i * CH), ty(j * CH), 4.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#fffdf8';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          continue;
-        }
-        if (!plan.signalized(i, j)) continue;
-        const st = lightState(i, j, elapsed);
-        ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
+    for (const n of graph.nodes) {
+      if (n.plaza) {
+        ctx.fillStyle = '#f6c952';
         ctx.beginPath();
-        ctx.arc(tx(i * CH), ty(j * CH), 3, 0, Math.PI * 2);
+        ctx.arc(tx(n.x), ty(n.z), 4.5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = '#fffdf8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        continue;
       }
+      if (!n.signalized) continue;
+      const st = lightState(n.x, n.z, elapsed);
+      ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
+      ctx.beginPath();
+      ctx.arc(tx(n.x), ty(n.z), 3, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // level crossings: a small white × on the street

@@ -119,7 +119,7 @@ export class ChunkManager {
   updateLights(elapsed: number): void {
     for (const ch of this.chunks.values()) {
       if (!ch.lights) continue;
-      const st = lightState(ch.cx, ch.cz, elapsed);
+      const st = lightState(ch.cx * this.CH, ch.cz * this.CH, elapsed);
       const ew = st === 'ew' ? 'go' : st === 'ewY' ? 'slow' : 'stop';
       const ns = st === 'ns' ? 'go' : st === 'nsY' ? 'slow' : 'stop';
       for (const h of ch.lights.ew) setHead(h, ew);

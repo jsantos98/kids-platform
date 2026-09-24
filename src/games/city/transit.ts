@@ -161,15 +161,20 @@ export class Transit {
   // crossbuck, a flashing lamp pair and a boom barrier. The booms swing down
   // while a train nears (update()) and the lamps warn the whole time. ----
   private makeCrossing(B: Baked, c: Crossing, ox: number, oz: number, inst: CityInst): void {
-    const alongX = c.axis === 'h'; // the street runs along X
-    const ry = alongX ? Math.PI / 2 : 0;
-    // posts stand on both shoulders of both approaches; each boom reaches
-    // from its shoulder across half the carriageway
-    const spots: Array<[number, number, number]> = alongX
-      ? [[c.x - 9.4, c.z - 7.6, 0], [c.x - 9.4, c.z + 7.6, Math.PI],
-         [c.x + 9.4, c.z - 7.6, 0], [c.x + 9.4, c.z + 7.6, Math.PI]]
-      : [[c.x - 7.6, c.z - 9.4, Math.PI / 2], [c.x + 7.6, c.z - 9.4, -Math.PI / 2],
-         [c.x - 7.6, c.z + 9.4, Math.PI / 2], [c.x + 7.6, c.z + 9.4, -Math.PI / 2]];
+    // the street's direction u and its across-road normal n
+    const ux = Math.round(Math.sin(c.heading) * 1e9) / 1e9, uz = Math.round(Math.cos(c.heading) * 1e9) / 1e9;
+    const nx = uz, nz = -ux;
+    const ry = c.heading;
+    // posts stand on both shoulders of both approaches (9.4 m up/down the
+    // road, 7.6 m out); each boom yaws across the carriageway from its
+    // shoulder — local +z points back toward the road's centre line (R12)
+    const spots: Array<[number, number, number]> = [];
+    for (const al of [-9.4, 9.4]) {
+      for (const side of [-1, 1]) {
+        spots.push([c.x + ux * al + nx * 7.6 * side, c.z + uz * al + nz * 7.6 * side,
+          Math.atan2(-nx * side, -nz * side)]);
+      }
+    }
     const lamps: THREE.Mesh[][] = [[], [], [], []];
     const arms: THREE.Group[] = [];
     for (let i = 0; i < spots.length; i++) {
@@ -182,7 +187,7 @@ export class Transit {
       // pair of signal lamps (kept dynamic so they can flash)
       for (const s of [-0.34, 0.34]) {
         const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), DIM_RED);
-        lamp.position.set(wx + (alongX ? s : 0), 1.75, wz + (alongX ? 0 : s));
+        lamp.position.set(wx + ux * s, 1.75, wz + uz * s);
         inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }
@@ -245,7 +250,7 @@ export class Transit {
   list(): unknown {
     return [...this.cities.entries()].map(([key, inst]) => ({
       key,
-      crossings: inst.signals.map(s => ({ x: +s.c.x.toFixed(1), z: +s.c.z.toFixed(1), axis: s.c.axis })),
+      crossings: inst.signals.map(s => ({ x: +s.c.x.toFixed(1), z: +s.c.z.toFixed(1), heading: +s.c.heading.toFixed(3) })),
     }));
   }
 }

@@ -6,7 +6,7 @@
 // way the kid was going — it can never land off-road or inside a building,
 // which the old "round to the nearest lattice line" rule could.
 import { cityAt } from '../../worlds/cityGrid.js';
-import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { graphFor, type SEdge } from '../../worlds/streetGraph.js';
 import { occupancyFor, ROAD, RAIL, RIVER, PLAZA } from '../../worlds/grid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
@@ -19,18 +19,25 @@ const EVERY = 0.4;      // seconds between crumbs
 const KEEP = 24;        // crumbs remembered (~10 s of driving)
 const BACK = 6;         // resume at least this far behind the crash
 
+/** the right-hand lane point `s` metres along edge e (city-local), for a
+ * vehicle facing `heading`: lane side and spot heading follow whichever way
+ * along the street the vehicle points */
+function laneOn(e: SEdge, s: number, heading: number, ox: number, oz: number, bx: number, by: number): Spot {
+  const g = graphFor(bx, by);
+  const fwd = Math.sin(heading) * e.ux + Math.cos(heading) * e.uz >= 0;
+  const p = g.sample(e, s, fwd ? LANE : -LANE);
+  return { x: p.x + ox, z: p.z + oz, heading: fwd ? e.heading : Math.atan2(-e.ux, -e.uz) };
+}
+
 /** snap a world point to the right-hand lane of the street it's on, facing
- * the travel direction; null when it isn't clearly on one street */
+ * the travel direction; null when it isn't clearly on one street (off the
+ * asphalt, or inside a junction pad) */
 function laneSpot(x: number, z: number, heading: number): Spot | null {
-  const lineZ = Math.round(z / CH) * CH, lineX = Math.round(x / CH) * CH;
-  const onH = Math.abs(z - lineZ) < 7, onV = Math.abs(x - lineX) < 7;
-  if (onH === onV) return null; // off every street, or inside a junction pad
-  if (onH) {
-    const east = Math.sin(heading) >= 0;
-    return { x, z: lineZ + (east ? LANE : -LANE), heading: east ? Math.PI / 2 : -Math.PI / 2 };
-  }
-  const south = Math.cos(heading) >= 0;
-  return { x: lineX + (south ? -LANE : LANE), z, heading: south ? 0 : Math.PI };
+  const c = cityAt(x, z);
+  const near = graphFor(c.bx, c.by).nearest(x - c.ox, z - c.oz);
+  if (!near || near.dist >= 7) return null;
+  if (near.s < 12 || near.s > near.edge.len - 12) return null; // mid-block only
+  return laneOn(near.edge, near.s, heading, c.ox, c.oz, c.bx, c.by);
 }
 
 /** asphalt the kid may be put back on: a street, not the track, the river
@@ -88,37 +95,23 @@ export class Breadcrumbs {
   }
 }
 
-/** the closest right-hand lane point on an OPEN street segment of the city
- * the point is in (searched on the surrounding lattice lines) */
+/** the closest right-hand lane point on a street of the city the point is
+ * in: every edge within reach, at its mid-block point nearest the crash */
 export function nearestLane(x: number, z: number, heading: number, boxes: CollisionBox[], radius: number): Spot | null {
   const c = cityAt(x, z);
-  const plan = cityPlanFor(c.bx, c.by);
+  const g = graphFor(c.bx, c.by);
   const lx = x - c.ox, lz = z - c.oz;
   let best: Spot | null = null, bestD = Infinity;
-  const consider = (s: Spot | null): void => {
-    if (!s) return;
-    const w = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
-    if (!drivable(w.x, w.z) || !clearOf(w, boxes, radius + 0.5)) return;
+  for (const e of g.edges) {
+    const a = g.nodes[e.a];
+    const raw = (lx - a.x) * e.ux + (lz - a.z) * e.uz;
+    const s = Math.max(12, Math.min(e.len - 12, raw));
+    const w = laneOn(e, s, heading, c.ox, c.oz, c.bx, c.by);
     const d = Math.hypot(w.x - x, w.z - z);
-    if (d < bestD) { bestD = d; best = w; }
-  };
-  const ci = Math.round(lx / CH), cj = Math.round(lz / CH);
-  for (let dj = -2; dj <= 2; dj++) {
-    const j = cj + dj;
-    for (let i = Math.floor(lx / CH) - 2; i <= Math.floor(lx / CH) + 2; i++) {
-      if (!plan.segH(j, i)) continue;
-      // mid-block span only (clear of the junction pads)
-      const along = Math.max(i * CH + 12, Math.min((i + 1) * CH - 12, lx));
-      consider(laneSpot(along, j * CH, heading));
-    }
-  }
-  for (let di = -2; di <= 2; di++) {
-    const i = ci + di;
-    for (let j = Math.floor(lz / CH) - 2; j <= Math.floor(lz / CH) + 2; j++) {
-      if (!plan.segV(i, j)) continue;
-      const along = Math.max(j * CH + 12, Math.min((j + 1) * CH - 12, lz));
-      consider(laneSpot(i * CH, along, heading));
-    }
+    if (d >= bestD || d > 200) continue;
+    if (!drivable(w.x, w.z) || !clearOf(w, boxes, radius + 0.5)) continue;
+    bestD = d;
+    best = w;
   }
   return best;
 }

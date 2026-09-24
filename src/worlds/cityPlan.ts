@@ -56,8 +56,9 @@ export interface Lot {
 export interface Crossing {
   x: number;
   z: number;
-  /** 'h': the street runs along X (rail crosses it perpendicularly) */
-  axis: 'h' | 'v';
+  /** heading of the street being crossed (atan2 of its direction; the rail
+   * crosses it square). Meaningful modulo pi. */
+  heading: number;
   /** arc distance along the rail loop — trains query this */
   d: number;
 }
@@ -478,7 +479,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       if (!cluster.length) return;
       const mx = cluster.reduce((s, u) => s + u.x, 0) / cluster.length;
       const mz = cluster.reduce((s, u) => s + u.z, 0) / cluster.length;
-      crossings.push({ x: mx, z: mz, axis: horiz ? 'h' : 'v', d: cluster[(cluster.length / 2) | 0].d });
+      crossings.push({ x: mx, z: mz, heading: horiz ? Math.PI / 2 : 0, d: cluster[(cluster.length / 2) | 0].d });
       cluster = [];
     };
     for (const hit of hits) {

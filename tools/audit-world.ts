@@ -8,15 +8,21 @@ import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA } from '../src/worlds/grid.js';
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, pieceRect, segmentPieces, nodeReach } from '../src/worlds/roadLayout.js';
+import { graphFor, clearGraphCache } from '../src/worlds/streetGraph.js';
+import { clearStreetLineCache } from '../src/worlds/streetLines.js';
 
 const clearAllWorldCaches = (): void => {
   clearCityPlanCache();
   clearRailCache();
   clearOccupancyCache();
   clearRiverCache();
+  clearGraphCache();
+  clearStreetLineCache();
 };
 
 const W = 14;
+/** the crossing's street runs east-west */
+const horizCross = (c: { heading: number }): boolean => Math.abs(Math.sin(c.heading)) > 0.5;
 const ISLAND = 14 * 64; // city side length in metres
 const baseSeed = Number(process.argv[2] ?? 4242) | 0;
 setCityBase(baseSeed);
@@ -50,6 +56,7 @@ let selfOverlap = 0;
 let riverFails = 0;
 let worstTrestleSkew = 0;
 let roadOverlaps = 0;
+let graphFaults = 0;
 let roadGaps = 0;
 
 for (const [bx, by] of cells) {
@@ -86,13 +93,14 @@ for (const [bx, by] of cells) {
   // diagonal chord that only tilts between wall-end vertices.
   for (const c of plan.crossings) {
     crossingsTotal++;
-    const streetH = c.axis === 'h' ? Math.PI / 2 : 0;
+    const streetH = c.heading;
+    const ux = Math.sin(streetH), uz = Math.cos(streetH);
     let worst = 0;
     for (const p of route.pts) {
-      const pd = c.axis === 'h' ? Math.abs(p.z - c.z) : Math.abs(p.x - c.x);
+      // across the street (normal distance) and along it, from the crossing
+      const pd = Math.abs((p.x - c.x) * uz - (p.z - c.z) * ux);
       if (pd >= 6.5) continue;
-      const pa = c.axis === 'h' ? p.x : p.z;
-      if (Math.abs(pa - (c.axis === 'h' ? c.x : c.z)) >= 24) continue;
+      if (Math.abs((p.x - c.x) * ux + (p.z - c.z) * uz) >= 24) continue;
       let dev = Math.abs(p.h - streetH);
       if (dev > Math.PI) dev = Math.PI * 2 - dev;
       while (dev > Math.PI / 2) dev = Math.PI - dev;
@@ -100,7 +108,7 @@ for (const [bx, by] of cells) {
     }
     const perpErrDeg = worst;
     if (perpErrDeg > 8) {
-      console.log(`  R7 detail: city ${bx},${by} crossing at (${c.x.toFixed(0)},${c.z.toFixed(0)}) axis ${c.axis} deviates ${perpErrDeg.toFixed(1)} deg`);
+      console.log(`  R7 detail: city ${bx},${by} crossing at (${c.x.toFixed(0)},${c.z.toFixed(0)}) street heading ${(c.heading * 180 / Math.PI).toFixed(0)} deviates ${perpErrDeg.toFixed(1)} deg`);
     }
     worstDevDeg = Math.max(worstDevDeg, perpErrDeg);
   }
@@ -203,7 +211,7 @@ for (const [bx, by] of cells) {
           const t = (c - p.z) / (q.z - p.z);
           const x = p.x + (q.x - p.x) * t, i = Math.floor(x / 64);
           if (plan.segH(j, i) && !plan.crossings.some(cc =>
-            cc.axis === 'h' && Math.abs(cc.x - x) < 4 && Math.abs(cc.z - c) < 4)) bareCrossings++;
+            horizCross(cc) && Math.abs(cc.x - x) < 4 && Math.abs(cc.z - c) < 4)) bareCrossings++;
         }
       }
       for (let i = 0; i <= W; i++) {
@@ -212,7 +220,7 @@ for (const [bx, by] of cells) {
           const t = (c - p.x) / (q.x - p.x);
           const z = p.z + (q.z - p.z) * t, j = Math.floor(z / 64);
           if (plan.segV(i, j) && !plan.crossings.some(cc =>
-            cc.axis === 'v' && Math.abs(cc.z - z) < 4 && Math.abs(cc.x - c) < 4)) bareCrossings++;
+            !horizCross(cc) && Math.abs(cc.z - z) < 4 && Math.abs(cc.x - c) < 4)) bareCrossings++;
         }
       }
     }
@@ -272,6 +280,31 @@ for (const [bx, by] of cells) {
     };
     for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) cover(true, j, i);
     for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) cover(false, i, j);
+  }
+
+  // G-graph: the street graph mirrors the plan — one edge per open segment,
+  // every level crossing seated on an edge, one connected piece, and the
+  // only dead ends are causeway mouths
+  {
+    const g = graphFor(bx, by);
+    let segs = 0;
+    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs++;
+    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs++;
+    const seated = g.edges.reduce((n, e) => n + e.crossings.length, 0);
+    const seen = new Set<number>([0]);
+    const stack = [0];
+    while (stack.length) {
+      const n = stack.pop()!;
+      for (const eid of g.nodes[n]?.edges ?? []) {
+        const o = g.other(g.edges[eid], n).id;
+        if (!seen.has(o)) { seen.add(o); stack.push(o); }
+      }
+    }
+    const tips = g.nodes.filter(n => n.edges.length === 1 && !n.mouth).length;
+    const faults = (g.edges.length !== segs ? 1 : 0) + (seated !== plan.crossings.length ? 1 : 0)
+      + (g.nodes.length && seen.size !== g.nodes.length ? 1 : 0) + tips;
+    if (faults) console.log(`  graph detail: city ${bx},${by} edges ${g.edges.length}/${segs}, crossings seated ${seated}/${plan.crossings.length}, reached ${seen.size}/${g.nodes.length}, stray tips ${tips}`);
+    graphFaults += faults;
   }
 
   // R22/R23: occupancy-grid combination invariants. The grid paints every
@@ -340,6 +373,7 @@ if (selfOverlap > 0) fail('R28', `${selfOverlap} rail samples overlap a differen
 if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
+if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
 if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.

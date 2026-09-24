@@ -17,8 +17,7 @@ import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { Pedestrians } from './pedestrians.js';
 import type { BakedTemplate } from '../../engine/assets.js';
-import { RoadGrid } from '../../worlds/roadGrid.js';
-import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { CENTER } from '../../worlds/world.js';
 import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
@@ -52,38 +51,28 @@ if (seedParam === null) {
 setCityBase(P.seed);
 
 /** a starting lane spot that suits THIS city: on a street near the centre,
- * clear of the river, the railway, and level crossings (city-local coords) */
+ * clear of the river, the railway, level crossings and roundabouts
+ * (city-local coords). Streets are tried nearest-the-centre first. */
 function pickSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
   const seed = citySeed(bx, by);
   const sr = rng(chunkSeed(seed, 0x5b0, 3));
-  const plan = cityPlanFor(bx, by);
+  const g = graphFor(bx, by);
   const river = riverFor(seed);
   const rail = railRouteFor(bx, by);
   const spots: Array<{ x: number; z: number; heading: number }> = [];
-  const collect = (lines: number[]): void => {
-    for (const j of lines) {
-      for (let i = 1; i < WORLD_CHUNKS - 1; i++) {
-        if (!plan.segH(j, i)) continue;
-        const x = i * 64 + 18 + sr() * 28, z = j * 64 + 3.5;
-        if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
-        if (plan.crossings.some(c => Math.abs(c.x - x) < 17 && Math.abs(c.z - z) < 12)) continue;
-        spots.push({ x, z, heading: Math.PI / 2 });
-      }
-    }
-    for (const i of lines) {
-      for (let j = 1; j < WORLD_CHUNKS - 1; j++) {
-        if (!plan.segV(i, j)) continue;
-        const x = i * 64 - 3.5, z = j * 64 + 18 + sr() * 28;
-        if (river.inWater(x, z) || rail.distTo(x, z) < 7) continue;
-        if (plan.crossings.some(c => Math.abs(c.x - x) < 12 && Math.abs(c.z - z) < 17)) continue;
-        spots.push({ x, z, heading: 0 });
-      }
-    }
-  };
-  const c = WORLD_CHUNKS >> 1;
-  collect([c, c + 1]);                 // prefer the central boulevards
-  if (spots.length < 4) collect([c - 1, c + 2]);
-  if (!spots.length) collect([1, WORLD_CHUNKS - 2]);
+  const byCentre = g.edges
+    .filter(e => !g.nodes[e.a].mouth && !g.nodes[e.b].mouth && !g.nodes[e.a].plaza && !g.nodes[e.b].plaza)
+    .map(e => ({ e, d: Math.hypot(g.sample(e, e.len / 2).x - CENTER, g.sample(e, e.len / 2).z - CENTER) }))
+    .sort((p, q) => p.d - q.d || p.e.id - q.e.id);
+  for (const { e } of byCentre) {
+    if (spots.length >= 6) break;
+    // the right-hand lane driving a -> b, mid-block
+    const s = 18 + sr() * (e.len - 36);
+    const p = g.sample(e, s, 3.5);
+    if (river.inWater(p.x, p.z) || rail.distTo(p.x, p.z) < 7) continue;
+    if (e.crossings.some(c => Math.abs(c.s - s) < 17)) continue;
+    spots.push({ x: p.x, z: p.z, heading: e.heading });
+  }
   return spots.length ? spots[(sr() * spots.length) | 0] : { x: CENTER, z: CENTER, heading: 0 };
 }
 
@@ -157,7 +146,6 @@ if (q.get('debugbake') === '1') {
 // the archipelago is far too big to build at once: chunks spring up around
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
-const roadGrid = new RoadGrid(0, 0);
 const chunks = new ChunkManager(scene, 64, 4);
 let river = riverFor(citySeed(0, 0));
 chunks.ensure(999, spawn.x, spawn.z);
@@ -189,7 +177,7 @@ scene.add(ladderMod.getLadderMesh());
 
 // ---- missions ----
 const heliMode = P.vehicle === 'heli';
-const missions = new Missions(scene, 64, roadGrid, heliMode);
+const missions = new Missions(scene, heliMode);
 const MAX_ACTIVE = 3;
 for (let i = 0; i < 3; i++) missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
 
@@ -205,7 +193,7 @@ if (q.get('spraytest') === '1') {
 const trains = new Trains(scene, 0, 0);
 const transit = new Transit(scene);
 // in heli mode one of the AI vehicles is the fire truck, driving itself
-const traffic = new Traffic(scene, roadGrid, 64, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
+const traffic = new Traffic(scene, 12, V.fly ? ['/assets/kenney/firetruck.glb'] : [], trains, camera);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -238,7 +226,7 @@ const pickTpl = (n: string) => {
   if (!t) console.warn('missing baked template:', n);
   return t;
 };
-const pedestrians = new Pedestrians(scene, roadGrid, 64, 14,
+const pedestrians = new Pedestrians(scene, 14,
   PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
   PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
   camera);
@@ -268,16 +256,15 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
 let curCity: CityRef = { bx: 0, by: 0, ox: 0, oz: 0, key: '0,0' };
 function applyCity(c: CityRef): void {
   curCity = c;
-  roadGrid.setCity(c.bx, c.by);
   river = riverFor(citySeed(c.bx, c.by));
   traffic.setCity(c.bx, c.by, c.ox, c.oz, player.car.position);
-  pedestrians.setCity(c.ox, c.oz, player.state.x, player.state.z);
+  pedestrians.setCity(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z);
   trains.setCity(scene, c.bx, c.by);
   transit.setCity(c.bx, c.by, c.ox, c.oz);
   sea.setCity(c.ox, c.oz);
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
-  missions.setCity(c.ox, c.oz);
+  missions.setCity(c.bx, c.by, c.ox, c.oz);
   const s = pickSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
 }
@@ -338,32 +325,31 @@ if (tp) {
 function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: number } {
   if (V.fly || dist < 45) return { x: tx, z: tz };
   const ox = curCity.ox, oz = curCity.oz;
+  const g = graphFor(curCity.bx, curCity.by);
   const lx = player.state.x - ox, lz = player.state.z - oz;
-  const ti = Math.round((tx - ox) / 64), tj = Math.round((tz - oz) / 64);
-  if (ti < 0 || tj < 0 || ti > WORLD_CHUNKS || tj > WORLD_CHUNKS) return { x: tx, z: tz };
-  const ends: Array<[number, number]> = [];
-  const jz = Math.round(lz / 64), ix = Math.round(lx / 64);
-  if (Math.abs(lz - jz * 64) < 9) {
-    const i0 = Math.floor(lx / 64);
-    if (roadGrid.segH(jz, i0)) ends.push([i0, jz], [i0 + 1, jz]);
-  }
-  if (Math.abs(lx - ix * 64) < 9) {
-    const j0 = Math.floor(lz / 64);
-    if (roadGrid.segV(ix, j0)) ends.push([ix, j0], [ix, j0 + 1]);
-  }
-  let best: Array<[number, number]> | null = null, bestCost = Infinity;
-  for (const [ei, ej] of ends) {
-    const path = roadGrid.route(ei, ej, ti, tj);
+  const here = g.nearest(lx, lz);
+  const goal = g.nearestNode(tx - ox, tz - oz);
+  if (!here || here.dist > 9 || !goal) return { x: tx, z: tz };
+  // route from whichever end of the player's street gets there first
+  let best: number[] | null = null, bestCost = Infinity;
+  for (const end of [here.edge.a, here.edge.b]) {
+    const path = g.route(end, goal.id);
     if (!path) continue;
-    const cost = Math.hypot(ei * 64 - lx, ej * 64 - lz) + (path.length - 1) * 64;
+    const n0 = g.nodes[end];
+    let cost = Math.hypot(n0.x - lx, n0.z - lz);
+    for (let k = 1; k < path.length; k++) {
+      const a = g.nodes[path[k - 1]], b = g.nodes[path[k]];
+      cost += Math.hypot(b.x - a.x, b.z - a.z);
+    }
     if (cost < bestCost) { bestCost = cost; best = path; }
   }
   if (!best) return { x: tx, z: tz };
   // the first junction, or the next one once the player is on top of it
+  const near = (id: number): boolean => Math.hypot(g.nodes[id].x - lx, g.nodes[id].z - lz) < 14;
   let k = 0;
-  while (k < best.length - 1 && Math.hypot(best[k][0] * 64 - lx, best[k][1] * 64 - lz) < 14) k++;
-  if (k === best.length - 1 && Math.hypot(best[k][0] * 64 - lx, best[k][1] * 64 - lz) < 14) return { x: tx, z: tz };
-  return { x: best[k][0] * 64 + ox, z: best[k][1] * 64 + oz };
+  while (k < best.length - 1 && near(best[k])) k++;
+  if (k === best.length - 1 && near(best[k])) return { x: tx, z: tz };
+  return { x: g.nodes[best[k]].x + ox, z: g.nodes[best[k]].z + oz };
 }
 
 // ---- main loop ----

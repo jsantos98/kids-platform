@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { C } from '../../engine/palette.js';
 import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
-import { RoadGrid } from '../../worlds/roadGrid.js';
+import { graphFor, type StreetGraph } from '../../worlds/streetGraph.js';
 import { makeBeacon } from './guide3d.js';
 
 export type ObjectiveType = 'fire' | 'cat' | 'patient';
@@ -44,11 +44,12 @@ export class Missions {
    * coordinates, then shifted back out to the world) */
   private ox = 0;
   private oz = 0;
+  private graph: StreetGraph = graphFor(0, 0);
 
-  constructor(private scene: THREE.Scene, private CH: number,
-              private grid: RoadGrid, private heliMode = false) {}
+  constructor(private scene: THREE.Scene, private heliMode = false) {}
 
-  setCity(ox: number, oz: number): void {
+  setCity(bx: number, by: number, ox: number, oz: number): void {
+    this.graph = graphFor(bx, by);
     this.ox = ox;
     this.oz = oz;
   }
@@ -79,10 +80,11 @@ export class Missions {
     for (let attempt = 0; attempt < 24; attempt++) {
       const aa = a + attempt * 2.39996;
       const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
-      gx = Math.round(px / this.CH) * this.CH;
-      gz = Math.round(pz / this.CH) * this.CH;
-      if (this.grid.cross(Math.round(gx / this.CH), Math.round(gz / this.CH))
-        && !taken(gx + ox2 + this.ox, gz + oz2 + this.oz)) break;
+      const n = this.graph.nearestNode(px, pz);
+      if (!n) break;
+      gx = n.x;
+      gz = n.z;
+      if (n.signalized && !taken(gx + ox2 + this.ox, gz + oz2 + this.oz)) break;
     }
     const pos = new THREE.Vector3(gx + ox2 + this.ox, 0.15, gz + oz2 + this.oz);
     forceChunkAt(pos.x, pos.z);

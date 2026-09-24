@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { prepBakedModels } from '../engine/assets.js';
 import { generateCityChunk } from '../worlds/cityChunk.js';
-import { cityPlanFor } from '../worlds/cityPlan.js';
+import { graphFor, leaving } from '../worlds/streetGraph.js';
 import { setCityBase, citySeed } from '../worlds/cityGrid.js';
 import { ISLAND, WORLD_CHUNKS } from '../worlds/world.js';
 import { KITDEFS } from '../games/city/kitdefs.js';
@@ -75,27 +75,25 @@ camera.lookAt(wx, 0, wz);
 renderer.render(scene, camera);
 
 // archetype finder: first node of each road-junction kind, for quick framing
-const plan = cityPlanFor(0, 0);
-const segH = (j: number, i: number) => {
-  try { return plan.segH(j, i); } catch { return false; }
-};
-const segV = (i: number, j: number) => {
-  try { return plan.segV(i, j); } catch { return false; }
-};
+// (arms read from the street graph: which compass directions leave the node)
+const graph = graphFor(0, 0);
 const kinds: Record<string, string> = {};
-for (let i = 1; i < WORLD_CHUNKS; i++) {
-  for (let j = 1; j < WORLD_CHUNKS; j++) {
-    const a = [segH(j, i - 1), segH(j, i), segV(i, j - 1), segV(i, j)].map(v => !!v);
-    const n = a.filter(Boolean).length;
-    let k: string | null = null;
-    if (plan.plaza(i, j)) k = 'roundabout';
-    else if (n === 4) k = plan.signalized(i, j) ? 'cross-lights' : 'cross';
-    else if (n === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) k = 'pass-' + (a[0] ? 'ew' : 'ns');
-    else if (n === 3) k = 'T-miss-' + 'wens'[a.findIndex(v => !v)];
-    else if (n === 2 && !(a[0] && a[1]) && !(a[2] && a[3])) k = 'bend-' + (a[0] && a[3] ? 'ws' : a[1] && a[3] ? 'se' : a[1] && a[2] ? 'en' : 'wn');
-    else if (n === 1) k = 'end-' + 'wens'[a.findIndex(v => v)];
-    if (k && !kinds[k]) kinds[k] = `${i * 64},${j * 64}`;
+for (const n of graph.nodes) {
+  const a = [false, false, false, false]; // w e n s
+  for (const eid of n.edges) {
+    const d = leaving(graph, graph.edges[eid], n.id);
+    if (Math.abs(d.x) > Math.abs(d.z)) a[d.x < 0 ? 0 : 1] = true;
+    else a[d.z < 0 ? 2 : 3] = true;
   }
+  const cnt = a.filter(Boolean).length;
+  let k: string | null = null;
+  if (n.plaza) k = 'roundabout';
+  else if (cnt === 4) k = n.signalized ? 'cross-lights' : 'cross';
+  else if (cnt === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) k = 'pass-' + (a[0] ? 'ew' : 'ns');
+  else if (cnt === 3) k = 'T-miss-' + 'wens'[a.findIndex(v => !v)];
+  else if (cnt === 2) k = 'bend-' + (a[0] && a[3] ? 'ws' : a[1] && a[3] ? 'se' : a[1] && a[2] ? 'en' : 'wn');
+  else if (cnt === 1) k = (n.mouth ? 'mouth-' : 'end-') + 'wens'[a.findIndex(v => v)];
+  if (k && !kinds[k]) kinds[k] = `${n.x},${n.z}`;
 }
 
 const info = document.createElement('pre');

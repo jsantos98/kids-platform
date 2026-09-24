@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { citySeed, CITY_PITCH } from '../../../worlds/cityGrid.js';
 import { Fleet } from '../sea.js';
 import { IslandCars } from './cars.js';
-import { IslandWalkers } from './walkers.js';
+import { IslandWalkers, type Threat } from './walkers.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
 import type { Railway } from '../railway.js';
 
@@ -79,7 +79,7 @@ export class IslandSim {
 
   /** one frame: `player` is where the kid is (world), `threat` the ground
    * vehicle people scurry from (null when flying/sailing) */
-  update(dt: number, elapsed: number, player: THREE.Vector3, threat: THREE.Vector3 | null): void {
+  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null): void {
     if (!this.active) return;
     if (this.lagging) {
       const t0 = performance.now();
@@ -93,10 +93,10 @@ export class IslandSim {
     this.tick(dt, elapsed, player, threat, true);
   }
 
-  private tick(dt: number, t: number, player: THREE.Vector3 | null, threat: THREE.Vector3 | null, draw: boolean): void {
+  private tick(dt: number, t: number, player: THREE.Vector3 | null, threat: Threat | null, draw: boolean): void {
     this.simTime = t;
     this.cars.update(dt, t, this.opts.railway, player, draw);
-    this.walkers.update(dt, threat, player, draw);
+    this.walkers.update(dt, t, this.opts.railway, threat, player, draw);
     if (draw) this.fleet.update(this.simTime);
   }
 

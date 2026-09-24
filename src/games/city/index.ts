@@ -750,8 +750,19 @@ const tick = (): void => {
   // helicopter; the river is a shallow ford — splash through it slowly
   // every awake island: trains, cars, people, boats (people only scatter
   // from vehicles on the ground)
-  islands.update(dt, elapsed, player.car.position,
-    airborne || V.kind === 'boat' ? null : player.car.position);
+  islands.update(dt, elapsed, player.car.position, V.kind === 'ground'
+    ? { x: st.x, z: st.z, heading: st.heading, v: st.v, halfL: V.glbLen / 2, halfW: V.halfW }
+    : null);
+  // nobody drives through anybody: the island's cars push a road vehicle
+  // out of their footprint (G8)
+  if (V.kind === 'ground') {
+    const push = islands.bump(st.x, st.z, V.radius + 0.3);
+    if (push) {
+      st.x += push.dx; st.z += push.dz;
+      st.v *= 1 - Math.min(0.5, dt * 3);
+      player.car.position.x = st.x; player.car.position.z = st.z;
+    }
+  }
   railway.update(dt, elapsed, st.x, st.z);
   boarding.update(dt, elapsed, railway, curCity.bx, curCity.by);
   transit.update(dt, elapsed, railway);

@@ -60,6 +60,8 @@ function fallbackCar(k: number): THREE.Group {
   return fallbacks[k].clone();
 }
 
+/** an AI car's footprint (half length / half width, m) */
+const CAR_HALF_L = 2.2, CAR_HALF_W = 1.0;
 const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz, z: hx });
 
 export class IslandCars {
@@ -102,6 +104,27 @@ export class IslandCars {
   hide(): void { for (const c of this.cars) c.obj.visible = false; }
 
   dispose(): void { for (const c of this.cars) this.scene.remove(c.obj); }
+
+  /** a push that moves a vehicle of radius r at world (x, z) out of the
+   * car it overlaps (a car's footprint as a 4.4 x 2 m box), or null */
+  bump(x: number, z: number, r: number): { dx: number; dz: number } | null {
+    for (const c of this.cars) {
+      const dx = x - c.x, dz = z - c.z;
+      if (dx * dx + dz * dz > 64) continue;
+      const fx = Math.sin(c.h), fz = Math.cos(c.h);
+      const a = dx * fx + dz * fz, l = dx * fz - dz * fx;
+      const pa = CAR_HALF_L + r - Math.abs(a), pl = CAR_HALF_W + r - Math.abs(l);
+      if (pa <= 0 || pl <= 0) continue;
+      // out along the shallower side
+      if (pl < pa) {
+        const s = (l >= 0 ? 1 : -1) * pl;
+        return { dx: fz * s, dz: -fx * s };
+      }
+      const s = (a >= 0 ? 1 : -1) * pa;
+      return { dx: fx * s, dz: fz * s };
+    }
+    return null;
+  }
 
   private lanePoint(e: SEdge, dir: 1 | -1, s: number, extra = 0): { x: number; z: number } {
     return this.graph.sample(e, dir > 0 ? s : e.len - s, (dir > 0 ? 1 : -1) * (LANE + extra));

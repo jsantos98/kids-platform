@@ -8,6 +8,7 @@ import { cityAt, CITY_PITCH } from '../../../worlds/cityGrid.js';
 import { ISLAND } from '../../../worlds/world.js';
 import { IslandSim, type SimOptions } from './sim.js';
 import { islandReady } from '../../../worlds/islandData.js';
+import type { Threat } from './walkers.js';
 
 const NEAR = 200;   // m from a neighbour island's edge that wakes it
 const KEEP = 4;     // simulations kept in memory (active + dormant)
@@ -52,7 +53,7 @@ export class IslandManager {
     return out;
   }
 
-  update(dt: number, elapsed: number, player: THREE.Vector3, threat: THREE.Vector3 | null): void {
+  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null): void {
     const want = this.wanted(player.x, player.z);
     const keys = new Set(want.map(([bx, by]) => `${bx},${by}`));
     for (const [bx, by] of want) this.sim(bx, by).setActive(true, elapsed);
@@ -65,6 +66,17 @@ export class IslandManager {
       this.sims.delete(oldest[0]);
     }
     for (const s of this.sims.values()) s.update(dt, elapsed, player, threat);
+  }
+
+  /** a push that keeps a ground vehicle (world x, z, radius r) out of every
+   * awake island's cars, or null — nobody drives through anybody (G8) */
+  bump(x: number, z: number, r: number): { dx: number; dz: number } | null {
+    for (const s of this.sims.values()) {
+      if (!s.active) continue;
+      const p = s.cars.bump(x, z, r);
+      if (p) return p;
+    }
+    return null;
   }
 
   /** every awake island's boats (the minimap's dots) */

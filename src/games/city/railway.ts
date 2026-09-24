@@ -39,19 +39,20 @@ const CAR_LEN = 7.5;
 const GAP = 1.1;
 
 const LOCOS = ['/assets/kenney/train/train-diesel-a.glb', '/assets/kenney/train/train-locomotive-b.glb'];
-const CARS = [
-  '/assets/kenney/train/train-carriage-container-red.glb',
-  '/assets/kenney/train/train-carriage-container-green.glb',
-  '/assets/kenney/train/train-carriage-coal.glb',
-  '/assets/kenney/train/train-carriage-box.glb',
-  '/assets/kenney/train/train-carriage-flatbed.glb',
-];
-/** passenger sets: electric city trains, cab front and back */
-const PASSENGER = [
-  '/assets/kenney/train/train-electric-city-a.glb',
-  '/assets/kenney/train/train-electric-city-b.glb',
-  '/assets/kenney/train/train-electric-city-c.glb',
-];
+const T = (f: string): string => `/assets/kenney/train/${f}.glb`;
+const CARS = ['train-carriage-container-red', 'train-carriage-container-green', 'train-carriage-container-blue',
+  'train-carriage-coal', 'train-carriage-box', 'train-carriage-flatbed', 'train-carriage-tank', 'train-carriage-lumber',
+  'train-carriage-wood'].map(T);
+/** passenger sets, cab front and back: electric city, double-decker, subway */
+const PASSENGER_SETS = [
+  ['train-electric-city-a', 'train-electric-city-b', 'train-electric-city-c'],
+  ['train-electric-double-a', 'train-electric-double-b', 'train-electric-double-c'],
+  ['train-electric-subway-a', 'train-electric-subway-b', 'train-electric-subway-c'],
+].map(set => set.map(T));
+const PASSENGER = PASSENGER_SETS[0];
+/** how far along a platform a door may stand from the stop point and still
+ * be served (the platform runs 7.5 m either side) */
+const PLATFORM_REACH = 10;
 const PLAYER_MAX = 12;   // m/s
 const PLAYER_ACCEL = 2.4;
 const PLAYER_BRAKE = 5.5;
@@ -354,14 +355,30 @@ export function timetableHeads(bx: number, by: number, kind: LineKind, t: number
 /** audit hook: flush the timetables (the city base seed changed) */
 export function clearTimetableCache(): void { segCache.clear(); }
 
-interface ConsistSpec { units: Array<{ url: string; len: number; back: number }>; length: number }
+interface ConsistSpec { units: Array<{ url: string; len: number; back: number }>; length: number; passenger: boolean }
+
+/** a train standing at a platform: which one, whether it carries people,
+ * and its doors on the platform side (world) */
+export interface Dwelling {
+  id: string;
+  passenger: boolean;
+  /** the station stop point (world) */
+  x: number;
+  z: number;
+  doors: Array<{ x: number; z: number }>;
+}
 
 function consistFor(l: LineId): ConsistSpec {
   const r = rng(chunkSeed(0x7a1, l.kind === 'ns' ? 1 : 2, l.idx));
   const units: ConsistSpec['units'] = [];
   let back = 0;
-  if (r() < 0.4) {
-    for (const url of PASSENGER) { units.push({ url, len: CAR_LEN + 1.5, back }); back += CAR_LEN + 1.5 + GAP; }
+  // a passenger line (one of the three electric sets) or a freight line —
+  // seeded per line: a line runs through many islands, so it can't follow
+  // any one island's districts
+  const passenger = r() < 0.55;
+  if (passenger) {
+    const set = PASSENGER_SETS[(r() * PASSENGER_SETS.length) | 0];
+    for (const url of set) { units.push({ url, len: CAR_LEN + 1.5, back }); back += CAR_LEN + 1.5 + GAP; }
   } else {
     units.push({ url: LOCOS[(r() * LOCOS.length) | 0], len: LOCO_LEN, back: 0 });
     back = LOCO_LEN + GAP;
@@ -371,7 +388,7 @@ function consistFor(l: LineId): ConsistSpec {
       back += CAR_LEN + GAP;
     }
   }
-  return { units, length: back };
+  return { units, length: back, passenger };
 }
 
 /** a drawn train: its unit objects (null until the GLB arrives) */
@@ -413,7 +430,7 @@ export class Railway {
     const seg = segment(bx, by, 'ns');
     this.kid = {
       line, bx, by, s: seg.dir > 0 ? arc : seg.route.total - arc, v: 0,
-      spec: { units: PASSENGER.map((url, k) => ({ url, len: CAR_LEN + 1.5, back: k * (CAR_LEN + 1.5 + GAP) })), length: 3 * (CAR_LEN + 1.5 + GAP) },
+      spec: { units: PASSENGER.map((url, k) => ({ url, len: CAR_LEN + 1.5, back: k * (CAR_LEN + 1.5 + GAP) })), length: 3 * (CAR_LEN + 1.5 + GAP), passenger: true },
       view: null,
     };
   }
@@ -501,6 +518,46 @@ export class Railway {
   /** is a level crossing's warning on (train within `warn` m) at time t */
   warns(bx: number, by: number, c: Crossing, warn: number, t = this.time): boolean {
     return this.distTo(bx, by, c.line, c.d, t) < warn;
+  }
+
+  /** every train standing at one of island (bx, by)'s platforms right now
+   * (timetable trains in their dwell, the kid's train stopped at the stop
+   * board), with the doors that open onto the platform */
+  dwelling(bx: number, by: number): Dwelling[] {
+    const out: Dwelling[] = [];
+    const doorsOf = (spec: ConsistSpec, kind: LineKind, sbx: number, sby: number, s: number, stop: { x: number; z: number }): Array<{ x: number; z: number }> => {
+      const doors: Array<{ x: number; z: number }> = [];
+      for (const u of spec.units) {
+        for (const f of [0.3, 0.7]) {
+          const p = this.pose(kind, sbx, sby, s - u.back - u.len * f);
+          if (Math.hypot(p.x - stop.x, p.z - stop.z) < PLATFORM_REACH) doors.push({ x: p.x, z: p.z });
+        }
+      }
+      return doors;
+    };
+    for (const kind of ['ns', 'ew'] as const) {
+      const id: LineId = { kind, idx: kind === 'ns' ? bx : by };
+      if (this.kid && lineKey(this.kid.line) === lineKey(id)) continue;
+      const seg = segment(bx, by, kind);
+      const spec = this.spec(id);
+      for (const tr of trainsOn(seg, this.time)) {
+        if (tr.v > 0.05) continue;
+        const st = seg.stops.find(o => o.station && Math.abs(o.s - tr.s) < 0.6);
+        if (!st) continue;
+        const stop = this.pose(kind, bx, by, st.s);
+        out.push({ id: `${lineKey(id)}:${tr.n}`, passenger: spec.passenger, x: stop.x, z: stop.z, doors: doorsOf(spec, kind, bx, by, tr.s, stop) });
+      }
+    }
+    const k = this.kid;
+    if (k && k.bx === bx && k.by === by && k.v < 0.3) {
+      const seg = segment(k.bx, k.by, 'ns');
+      const st = seg.stops.find(o => o.station && Math.abs(o.s - k.s) < 12);
+      if (st) {
+        const stop = this.pose('ns', k.bx, k.by, st.s);
+        out.push({ id: 'kid', passenger: true, x: stop.x, z: stop.z, doors: doorsOf(k.spec, 'ns', k.bx, k.by, k.s, stop) });
+      }
+    }
+    return out;
   }
 
   /** debug: the timetable trains around island (bx, by) */

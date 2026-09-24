@@ -25,9 +25,11 @@ suburban houses with fenced gardens toward the shore, works yards and a rail
 yard along the railway, a park beside downtown — and is built over inside,
 not just along its streets. Every new game rolls a fresh seed and writes it into the URL, and
 `?seed=N` replays that world exactly. Pick a mode from the garage (or
-`?mode=`): fire truck (fires + cats), police car (patrol gates), ambulance and
-medical helicopter (people to rescue), police helicopter and plane (sky
-rings), boat (buoy course), train (station stops) and kart race (three laps
+`?mode=`): fire truck (fires + cats), police car and police helicopter
+(chase the getaway car — stay close, or keep it in the searchlight),
+ambulance and medical helicopter (people to rescue), plane (sky rings), boat
+(buoy course), train (stop at the yellow board and passengers get on and
+off) and kart race (three laps
 against three AI karts on the race islands — every island at x, y multiples
 of 10, starting from island (0,0); the other modes start on island (1,0)). The world keeps running while you play: two railway lines cross
 every island (north-south and west-east, meeting at a diamond) and carry on

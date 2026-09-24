@@ -802,6 +802,22 @@ function buildPlan(bx: number, by: number): CityPlan {
   };
 }
 
+/** which side of the track a station's platform stands: +1 = right of the
+ * line's direction of increasing arc (seeded by the station's spot; the
+ * platform baker and the boarding queues agree through this) */
+export function platformSide(st: Station): 1 | -1 {
+  return (chunkSeed(Math.round(st.x), Math.round(st.z), 0x57a7) & 1) ? 1 : -1;
+}
+
+/** a point on a station's platform: `along` metres from the stop point in
+ * the track direction, `across` metres out from the track (3.5 = the
+ * platform's middle) */
+export function platformPoint(st: Station, along: number, across: number): { x: number; z: number } {
+  const side = platformSide(st);
+  const ux = Math.sin(st.h), uz = Math.cos(st.h), nx = Math.cos(st.h), nz = -Math.sin(st.h);
+  return { x: st.x + ux * along + nx * across * side, z: st.z + uz * along + nz * across * side };
+}
+
 function mkStation(rail: RailRoute, line: number, d: number): Station {
   const p = rail.sample(d);
   return { line, d, x: p.x, z: p.z, h: p.h };

@@ -27,18 +27,20 @@ export interface ModeDef {
   searchlight: boolean;
   /** medical helicopter: a winch line lowers while rescuing */
   winch: boolean;
+  /** robber chases: a getaway car to catch (police car, police helicopter) */
+  chase: boolean;
   /** where the vehicle starts (race: on a race island's starting grid) */
   spawn: 'street' | 'sea' | 'rail' | 'race';
 }
 
-const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, spawn: 'street' as const };
+const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, chase: false, spawn: 'street' as const };
 
 export const MODES: Record<ModeId, ModeDef> = {
   truck: { ...base, id: 'truck', title: 'Fire Truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'cat', 'fire', 'rescue'], lightbar: true },
-  police: { ...base, id: 'police', title: 'Police Car', icon: '🚓', vehicle: VEHICLES.police, course: 'gates', lightbar: true },
+  police: { ...base, id: 'police', title: 'Police Car', icon: '🚓', vehicle: VEHICLES.police, chase: true, lightbar: true },
   ambulance: { ...base, id: 'ambulance', title: 'Ambulance', icon: '🚑', vehicle: VEHICLES.ambulance, calls: ['patient'], lightbar: true },
   heliMedical: { ...base, id: 'heliMedical', title: 'Medical Helicopter', icon: '🚁', vehicle: VEHICLES.heliMedical, calls: ['patient'], lightbar: true, winch: true },
-  heliPolice: { ...base, id: 'heliPolice', title: 'Police Helicopter', icon: '🚁', vehicle: VEHICLES.heliPolice, course: 'rings', lightbar: true, searchlight: true },
+  heliPolice: { ...base, id: 'heliPolice', title: 'Police Helicopter', icon: '🚁', vehicle: VEHICLES.heliPolice, chase: true, lightbar: true, searchlight: true },
   plane: { ...base, id: 'plane', title: 'Plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },
   boat: { ...base, id: 'boat', title: 'Boat', icon: '🚤', vehicle: VEHICLES.boat, course: 'buoys', spawn: 'sea' },
   train: { ...base, id: 'train', title: 'Train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },

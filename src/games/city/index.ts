@@ -26,6 +26,9 @@ import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
 import { raceTrackFor } from '../../worlds/raceIsland.js';
 import { Race, LAPS } from './race.js';
+import { Boarding } from './boarding.js';
+import { Robber, CATCH_R, CATCH_T } from './robber.js';
+import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { Railway, lineDir } from './railway.js';
@@ -266,6 +269,10 @@ const islands = new IslandManager(scene, {
   pets: PET_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
   people: PED_NAMES.map(pickTpl).filter((t): t is BakedTemplate => !!t),
 });
+// passengers queueing, boarding and leaving at the platforms
+const boarding = new Boarding(scene,
+  PED_NAMES.map(n => bakedModel(n)).filter((t): t is BakedTemplate => !!t),
+  PET_NAMES.map(n => bakedModel(n)).filter((t): t is BakedTemplate => !!t));
 // the kid's own train runs on the start island's north-south line
 if (V.kind === 'rail') railway.addPlayer(START.bx, START.by, trainStart(START.bx, START.by).arc);
 /** the platform the kid's train last stopped at (the goal moves on) */
@@ -291,6 +298,10 @@ if (q.get('debugsea') === '1') {
     transit: () => transit.list(),
     river: () => river,
     route: () => railNetFor(curCity.bx, curCity.by),
+    /** police modes: the getaway car */
+    robber: () => robber,
+    /** the platforms' passengers */
+    boarding: () => boarding.list(),
     /** race mode: the race on this island */
     race: () => race,
     probe: (x: number, y: number, z: number) => {
@@ -325,6 +336,12 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
 // already awake as we approached (islands); the seed is derived from the
 // city's coordinates, so city (3, -2) is always the same city. ----
 let curCity: CityRef = cityAt(spawn.x, spawn.z);
+/** police modes: the getaway car on this island */
+const robber = MODE.chase ? new Robber(scene) : null;
+let robberWait = 0, robberCount = 0;
+const newRobber = (c: CityRef): void => {
+  robber?.spawn(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z, citySeed(c.bx, c.by) + 7919 * ++robberCount);
+};
 /** race mode: the race on this island's circuit (none elsewhere) */
 let race: Race | null = null;
 let raceCheer = 0, raceMsg = '', raceMsgT = 0;
@@ -337,6 +354,8 @@ function applyCity(c: CityRef): void {
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
   missions.setCity(c.bx, c.by, c.ox, c.oz);
+  boarding.setCity(c.bx, c.by, c.ox, c.oz);
+  if (robber) newRobber(c);
   const s = modeSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
@@ -430,6 +449,10 @@ function openCall(o: Objective): void {
 // (dev/verification — every scene can be looked at without driving there)
 {
   const sq = q.get('scene');
+  if (sq === 'caught') {
+    mode = 'activity';
+    director.start(() => new CaughtActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
+  }
   if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient') {
     const o = missions.objectives[0] ?? null;
     const fake = {
@@ -571,6 +594,31 @@ const tick = (): void => {
     }
   }
 
+  // the robber chase: the police car stays close, the helicopter keeps the
+  // getaway car in its searchlight — CATCH_T seconds in all and it's caught
+  if (robber) {
+    if (robber.active) {
+      robber.update(dt, elapsed, st.x, st.z, director.busy);
+      const lit = V.kind === 'heli'
+        ? Math.hypot(robber.x - (st.x + Math.sin(st.heading) * 7), robber.z - (st.z + Math.cos(st.heading) * 7)) < 8
+        : Math.hypot(robber.x - st.x, robber.z - st.z) < CATCH_R;
+      if (lit && mode === 'drive' && player.crashT <= 0) robber.caught += dt;
+      if (robber.caught >= CATCH_T && mode === 'drive') {
+        robber.hide();
+        mode = 'activity';
+        const seed = robberCount;
+        director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
+          earnStar('🚓 ROBBER CAUGHT!', player.car.position.clone());
+          mode = 'drive';
+          robberWait = 3;
+        });
+      }
+    } else if (!director.busy) {
+      robberWait -= dt;
+      if (robberWait <= 0) newRobber(curCity);
+    }
+  }
+
   // road vehicles ride the causeway decks up over the raised span
   let deckPitch = 0;
   if (V.kind === 'ground') {
@@ -650,6 +698,7 @@ const tick = (): void => {
   islands.update(dt, elapsed, player.car.position,
     airborne || V.kind === 'boat' ? null : player.car.position);
   railway.update(dt, elapsed, st.x, st.z);
+  boarding.update(dt, elapsed, railway, curCity.bx, curCity.by);
   transit.update(dt, elapsed, railway);
   sea.update(elapsed);
   scenery.update(elapsed);
@@ -708,7 +757,7 @@ const tick = (): void => {
   // the course gate / station the mode is heading for (when it has one)
   const gate = course?.target() ?? null;
   const station = V.kind === 'rail' ? nextStation() : null;
-  const goal = gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
+  const goal = robber?.active ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
     : near ? { x: near.pos.x, z: near.pos.z } : null;
   const goalD = goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
   // where the guidance points: straight at the goal when flying or close,
@@ -736,6 +785,15 @@ const tick = (): void => {
     promptEl.style.display = view.scene ? 'block' : 'none';
     promptText.textContent = view.prompt;
     promptFill.style.width = `${Math.min(100, view.progress * 100)}%`;
+  } else if (robber?.active) {
+    // ---- the chase ----
+    const rd = Math.hypot(robber.x - st.x, robber.z - st.z);
+    showGuide('🦹', rd, Math.round((5 * robber.caught) / CATCH_T));
+    promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
+    const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
+    promptText.textContent = V.kind === 'heli'
+      ? (close ? 'KEEP THE CAR IN YOUR LIGHT!' : 'FLY AFTER THE GETAWAY CAR!')
+      : (close ? 'STAY RIGHT BEHIND IT!' : 'CATCH THE GETAWAY CAR!');
   } else if (race) {
     // ---- the race: lap, place, countdown ----
     const rv = race.view();
@@ -772,7 +830,7 @@ const tick = (): void => {
     const gap = station.gap;
     showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
     promptFill.style.width = '0%';
-    promptText.textContent = gap < 12 ? (pose.v < 0.5 ? 'ALL ABOARD!' : 'STOP HERE!')
+    promptText.textContent = gap < 12 ? (pose.v < 0.5 ? `ALL ABOARD! ${'🧍'.repeat(Math.min(6, boarding.boardedKid))}` : 'STOP AT THE YELLOW BOARD!')
       : gap < 70 ? 'SLOW DOWN…' : 'DRIVE TO THE STATION';
     if (gap < 12 && pose.v < 0.5) {
       earnStar('🚉 STATION STOP!', new THREE.Vector3(st.x, 3, st.z));

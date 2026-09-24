@@ -20,7 +20,7 @@ export const GAMES: GameEntry[] = [
     id: 'police',
     title: 'Police Car',
     icon: '🚓',
-    blurb: 'Siren on! Patrol the streets through the checkpoint gates.',
+    blurb: 'Siren on! Chase the getaway car and stay right behind it to catch the robber.',
     url: 'play/city.html?mode=police',
   },
   {
@@ -41,7 +41,7 @@ export const GAMES: GameEntry[] = [
     id: 'heli-police',
     title: 'Police Helicopter',
     icon: '🔦',
-    blurb: 'Searchlight on! Fly through the rings over the rooftops.',
+    blurb: 'Searchlight on! Keep the getaway car in your light until the robber gives up.',
     url: 'play/city.html?mode=heliPolice',
   },
   {

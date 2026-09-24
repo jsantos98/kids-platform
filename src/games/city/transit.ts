@@ -10,7 +10,7 @@ import { rng, chunkSeed } from '../../engine/rng.js';
 import { RAIL_Y, railNetFor, layRails, railTile, type RailRoute } from '../../worlds/railRoute.js';
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
 import { coastFor } from '../../worlds/coast.js';
-import { cityPlanFor, type Crossing, type Station } from '../../worlds/cityPlan.js';
+import { cityPlanFor, platformSide, type Crossing, type Station } from '../../worlds/cityPlan.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 import type { Railway } from './railway.js';
@@ -131,7 +131,7 @@ export class Transit {
 
   // ---- station platform beside a straight stretch of the line ----
   private bakeStation(B: Baked, st: Station, r: () => number, ox: number, oz: number, inst: CityInst): void {
-    const side = r() < 0.5 ? 1 : -1;
+    const side = platformSide(st);
     const nx = Math.cos(st.h), nz = -Math.sin(st.h);   // right of travel
     const px = ox + st.x + nx * 3.5 * side, pz = oz + st.z + nz * 3.5 * side;
     B.box(3.4, 0.36, 15, WOOD, px, 0.28, pz, 0, st.h, 0);
@@ -148,6 +148,16 @@ export class Transit {
     const sx = px + nx * 0.4 * side, sz = pz + nz * 0.4 * side;
     B.cyl(0.06, 0.08, 2.6, 8, STEEL, sx + Math.sin(st.h) * 6.8, 1.3, sz + Math.cos(st.h) * 6.8);
     B.cyl(0.55, 0.55, 0.08, 12, 0x4a90d9, sx + Math.sin(st.h) * 6.8, 2.5, sz + Math.cos(st.h) * 6.8, Math.PI / 2, st.h, 0);
+    // the stop board: a train's head stops level with it (the kid's train
+    // opens its doors there) — a yellow board on a post at the platform's
+    // track edge, and a yellow line painted across the platform
+    {
+      const bx = ox + st.x + nx * 1.9 * side, bz = oz + st.z + nz * 1.9 * side;
+      B.cyl(0.07, 0.07, 2.4, 8, STEEL, bx, 1.2, bz);
+      B.box(0.12, 0.8, 1.1, 0xffd23f, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
+      B.box(0.14, 0.18, 1.12, 0x2b2b2b, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
+      B.box(3.2, 0.02, 0.35, 0xffd23f, px, 0.47, pz, 0, st.h, 0);
+    }
     // platform collision: approximate AABB of the rotated deck
     const alongZ = Math.abs(Math.sin(st.h)) > Math.abs(Math.cos(st.h));
     inst.boxes.push({

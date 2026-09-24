@@ -422,7 +422,7 @@ function tryRoute(
     }
     for (const line of V) {
       const d = Math.abs(p.x - line * 64);
-      const dev = Math.min(p.h, Math.PI - p.h, Math.abs(p.h - Math.PI * 2));
+      const dev = Math.min(Math.abs(p.h), Math.PI - Math.abs(p.h));
       if (d < 10 && dev < 55 * Math.PI / 180) score += 0.75;
     }
   }

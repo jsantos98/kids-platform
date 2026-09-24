@@ -1,5 +1,8 @@
-// Missions: fire & cat-rescue objectives spawning around the player, nearest
-// selection for the guidance arrow, and the hovering markers above each call.
+// Missions: emergency calls spawning around the player — fires (a house, a
+// tree or a car), cats (up a tree or on a ledge), people in a burning
+// building, patients — with the nearest-call lookup for the guidance and the
+// markers + beacons over each call. Arriving at a call opens its mission
+// scene (activity/); `variant` and `seed` decide what that scene looks like.
 import * as THREE from 'three';
 import { C } from '../../engine/palette.js';
 import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
@@ -7,10 +10,14 @@ import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { graphFor, type StreetGraph } from '../../worlds/streetGraph.js';
 import { makeBeacon } from './guide3d.js';
 
-export type ObjectiveType = 'fire' | 'cat' | 'patient';
+export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue';
 
 export interface Objective {
   type: ObjectiveType;
+  /** which scene: fire 'house' | 'tree' | 'car', cat 'tree' | 'building' */
+  variant: string;
+  /** seeds the mission scene's layout */
+  seed: number;
   group: THREE.Group;
   flames?: THREE.Mesh[];
   smoke?: THREE.Mesh[];
@@ -61,7 +68,7 @@ export class Missions {
     const qType = new URLSearchParams(location.search).get('type');
     let type: ObjectiveType;
     if (forcedType) type = forcedType;
-    else if ((qType === 'fire' || qType === 'cat' || qType === 'patient') && this.calls.includes(qType)) type = qType;
+    else if ((qType === 'fire' || qType === 'cat' || qType === 'patient' || qType === 'rescue') && this.calls.includes(qType)) type = qType;
     else type = this.calls[this.index % this.calls.length];
     const diff = Math.min(this.sFires + this.sCats, 10);
     const dist = this.index === 0 ? 26 + r() * 10 : Math.min(90 + diff * 10, 240) + r() * 60;
@@ -95,7 +102,19 @@ export class Missions {
     let group: THREE.Group;
     let flames: THREE.Mesh[] | undefined;
     let smoke: THREE.Mesh[] | undefined;
-    if (type === 'fire') {
+    const variant = type === 'fire' ? (['house', 'tree', 'car'] as const)[(r() * 3) | 0]
+      : type === 'cat' ? (r() < 0.5 ? 'tree' : 'building') : '';
+    const seed = chunkSeed(this.ox + this.index, this.oz, 0x5ce7e);
+    if (type === 'rescue') {
+      // smoke and flames with somebody waving for help beside them
+      const f = makeFire();
+      group = f.group;
+      flames = f.flames;
+      smoke = f.smoke;
+      const who = makePerson({ shirt: C.yellow, pants: C.dark });
+      who.position.set(-1.6, 0, 0.6);
+      group.add(who);
+    } else if (type === 'fire') {
       const f = makeFire();
       group = f.group;
       flames = f.flames;
@@ -111,14 +130,14 @@ export class Missions {
     group.position.copy(pos);
     group.position.y = pos.y;
     this.scene.add(group);
-    const markerColor = type === 'fire' ? 0xffc93c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1;
+    const markerColor = type === 'fire' || type === 'rescue' ? 0xffc93c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1;
     const marker = makeMarker(markerColor);
     marker.position.set(pos.x, 6.4, pos.z);
     this.scene.add(marker);
-    const beacon = makeBeacon(type === 'fire' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
+    const beacon = makeBeacon(type === 'fire' || type === 'rescue' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
     beacon.position.set(pos.x, 0, pos.z);
     this.scene.add(beacon);
-    this.objectives.push({ type, group, flames, smoke, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
+    this.objectives.push({ type, variant, seed, group, flames, smoke, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
     this.index++;
   }
 

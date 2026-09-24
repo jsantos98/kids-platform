@@ -28,8 +28,14 @@ import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGr
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
-import * as sprayMod from './spray.js';
-import * as ladderMod from './ladder.js';
+import { Director } from './activity/director.js';
+import type { Activity } from './activity/common.js';
+import { HoseActivity, type FireVariant } from './activity/hose.js';
+import { CatLadderActivity, type CatVariant } from './activity/catLadder.js';
+import { RescueLadderActivity } from './activity/rescueLadder.js';
+import { StretcherActivity } from './activity/stretcher.js';
+import { WinchActivity } from './activity/winch.js';
+import type { Objective } from './missions.js';
 import { Particles } from './particles.js';
 import { Transit } from './transit.js';
 import { riverFor } from '../../worlds/riverRoute.js';
@@ -196,20 +202,8 @@ if (q.get('buildall') === '1') {
 const sea = await createSea(scene);
 const scenery = new CityScenery(scene);
 
-// ---- water jet + steam (spray mini-scene visuals) ----
-const jet = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.16, 0.3, 1, 8),
-  new THREE.MeshLambertMaterial({ color: 0xbfe3ff, transparent: true, opacity: 0.62 }),
-);
-jet.visible = false;
-scene.add(jet);
-const steamPuff = new THREE.Mesh(
-  new THREE.SphereGeometry(0.5, 10, 8),
-  new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, flatShading: true }),
-);
-steamPuff.visible = false;
-scene.add(steamPuff);
-scene.add(ladderMod.getLadderMesh());
+// ---- mission scenes: arriving at a call fades into its own little scene ----
+const director = new Director(document.getElementById('fade')!);
 
 // ---- missions ----
 const missions = new Missions(scene, MODE.calls);
@@ -344,11 +338,9 @@ function cycleCamera(): void {
 }
 
 // ---- game state ----
-let mode: 'drive' | 'spray' | 'ladder' = 'drive';
-let ladderAim = 0;
-let hoseAim = 0;
-let spraySession: sprayMod.SpraySession | null = null;
-let ladderSession: ladderMod.LadderSession | null = null;
+let mode: 'drive' | 'activity' = 'drive';
+/** the call whose scene is playing */
+let activeCall: Objective | null = null;
 let toast = '';
 let splashTimer = 0;
 const totals = loadTotals();
@@ -356,14 +348,52 @@ updateMissionPanel();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
 
-// ?livertest=1: teleport next to the first cat -> ladder scene
-if (q.get('livertest') === '1') {
-  const cp = missions.objectives.find(o => o.type === 'cat');
-  if (cp) {
-    player.state.x = cp.pos.x + 6;
-    player.state.z = cp.pos.z + 4;
-    ladderSession = ladderMod.beginLadder(scene, cp, player.car);
-    mode = 'ladder';
+/** the scene for a call: hose (fires), ladders (cats, burning buildings),
+ * stretcher (ambulance) or winch (medical helicopter) */
+function sceneFor(o: Objective): Activity {
+  if (o.type === 'fire') return new HoseActivity(o.seed, o.variant as FireVariant);
+  if (o.type === 'cat') return new CatLadderActivity(o.seed, o.variant as CatVariant);
+  if (o.type === 'rescue') return new RescueLadderActivity(o.seed);
+  return V.kind === 'heli' ? new WinchActivity(o.seed) : new StretcherActivity(o.seed);
+}
+
+/** fade into a call's scene; when it's done the call is answered */
+function openCall(o: Objective): void {
+  activeCall = o;
+  mode = 'activity';
+  director.start(() => sceneFor(o), () => {
+    missions.remove(o);
+    if (o.type === 'fire') {
+      missions.sFires++; totals.fires++;
+      toast = '🔥 FIRE EXTINGUISHED!';
+    } else if (o.type === 'cat' || o.type === 'rescue') {
+      missions.sCats++; totals.cats++;
+      toast = o.type === 'cat' ? '🐱 CAT RESCUED!' : '🧑‍🚒 EVERYONE IS SAFE!';
+    } else {
+      runStars++; totals.stars++;
+      toast = '🆘 PERSON RESCUED!';
+    }
+    saveTotals(totals);
+    updateMissionPanel();
+    particles.burstConfetti(player.car.position);
+    missions.cooldown = 3;
+    activeCall = null;
+    mode = 'drive';
+  });
+}
+
+// ?scene=fire|cat|rescue|patient[&variant=..]: open that mission scene at once
+// (dev/verification — every scene can be looked at without driving there)
+{
+  const sq = q.get('scene');
+  if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient') {
+    const o = missions.objectives[0] ?? null;
+    const fake = {
+      ...(o ?? {}), type: sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
+      seed: Number(q.get('sceneSeed') ?? 7),
+    } as Objective;
+    if (o) missions.objectives.splice(0, 1, fake);
+    openCall(fake);
   }
 }
 
@@ -513,24 +543,7 @@ const tick = (): void => {
   // camera (flying vehicles keep the camera near their altitude)
   const flyY = V.kind === 'plane' ? st.alt : V.kind === 'heli' ? HELI_ALT : 0;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
-  if (mode === 'spray' && spraySession) {
-    const fp = spraySession.obj.pos;
-    // over-the-truck view: 11 m up and 8.5 m back — the line to the fire always
-    // clears the cab (≈2.9 m), with the truck in the lower frame and the fire centered
-    const camT = player.car.position.clone().addScaledVector(fwd, -8.5).add(new THREE.Vector3(0, 11, 0));
-    camera.position.lerp(camT, Math.min(1, dt * 3));
-    camera.lookAt(fp.x, 0.8, fp.z);
-  } else if (mode === 'ladder' && ladderSession) {
-    // dedicated ladder view: broadside from the road side of the cat tree —
-    // the cat on its branch, the sliding ladder and the truck all in profile
-    const fp = ladderSession.obj.pos;
-    const toCross = new THREE.Vector3(ladderSession.obj.gx - fp.x, 0, ladderSession.obj.gz - fp.z).normalize();
-    const camT = fp.clone().addScaledVector(toCross, 7).add(new THREE.Vector3(0, 3.4, 0));
-    camT.lerp(player.car.position, 0.25);
-    camT.y = Math.max(camT.y, 3.2);
-    camera.position.lerp(camT, Math.min(1, dt * 3));
-    camera.lookAt(fp.x, 2.1, fp.z);
-  } else if (camMode === 'cab') {
+  if (camMode === 'cab') {
     camera.position.set(st.x + fwd.x * V.cabF, flyY + V.cabY, st.z + fwd.z * V.cabF);
     camera.lookAt(st.x + fwd.x * 25, flyY + 1.4, st.z + fwd.z * 25);
   } else if (camMode === 'high') {
@@ -581,15 +594,16 @@ const tick = (): void => {
   particles.update(dt);
   chunks.updateLights(elapsed);
   minimap.update(st.x, st.z, st.heading, elapsed);
-  // hose / ladder aiming: wheel axis, A/D / arrows, or mouse cursor position
+  // mission-scene steering: +1 = right on screen — the wheel (turned right),
+  // D / right arrow, or the mouse's x when nothing else is pressed
   let aimIn = 0;
   if (isDown('KeyA') || isDown('ArrowLeft')) aimIn -= 1;
   if (isDown('KeyD') || isDown('ArrowRight')) aimIn += 1;
   const gp = navigator.getGamepads?.()[0];
-  if (gp && Math.abs(gp.axes[0]) > 0.08) aimIn = -gp.axes[0];
+  if (gp && Math.abs(gp.axes[0]) > 0.08) aimIn = gp.axes[0];
   if (aimIn === 0 && Math.abs(pointerX()) > 0.05) aimIn = pointerX();
-  if (mode === 'spray') hoseAim += (Math.max(-1, Math.min(1, aimIn)) - hoseAim) * Math.min(1, dt * 4);
-  if (mode === 'ladder') ladderAim += (Math.max(-1, Math.min(1, aimIn)) - ladderAim) * Math.min(1, dt * 5);
+  const view = director.update(dt, elapsed, { steer: Math.max(-1, Math.min(1, aimIn)) });
+  document.body.classList.toggle('in-scene', !!view.scene);
 
   // a finished course is followed by a fresh one after a short cheer
   if (course && !course.target()) {
@@ -610,7 +624,7 @@ const tick = (): void => {
     if (!o.marker) continue;
     // hover marker over the call; the tall beacon pillar does the
     // long-range finding (it shows over the rooftops, fog or not)
-    const busy = mode !== 'drive' && (spraySession?.obj === o || ladderSession?.obj === o);
+    const busy = activeCall === o;
     o.marker.visible = !busy;
     o.marker.scale.setScalar(1.6);
     o.marker.position.y = 5.4 + Math.sin(elapsed * 2 + o.index) * 0.5;
@@ -642,40 +656,12 @@ const tick = (): void => {
     promptEl.style.display = 'block';
   };
 
-  if (mode === 'spray' && spraySession) {
+  if (director.busy) {
+    // ---- a mission scene is playing (or fading in/out) ----
     guideEl.style.opacity = '0';
-    promptEl.style.display = 'block';
-    promptText.textContent = 'SPRAY LEFT / RIGHT!';
-    const doneFrac = sprayMod.updateSpray(spraySession, dt, elapsed, hoseAim, player.car, { jet, steam: steamPuff });
-    promptFill.style.width = `${Math.min(100, doneFrac * 100)}%`;
-    if (doneFrac >= 0.999) {
-      sprayMod.endSpray({ jet, steam: steamPuff });
-      particles.burstConfetti(spraySession.obj.pos);
-      missions.remove(spraySession.obj);
-      missions.sFires++; totals.fires++;
-      saveTotals(totals);
-      toast = '🔥 FIRE EXTINGUISHED!';
-      missions.cooldown = 3;
-      spraySession = null;
-      mode = 'drive';
-    }
-  } else if (mode === 'ladder' && ladderSession) {
-    // ---- ladder mini-scene: slide the ladder to the cat ----
-    guideEl.style.opacity = '0';
-    promptEl.style.display = 'block';
-    promptFill.style.width = `${Math.min(100, ladderSession.obj.progress / 1.4 * 100)}%`;
-    const done = ladderMod.updateLadder(ladderSession, ladderAim, dt);
-    promptText.textContent = done ? 'RESCUING…' : 'MOVE THE LADDER TO THE CAT!';
-    if (done) {
-      particles.burstConfetti(ladderSession.obj.pos);
-      missions.remove(ladderSession.obj);
-      missions.sCats++; totals.cats++;
-      saveTotals(totals);
-      toast = '🐱 CAT RESCUED!';
-      ladderMod.endLadder();
-      ladderSession = null;
-      mode = 'drive';
-    }
+    promptEl.style.display = view.scene ? 'block' : 'none';
+    promptText.textContent = view.prompt;
+    promptFill.style.width = `${Math.min(100, view.progress * 100)}%`;
   } else if (course && gate) {
     // ---- checkpoint course: through the glowing gate, then the next ----
     showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,
@@ -704,40 +690,19 @@ const tick = (): void => {
     }
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----
-    showGuide(near.type === 'fire' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱', nd,
+    showGuide(near.type === 'fire' || near.type === 'rescue' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱', nd,
       Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240)))));
-    if (near.type === 'fire') {
-      promptText.textContent = nd < 15 ? 'STOP HERE!' : 'DRIVE TO THE FIRE';
-      promptFill.style.width = '0%';
-      if (nd < 15 && Math.abs(st.v) < 1.0 && player.crashT <= 0) {
-        spraySession = sprayMod.beginSpray(near, player.car);
-        mode = 'spray';
-        promptText.textContent = 'SPRAY LEFT / RIGHT!';
-      }
-    } else if (near.type === 'patient') {
-      // helicopter: hover over the person and the winch lifts them;
-      // ambulance: pull up beside them and they climb in
-      const heliMode = V.kind === 'heli';
-      const close = heliMode ? nd < 9 && Math.abs(st.v) < 4 : nd < 12 && Math.abs(st.v) < 1 && player.crashT <= 0;
-      if (close) near.progress += dt; // seconds held; done at `need`
-      promptFill.style.width = `${Math.min(100, near.progress / near.need * 100)}%`;
-      promptText.textContent = close ? (heliMode ? 'WINCHING…' : 'HELPING THEM IN…')
-        : heliMode ? (nd < 9 ? 'HOVER HERE!' : 'FLY TO THE PERSON')
-          : (nd < 12 ? 'STOP HERE!' : 'DRIVE TO THE PERSON');
-      winch?.update(dt, close ? HELI_ALT - 1 : 1.2, V.scale ?? 1);
-      if (near.progress >= near.need) {
-        missions.remove(near);
-        earnStar('🆘 PERSON RESCUED!', near.pos);
-      }
-    } else {
-      promptText.textContent = nd < 12 ? 'STOP HERE!' : 'DRIVE TO THE CAT';
-      promptFill.style.width = '0%';
-      if (nd < 12 && Math.abs(st.v) < 1.0 && player.crashT <= 0) {
-        ladderSession = ladderMod.beginLadder(scene, near, player.car);
-        mode = 'ladder';
-        promptText.textContent = 'MOVE THE LADDER TO THE CAT!';
-      }
-    }
+    promptFill.style.width = '0%';
+    // arriving: stop beside the call (the helicopter hovers over it) and its
+    // scene opens
+    const heliMode = V.kind === 'heli';
+    const reach = heliMode ? 9 : near.type === 'cat' ? 12 : 15;
+    const stopped = heliMode ? Math.abs(st.v) < 4 : Math.abs(st.v) < 1 && player.crashT <= 0;
+    const what = near.type === 'fire' ? 'THE FIRE' : near.type === 'cat' ? 'THE CAT'
+      : near.type === 'rescue' ? 'THE BURNING HOUSE' : 'THE PERSON';
+    promptText.textContent = nd < reach ? (heliMode ? 'HOVER HERE!' : 'STOP HERE!')
+      : `${heliMode ? 'FLY' : 'DRIVE'} TO ${what}`;
+    if (nd < reach && stopped) openCall(near);
   } else {
     guideEl.style.opacity = '1';
     promptEl.style.display = 'none';
@@ -750,7 +715,7 @@ const tick = (): void => {
   }
 
   audio.setSiren(sirenOn);
-  audio.setPump(jet.visible);
+  audio.setPump(director.pumping);
   if (sirenOn) {
     // alternate the lightbar: red flash / blue flash
     const phase = Math.floor(elapsed * 5) % 2;
@@ -764,7 +729,8 @@ const tick = (): void => {
     promptFill.style.width = '0%';
   }
 
-  renderer.render(scene, camera);
+  if (view.scene && view.camera) renderer.render(view.scene, view.camera);
+  else renderer.render(scene, camera);
   if (elapsed - statTime > 0.4) {
     statTime = elapsed;
     const i = renderer.info.render;
@@ -779,6 +745,7 @@ renderer.setAnimationLoop(tick);
 if (q.get('debugsea') === '1') {
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.tick = tick;
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.missions = missions;
+  (window as unknown as { __dbg: Record<string, unknown> }).__dbg.director = director;
 }
 if (q.get('still') === '1') {
   // background tabs suspend rAF — drive frames off a timer so ?still captures

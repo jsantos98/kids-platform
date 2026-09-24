@@ -29,9 +29,11 @@ driving it the fire truck drives itself.
 
 WASD / arrow keys or the USB wheel (steering axis + triggers).
 `E` toggles the siren, `C` cycles chase / high / cab cameras (or `?cam=high`),
-`R` resets. Drive to the 🔥 / 🐱 marker and stop, then sweep the hose or
-slide the ladder (A/D, the wheel or the mouse). In the helicopter, hover over
-the 🆘 person to winch them up.
+`R` resets. Drive to a call's beacon and stop (hover, in the helicopter) and
+its mission scene opens: sweep the hose over a burning house, tree or car,
+slide the ladder to a cat or to people at the windows of a burning building,
+steer the stretcher into the ambulance, or hold the helicopter's winch over the
+person — the wheel only (A/D or the mouse work too).
 
 ## Project layout
 

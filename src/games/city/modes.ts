@@ -5,7 +5,7 @@ import { VEHICLES, type VehicleConfig } from './player.js';
 export type ModeId = 'truck' | 'police' | 'ambulance' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'train';
 
 /** emergency calls a mode answers (missions.ts) */
-export type CallKind = 'fire' | 'cat' | 'patient';
+export type CallKind = 'fire' | 'cat' | 'patient' | 'rescue';
 
 /** a checkpoint course: gates across streets, rings in the sky, buoys at sea */
 export type CourseKind = 'gates' | 'rings' | 'buoys';
@@ -34,7 +34,7 @@ export interface ModeDef {
 const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, spawn: 'street' as const };
 
 export const MODES: Record<ModeId, ModeDef> = {
-  truck: { ...base, id: 'truck', title: 'Fire Truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'fire', 'cat'], lightbar: true },
+  truck: { ...base, id: 'truck', title: 'Fire Truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'cat', 'fire', 'rescue'], lightbar: true },
   police: { ...base, id: 'police', title: 'Police Car', icon: '🚓', vehicle: VEHICLES.police, course: 'gates', lightbar: true },
   ambulance: { ...base, id: 'ambulance', title: 'Ambulance', icon: '🚑', vehicle: VEHICLES.ambulance, calls: ['patient'], lightbar: true },
   heliMedical: { ...base, id: 'heliMedical', title: 'Medical Helicopter', icon: '🚁', vehicle: VEHICLES.heliMedical, calls: ['patient'], lightbar: true, winch: true },

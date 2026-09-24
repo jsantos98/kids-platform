@@ -86,7 +86,16 @@ export interface Stage {
   followSky(x: number, z: number): void;
 }
 
-export function createStage({
+export interface Dressing {
+  sun: THREE.DirectionalLight;
+  /** the sky dome + sun disc follow a point (the player) */
+  followSky(x: number, z: number): void;
+}
+
+/** Sky dome, fog, hemisphere fill, the warm shadow-casting sun, optional sun
+ * disc and ground — everything a pastel scene needs besides its content.
+ * Shared by the world stage and the mission scenes (same renderer). */
+export function makeSceneDressing(scene: THREE.Scene, {
   skyTop = C.skyTop,
   skyBottom = C.skyBottom,
   fogNear = 70,
@@ -97,17 +106,7 @@ export function createStage({
   groundColor = C.grass,
   showSun = true,
   ground = true,
-}: StageOptions = {}): Stage {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean
-  renderer.toneMappingExposure = 1.06;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.body.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
+}: StageOptions = {}): Dressing {
   scene.fog = new THREE.Fog(skyBottom, fogNear, fogFar);
 
   // Gradient sky dome
@@ -139,6 +138,7 @@ export function createStage({
   sun.shadow.bias = -0.0002;
   sun.shadow.normalBias = 0.04;
   scene.add(sun);
+  scene.add(sun.target);
 
   let disc: THREE.Mesh | null = null;
   const sunDiscOffset = new THREE.Vector3().copy(sun.position).normalize().multiplyScalar(420);
@@ -159,18 +159,33 @@ export function createStage({
     scene.add(groundMesh);
   }
 
+  // keep the sky dome and the sun disc centred on the player
+  const followSky = (x: number, z: number) => {
+    sky.position.set(x, 0, z);
+    disc?.position.set(x + sunDiscOffset.x, sunDiscOffset.y, z + sunDiscOffset.z);
+  };
+  return { sun, followSky };
+}
+
+export function createStage(opts: StageOptions = {}): Stage {
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean
+  renderer.toneMappingExposure = 1.06;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const { sun, followSky } = makeSceneDressing(scene, opts);
+
   const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1200);
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   });
-
-  // keep the sky dome and the sun disc centred on the player
-  const followSky = (x: number, z: number) => {
-    sky.position.set(x, 0, z);
-    disc?.position.set(x + sunDiscOffset.x, sunDiscOffset.y, z + sunDiscOffset.z);
-  };
 
   return { renderer, scene, camera, sun, followSky };
 }

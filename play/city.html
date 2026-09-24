@@ -84,6 +84,13 @@
     opacity: 0; transition: opacity .4s; pointer-events: none;
     box-shadow: 0 3px 0 rgba(74, 80, 88, .14);
   }
+  /* mission scenes: a soft cream fade between the world and the scene; the
+     map, siren and key hints step aside while a scene plays */
+  #fade {
+    position: fixed; inset: 0; z-index: 7; background: #fdf4e3;
+    opacity: 0; pointer-events: none;
+  }
+  body.in-scene #minimap, body.in-scene #sirenBtn, body.in-scene #hint { display: none; }
   #minimap {
     position: fixed; right: 12px; bottom: 12px; z-index: 9;
     width: clamp(110px, 17vh, 150px); height: clamp(110px, 17vh, 150px);
@@ -126,6 +133,7 @@
 </div>
 <div id="prompt"><span id="promptText"></span><div class="bar"><div id="promptFill"></div></div></div>
 <div id="camLabel"></div>
+<div id="fade"></div>
 <button id="sirenBtn" type="button"><span class="ic">🚨</span>SIREN</button>
 <canvas id="minimap" width="256" height="256"></canvas>
 <script type="module" src="../src/games/city/index.ts"></script>

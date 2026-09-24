@@ -1,11 +1,10 @@
 // Traffic-light props: the Kenney City Kit Roads traffic light, one pole per
-// approach (roadLayout TRAFFIC_POLES), with dynamic red / yellow / green
+// approach (roadLayout trafficPoles), with dynamic red / yellow / green
 // lamps laid over the kit's baked lamp faces so they can switch each frame.
 // A procedural pole stands in if the kit template failed to load.
 import * as THREE from 'three';
 import { bakedModel } from '../../engine/assets.js';
 import { templateToMesh } from '../../engine/baked.js';
-import { TRAFFIC_POLES } from '../../worlds/roadLayout.js';
 
 export const LAMP_MATS = {
   red: new THREE.MeshBasicMaterial({ color: 0xff3b30 }),
@@ -49,17 +48,16 @@ function kitPole(): THREE.Mesh | null {
 }
 
 /**
- * Poles around the signalized node at world (x0, z0). `arms` is the node's
- * unfiltered [w, e, n, s] arm set: only approaches that exist get a pole.
+ * Poles around a signalized node: `poles` (world positions, lamp yaw and
+ * the phase each approach obeys) come from roadLayout's trafficPoles.
  */
-export function makeTrafficLights(x0: number, z0: number, arms: boolean[]): TrafficLightProps {
+export function makeTrafficLights(poles: Array<{ x: number; z: number; ry: number; axis: 'ew' | 'ns' }>): TrafficLightProps {
   const group = new THREE.Group();
   const out: TrafficLightProps = { group, ew: [], ns: [] };
   const kit = kitPole();
-  for (const [dx, dz, ry, arm, axis] of TRAFFIC_POLES) {
-    if (!arms[arm]) continue;
+  for (const { x, z, ry, axis } of poles) {
     const g = new THREE.Group();
-    g.position.set(x0 + dx, 0.1, z0 + dz);
+    g.position.set(x, 0.1, z);
     g.rotation.y = ry;
     let head: LampHead;
     if (kit) {

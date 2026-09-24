@@ -19,6 +19,7 @@ import { rng, chunkSeed } from '../engine/rng.js';
 import { makePath, type WorldPath } from './spline.js';
 import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X } from './world.js';
 import { citySeed, southExit } from './cityGrid.js';
+import { streetNetFor } from './streetGen.js';
 
 const SPAWN = { x: CENTER, z: CENTER };
 const LANE = 64; // lattice spacing
@@ -38,39 +39,62 @@ export interface RiverRoute {
   near(x: number, z: number, r: number): boolean;
 }
 
-// module-level cache per city
+// module-level caches per city: the base river (the street generator lays
+// its crossings against it) and the final one, straightened square to every
+// street that crosses it
 const cache = new Map<string, RiverRoute>();
+const baseCache = new Map<string, Array<{ x: number; z: number; w: number }>>();
 
 /** test/audit hook: rivers are cached per seed, so switching the city base
  * seed requires a flush or stale rivers come back */
-export function clearRiverCache(): void { cache.clear(); }
+export function clearRiverCache(): void { cache.clear(); baseCache.clear(); }
 
 export function riverFor(bx: number, by: number): RiverRoute {
   const seed = citySeed(bx, by);
   const key = `${bx},${by},${seed}`;
   let rv = cache.get(key);
   if (!rv) {
-    // the north-south railway's straight portal stems run 24 m east of the
-    // north and south causeway avenues — the river keeps out of those two
-    // lanes, or a stem would sit in the water (R30)
-    rv = buildRiver(seed, [southExit(bx, by - 1), southExit(bx, by)]);
+    // straightened square to every street crossing the generator kept, so
+    // each bridge meets the water at a right angle (R26) — two passes, the
+    // second flattens what the first one's blend windows leave
+    const cross = streetNetFor(bx, by).riverCrossings;
+    rv = routeOf(straightenAt(straightenAt(baseSamples(bx, by), cross), cross));
     cache.set(key, rv);
     if (cache.size > 64) cache.delete(cache.keys().next().value as string);
   }
   return rv;
 }
 
-function buildRiver(seed: number, avoid: number[]): RiverRoute {
-  // rejection-sampled wobble inside the chosen corridor
-  const lane = pickCorridor(seed, avoid);
-  let samples: Array<{ x: number; z: number; w: number }> | null = null;
-  for (let attempt = 0; attempt < 48 && !samples; attempt++) {
-    samples = tryRiver(rng(chunkSeed(seed, 0x71f3, attempt)), lane);
+/** the river before any street has been laid (the street generator decides
+ * its crossings against this one) */
+export function baseRiverFor(bx: number, by: number): RiverRoute {
+  return routeOf(baseSamples(bx, by));
+}
+
+function baseSamples(bx: number, by: number): Array<{ x: number; z: number; w: number }> {
+  const seed = citySeed(bx, by);
+  const key = `${bx},${by},${seed}`;
+  let s = baseCache.get(key);
+  if (!s) {
+    // the north-south railway's straight portal stems run 24 m east of the
+    // north and south causeway avenues — the river keeps out of those two
+    // lanes, or a stem would sit in the water (R30)
+    const lane = pickCorridor(seed, [southExit(bx, by - 1), southExit(bx, by)].flatMap(l => [l - 1, l]));
+    let samples: Array<{ x: number; z: number; w: number }> | null = null;
+    for (let attempt = 0; attempt < 48 && !samples; attempt++) {
+      samples = tryRiver(rng(chunkSeed(seed, 0x71f3, attempt)), lane);
+    }
+    s = samples ?? fallbackRiver(lane);
+    baseCache.set(key, s);
+    if (baseCache.size > 64) baseCache.delete(baseCache.keys().next().value as string);
   }
-  samples ??= fallbackRiver(lane);
-  // two passes: the second flattens the residual slope the first one's
-  // blend windows leave a few metres off the line
-  samples = straightenAtStreets(straightenAtStreets(samples));
+  return s;
+}
+
+const routeCache = new WeakMap<object, RiverRoute>();
+function routeOf(samples: Array<{ x: number; z: number; w: number }>): RiverRoute {
+  const hit = routeCache.get(samples);
+  if (hit) return hit;
   const path = makePath(samples.map(p => ({ x: p.x, z: p.z })), false);
   const pts = path.pts.map(p => {
     // width swells gently along the run
@@ -89,6 +113,7 @@ function buildRiver(seed: number, avoid: number[]): RiverRoute {
     },
     near(x, z, r) { return path.nearest(x, z).d2 < r * r; },
   };
+  routeCache.set(samples, route);
   return route;
 }
 
@@ -103,6 +128,10 @@ function pickCorridor(seed: number, avoid: number[]): number {
     const cx = k * LANE + LANE / 2;
     if (avoid.includes(k)) continue;
     if (Math.abs(cx - BRIDGE_X) < 100) continue;
+    // the west-east railway runs straight in 140 m beside the west and
+    // east causeway avenues: the river keeps out of those stems, or a trestle
+    // would share the water with the avenue's bridge (R22)
+    if (cx < 200 || cx > ISLAND - 200) continue;
     if (Math.abs(cx - SPAWN.x) < 60) continue;
     lanes.push(k);
   }
@@ -130,29 +159,37 @@ function tryRiver(r: () => number, lane: number): Array<{ x: number; z: number; 
   return out;
 }
 
-/** at every east-west lattice line, straighten the flow to due south so a
- * bridge there meets the water at a right angle. The blend window (±26 m)
- * fades the straightening out; windows are 64 m apart so they never stack. */
-function straightenAtStreets(
+/** at every street crossing, straighten the flow square to the street: the
+ * river follows the street's normal through the crossing point, blended
+ * back over ±26 m (smoothstep: the tangent is exact at the crossing).
+ * Samples are a function x(z), 12 m apart. */
+function straightenAt(
   samples: Array<{ x: number; z: number; w: number }>,
+  crossings: Array<{ x: number; z: number; heading: number }>,
 ): Array<{ x: number; z: number; w: number }> {
   let cur = samples.map(p => ({ ...p }));
-  for (let j = 1; j < WORLD_CHUNKS; j++) {
-    const zj = j * LANE;
-    // the river's own x at this line (samples are 12 m apart in z)
-    let xc = cur[cur.length - 1].x;
+  for (const c of crossings) {
+    // the river's heading here: the street's normal nearest to due south
+    let hr = c.heading + Math.PI / 2;
+    while (hr > Math.PI / 2) hr -= Math.PI;
+    while (hr < -Math.PI / 2) hr += Math.PI;
+    if (Math.abs(hr) > (55 * Math.PI) / 180) continue; // (samples are x(z): steeper would fold)
+    const slope = Math.tan(hr); // dx / dz
+    // the river's own x at the crossing's z
+    let xc = c.x;
     for (let k = 0; k + 1 < cur.length; k++) {
-      if ((cur[k].z - zj) * (cur[k + 1].z - zj) <= 0) {
-        const f = (zj - cur[k].z) / ((cur[k + 1].z - cur[k].z) || 1);
+      if ((cur[k].z - c.z) * (cur[k + 1].z - c.z) <= 0) {
+        const f = (c.z - cur[k].z) / ((cur[k + 1].z - cur[k].z) || 1);
         xc = cur[k].x + (cur[k + 1].x - cur[k].x) * f;
         break;
       }
     }
     cur = cur.map(p => {
-      const t = Math.abs(p.z - zj) / 26;
+      const t = Math.abs(p.z - c.z) / 26;
       if (t >= 1) return p;
-      const w = t * t * (3 - 2 * t); // smoothstep: tangent exactly vertical at zj
-      return { x: xc + (p.x - xc) * w, z: p.z, w: p.w };
+      const w = t * t * (3 - 2 * t);
+      const lx = xc + (p.z - c.z) * slope;
+      return { x: lx + (p.x - lx) * w, z: p.z, w: p.w };
     });
   }
   return cur;

@@ -72,9 +72,37 @@ export class CityGrid {
     }
   }
 
+  /** every cell within `half` of segment a-b (a band at any angle) */
   seg(ax: number, az: number, bx: number, bz: number, half: number, bit: number): void {
-    this.fill(Math.min(ax, bx) - half, Math.min(az, bz) - half,
-      Math.max(ax, bx) + half, Math.max(az, bz) + half, bit);
+    const x0 = Math.max(0, (Math.min(ax, bx) - half | 0) + MARGIN), x1 = Math.min(SIZE - 1, (Math.max(ax, bx) + half | 0) + MARGIN);
+    const z0 = Math.max(0, (Math.min(az, bz) - half | 0) + MARGIN), z1 = Math.min(SIZE - 1, (Math.max(az, bz) + half | 0) + MARGIN);
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-9;
+    for (let iz = z0; iz <= z1; iz++) {
+      const z = iz - MARGIN + 0.5, row = iz * SIZE;
+      for (let ix = x0; ix <= x1; ix++) {
+        const x = ix - MARGIN + 0.5;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+        const ex = ax + dx * t - x, ez = az + dz * t - z;
+        if (ex * ex + ez * ez <= half * half) this.raw[row + ix] |= bit;
+      }
+    }
+  }
+
+  /** every cell inside a rectangle of half extents hx, hz turned by ry
+   * (local x = (cos, -sin), local z = (sin, cos)) */
+  obb(cx: number, cz: number, hx: number, hz: number, ry: number, bit: number): void {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    const ex = Math.abs(hx * c) + Math.abs(hz * s), ez = Math.abs(hx * s) + Math.abs(hz * c);
+    const x0 = Math.max(0, (cx - ex | 0) + MARGIN), x1 = Math.min(SIZE - 1, (cx + ex | 0) + MARGIN);
+    const z0 = Math.max(0, (cz - ez | 0) + MARGIN), z1 = Math.min(SIZE - 1, (cz + ez | 0) + MARGIN);
+    for (let iz = z0; iz <= z1; iz++) {
+      const dz = iz - MARGIN + 0.5 - cz, row = iz * SIZE;
+      for (let ix = x0; ix <= x1; ix++) {
+        const dx = ix - MARGIN + 0.5 - cx;
+        const lx = dx * c - dz * s, lz = dx * s + dz * c;
+        if (Math.abs(lx) <= hx && Math.abs(lz) <= hz) this.raw[row + ix] |= bit;
+      }
+    }
   }
 
   disc(cx: number, cz: number, r: number, bit: number): void {
@@ -150,34 +178,25 @@ function paint(bx: number, by: number): CityGrid {
     g.disc(p.x, p.z, p.w / 2, RIVER);
   }
 
-  // streets: the plan's open segments, 14 m carriageway, plus specials
-  for (let j = 0; j <= WORLD_CHUNKS; j++) {
-    for (let i = 0; i < WORLD_CHUNKS; i++) {
-      if (plan.segH(j, i)) g.seg(i * 64, j * 64, (i + 1) * 64, j * 64, 7, ROAD);
-    }
+  // streets: every edge of the plan's web, 14 m carriageway, plus each
+  // junction's pad (its farthest reach) and the roundabouts' rings
+  for (const e of plan.edges) {
+    const a = plan.nodes[e.a], b = plan.nodes[e.b];
+    g.seg(a.x, a.z, b.x, b.z, 7, ROAD);
   }
-  for (let i = 0; i <= WORLD_CHUNKS; i++) {
-    for (let j = 0; j < WORLD_CHUNKS; j++) {
-      if (plan.segV(i, j)) g.seg(i * 64, j * 64, i * 64, (j + 1) * 64, 7, ROAD);
-    }
-  }
-  for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
-    for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
-      if (plan.plaza(cx, cz)) g.disc(cx * 64, cz * 64, ROUNDABOUT_REACH, PLAZA);
-    }
+  for (const n of plan.nodes) {
+    if (n.plaza) g.disc(n.x, n.z, ROUNDABOUT_REACH, PLAZA);
+    else if (!n.mouth && !n.square) g.disc(n.x, n.z, Math.max(...n.reach) * 0.75, ROAD);
   }
 
   // rail bed (3.4 m bed, stamped a little wider for approaches)
   for (const L of rail.lines) g.stroke(L.pts, 1.5, 2, RAIL);
 
-  // lots: developed ground (buildings, tree rows, parking slabs)
+  // lots: developed ground (buildings, tree rows, parking slabs), turned
+  // to their streets
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
     for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
-      for (const lot of plan.lots(cx, cz)) {
-        const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
-        const hx = (flip ? lot.d : lot.w) / 2, hz = (flip ? lot.w : lot.d) / 2;
-        g.fill(lot.x - hx, lot.z - hz, lot.x + hx, lot.z + hz, LOT);
-      }
+      for (const lot of plan.lots(cx, cz)) g.obb(lot.x, lot.z, lot.w / 2, lot.d / 2, lot.ry, LOT);
     }
   }
   // the sea: every cell off the shore; causeway corridors out over it are

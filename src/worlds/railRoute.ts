@@ -19,10 +19,10 @@ import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { makePath, polyPath, type WorldPath } from './spline.js';
 import { citySeed, southExit, eastExit, CITY_PITCH } from './cityGrid.js';
 import {
-  streetCandidatesFor, across, along, pointAt, lineDev,
+  streetCandidatesFor, across, along, pointAt, lineDev, inSpan,
   type StreetLine, type StreetCandidates,
 } from './streetLines.js';
-import { riverFor, type RiverRoute } from './riverRoute.js';
+import { baseRiverFor, type RiverRoute } from './riverRoute.js';
 import { ISLAND } from './world.js';
 import { coastFor, type Coast } from './coast.js';
 
@@ -31,7 +31,7 @@ export const RAIL_TOP = 0.21; // where train wheels sit
 /** the track runs this far beside a causeway avenue's centreline (m) */
 export const RAIL_OFFSET = 24;
 /** straight portal stem inland from the rim (m) */
-export const STEM = 40;
+export const STEM = 180;
 /** half-length of the pinned straight through the diamond (m) */
 const DIAMOND_ARM = 16;
 
@@ -56,12 +56,17 @@ export interface RailRoute {
   arcAt(x: number, z: number): number;
   /** arc where the line leaves the island over the south / east rim */
   rimOut: number;
+  /** candidate street edges this line cuts badly (a shallow crossing, a
+   * crossing hard by a junction, a long hug) — the plan drops them */
+  vetoed: number[];
   control: Array<{ x: number; z: number }>;
 }
 
 /** both lines of one island + the diamond where they cross */
 export interface RailNet {
   lines: [RailRoute, RailRoute];
+  /** every candidate street edge either line vetoed (see RailRoute.vetoed) */
+  vetoed: Set<number>;
   diamond: { x: number; z: number; /** arc of the diamond on each line */ d: [number, number] };
   distTo(x: number, z: number): number;
   near(x: number, z: number, r: number): boolean;
@@ -99,7 +104,49 @@ export function railNetFor(bx: number, by: number): RailNet {
   return net;
 }
 
-interface Attempt { control: Array<{ x: number; z: number }>; score: number; path: WorldPath }
+interface Attempt { control: Array<{ x: number; z: number }>; score: number; path: WorldPath; veto: Set<number> }
+
+/** the streets a rough line would cut badly: crossed shallower than ~60
+ * degrees, crossed within 20 m of a junction, or hugged for over 8 m. The
+ * plan drops them (the dead-end trim repairs the web), so the deform never
+ * has to square what can't be squared. `pre` carries the other line's. */
+function vetoesFor(path: WorldPath, streets: StreetCandidates, pre: Set<number>): Set<number> {
+  const veto = new Set(pre);
+  const pts = path.pts;
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const a = pts[k], b = pts[k + 1];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    if (len < 1e-3) continue;
+    for (const L of streets.near((a.x + b.x) / 2, (a.z + b.z) / 2, len / 2 + 1)) {
+      const va = across(L, a.x, a.z), vb = across(L, b.x, b.z);
+      if (va * vb >= 0) continue;
+      const sa = along(L, a.x, a.z);
+      const s = sa + (along(L, b.x, b.z) - sa) * (-va / (vb - va));
+      if (!inSpan(L, s)) continue;
+      if (L.kind !== 'exit' && (Math.abs(vb - va) / len < 0.87 || L.nodeGap(s) < 20)) veto.add(L.id);
+    }
+  }
+  const hug = new Map<number, number>();
+  for (const p of pts) {
+    for (const L of streets.near(p.x, p.z, 10)) {
+      if (Math.abs(across(L, p.x, p.z)) < 10 && inSpan(L, along(L, p.x, p.z), 2) && lineDev(L, p.h) < (55 * Math.PI) / 180) {
+        hug.set(L.id, (hug.get(L.id) ?? 0) + 2);
+      }
+    }
+  }
+  for (const [id, m] of hug) if (m > 8 && streets.lines[id].kind !== 'exit') veto.add(id);
+  return veto;
+}
+
+/** the candidate streets minus a veto set */
+function without(streets: StreetCandidates, veto: Set<number>): StreetCandidates {
+  if (!veto.size) return streets;
+  return {
+    lines: streets.lines.filter(L => !veto.has(L.id)),
+    near: (x, z, r) => streets.near(x, z, r).filter(L => !veto.has(L.id)),
+    nearestNode: streets.nearestNode,
+  };
+}
 
 /** how clean a deformed line came out — mirrors the audit's own checks,
  * so a line is only ever shipped when the deformation provably worked */
@@ -145,7 +192,7 @@ function bridgeZones(lines: StreetLine[], river: RiverRoute): Array<{ x: number;
     for (const L of lines) {
       if (Math.abs(across(L, p.x, p.z)) >= p.w / 2 + 9) continue;
       const s = along(L, p.x, p.z);
-      if (s > 8 && s < ISLAND - 8) zones.push(pointAt(L, s));
+      if (inSpan(L, s, -2)) zones.push(pointAt(L, s));
     }
   }
   return zones;
@@ -220,7 +267,7 @@ function lineHits(
 }
 
 function shapeQuality(
-  p: WorldPath, f: Frame, lines: StreetLine[],
+  p: WorldPath, f: Frame, streets: StreetCandidates,
   river: RiverRoute | null, zones: Array<{ x: number; z: number }>,
   coast: Coast, other: RailRoute | null,
 ): Quality {
@@ -249,11 +296,12 @@ function shapeQuality(
     while (dh < -Math.PI) dh += Math.PI * 2;
     if (Math.abs(dh) > (120 * Math.PI) / 180) folds++;
   }
+  const lines = streets.lines;
   for (let k = 0; k < D; k++) {
     const b = dense[k];
     let bad = false;
-    for (const L of lines) {
-      if (Math.abs(across(L, b.x, b.z)) < 7 && lineDev(L, b.h) < Math.PI / 3) { bad = true; break; }
+    for (const L of streets.near(b.x, b.z, 7)) {
+      if (Math.abs(across(L, b.x, b.z)) < 7 && inSpan(L, along(L, b.x, b.z), 2) && lineDev(L, b.h) < Math.PI / 3) { bad = true; break; }
     }
     if (bad) run += 2;
     else { ride = Math.max(ride, run); run = 0; }
@@ -270,7 +318,7 @@ function shapeQuality(
       const fr = -va / (vb - va);
       const sa = along(L, a.x, a.z);
       const s = sa + (along(L, b.x, b.z) - sa) * fr;
-      if (L.nodeGap(s) < 11) continue;
+      if (!inSpan(L, s) || L.nodeGap(s) < 11) continue;
       let worst = 0;
       for (let i = 0; i < D; i++) {
         if (Math.abs(across(L, dense[i].x, dense[i].z)) >= 6.5) continue;
@@ -338,29 +386,36 @@ const qualityBetter = (a: Quality, b: Quality): boolean =>
             : a.skew !== b.skew ? a.skew < b.skew
               : a.riverSkew < b.riverSkew;
 
-/** the diamond: a block centre near the middle of the island, well clear of
- * the river, the shore and every street (32 m to each bounding line) */
-function pickDiamond(bx: number, by: number, river: RiverRoute, coast: Coast): { x: number; z: number } {
+/** the diamond: a spot near the middle of the island well inside a block —
+ * clear of every candidate street (the pinned ±16 m straights plus the
+ * crossings' own walls fit), of the river and of the shore */
+function pickDiamond(bx: number, by: number, river: RiverRoute, coast: Coast, streets: StreetCandidates): { x: number; z: number } {
   const r = rng(chunkSeed(citySeed(bx, by), 0xd1a, 7));
-  const opts: Array<{ x: number; z: number }> = [];
-  for (let cx = 4; cx <= 9; cx++) for (let cz = 4; cz <= 9; cz++) {
-    const x = cx * 64 + 32, z = cz * 64 + 32;
-    if (river.distTo(x, z) < 44) continue;
-    if (!coast.inLand(x, z, 140)) continue;
-    opts.push({ x, z });
+  for (const need of [30, 26, 22, 18]) {
+    const opts: Array<{ x: number; z: number }> = [];
+    for (let x = 256; x <= ISLAND - 256; x += 8) for (let z = 256; z <= ISLAND - 256; z += 8) {
+      if (river.distTo(x, z) < 44) continue;
+      if (!coast.inLand(x, z, 140)) continue;
+      if (streets.near(x, z, need).length) continue;
+      opts.push({ x, z });
+    }
+    if (opts.length) return opts[(r() * opts.length) | 0];
   }
-  return opts.length ? opts[(r() * opts.length) | 0] : { x: 5 * 64 + 32, z: 6 * 64 + 32 };
+  return { x: 5 * 64 + 32, z: 6 * 64 + 32 };
 }
 
 function buildNet(bx: number, by: number): RailNet {
   const seed = citySeed(bx, by);
   const streets = streetCandidatesFor(bx, by);
   const lines = streets.lines;
-  const river = riverFor(bx, by);
+  // the river as it is before any street crosses it: streets later keep
+  // their bridges 30 m clear of every trestle, so the straightening at
+  // bridges never reaches the water under the track
+  const river = baseRiverFor(bx, by);
   const zones = bridgeZones(lines, river);
   const coast = coastFor(bx, by);
   const P = railPortals(bx, by);
-  const D = pickDiamond(bx, by, river, coast);
+  const D = pickDiamond(bx, by, river, coast, streets);
   const fNS: Frame = { kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x };
   const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z };
   const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
@@ -368,6 +423,7 @@ function buildNet(bx: number, by: number): RailNet {
   const both: [RailRoute, RailRoute] = [ns, ew];
   return {
     lines: both,
+    vetoed: new Set([...ns.vetoed, ...ew.vetoed]),
     diamond: { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] },
     distTo: (x, z) => Math.min(ns.distTo(x, z), ew.distTo(x, z)),
     near: (x, z, rr) => ns.near(x, z, rr) || ew.near(x, z, rr),
@@ -379,8 +435,8 @@ function buildLine(
   seed: number, f: Frame, streets: StreetCandidates, river: RiverRoute,
   zones: Array<{ x: number; z: number }>, coast: Coast, other: RailRoute | null,
 ): RailRoute {
-  const lines = streets.lines;
   const salt = f.kind === 'ns' ? 0x5a1 : 0x5e1;
+  const pre = new Set(other?.vetoed ?? []);
   // rank line candidates by the cheap pre-deform score, then actually
   // deform the best few and SHIP the first whose geometry comes out clean
   // (no on-road rides, no folds, square crossings, trestles clear of road
@@ -402,22 +458,24 @@ function buildLine(
     };
     for (let attempt = 0; attempt < 90; attempt++) {
       const r = rng(chunkSeed(seed, salt, 0x7e + attempt + round * 1000));
-      const a = tryLine(r, f, streets, river, zones, coast, other, mul);
+      const a = tryLine(r, f, streets, river, zones, coast, other, mul, pre);
       if (!a) continue;
       if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
       offer(a);
     }
     for (const a of ranked) {
-      const route = finalize(f, a.control, a.path, lines, river, zones);
-      const q = shapeQuality(route.path, f, lines, river, zones, coast, other);
+      const view = without(streets, a.veto);
+      const route = finalize(f, a.control, a.path, view, river, zones, a.veto);
+      const q = shapeQuality(route.path, f, view, river, zones, coast, other);
       if (clean(q)) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
     }
   }
   // last resort: the deterministic straight-ish line through the diamond
-  const a = forcedLine(f);
-  const route = finalize(f, a.control, a.path, lines, river, zones);
-  const q = shapeQuality(route.path, f, lines, river, zones, coast, other);
+  const a = forcedLine(f, streets, pre);
+  const view = without(streets, a.veto);
+  const route = finalize(f, a.control, a.path, view, river, zones, a.veto);
+  const q = shapeQuality(route.path, f, view, river, zones, coast, other);
   if (clean(q) || !fallback || qualityBetter(q, fallback.q)) return route;
   return fallback.route;
 }
@@ -442,14 +500,15 @@ function tryLine(
   river: RiverRoute, zones: Array<{ x: number; z: number }>,
   coast: Coast, other: RailRoute | null,
   slideMul = 0.9,
+  pre: Set<number> = new Set(),
 ): Attempt | null {
-  const lines = streets.lines;
+  const full = streets;
   const { head, mid, tail } = stemControls(f);
   // free control points between the stems and the diamond: evenly spaced in
   // u, wandering in v around the straight chord
   const free = (u0: number, v0: number, u1: number, v1: number): Array<{ x: number; z: number }> => {
-    const n = 1 + ((r() * 3) | 0);
-    const amp = 40 + r() * 110;
+    const n = 1 + ((r() * 2) | 0);
+    const amp = 20 + r() * 50; // gentle: every street is laid around it
     const out: Array<{ x: number; z: number }> = [];
     for (let k = 1; k <= n; k++) {
       const t = k / (n + 1);
@@ -509,8 +568,15 @@ function tryLine(
     }
   }
   const path = makePath(control, false);
+  // the streets this rough line would cut badly go (each one costs rank);
+  // everything below scores against the streets that stay
+  const veto = vetoesFor(path, full, pre);
+  streets = without(full, veto);
   // score violations on dense samples
+  // a trunk road (ring, embankment, bridge, seam, link) holds the island
+  // together: vetoing one can strand a whole district, so it costs far more
   let score = 0;
+  for (const id of veto) if (!pre.has(id)) score += 60;
   let inBridgeRun = false;
   let wet = 0;
   for (let k = 0; k < path.pts.length; k++) {
@@ -524,6 +590,14 @@ function tryLine(
     }
     // riding along the river is never a crossing
     if (river.inWater(p.x, p.z)) { wet += 2; if (wet > 30) score += 6; } else wet = 0;
+    // nor is running beside it: track and river side by side make one wide
+    // barrier the streets can barely cross (both want their own roads)
+    if (river.distTo(p.x, p.z) < 80) {
+      const near = river.path.nearest(p.x, p.z);
+      let dev = Math.abs(p.h - river.pts[near.i].h) % Math.PI;
+      if (dev > Math.PI / 2) dev = Math.PI - dev;
+      if (dev < Math.PI / 4) score += 1.5;
+    }
     // dipping into the river anywhere near a road bridge means a trestle
     // sharing the water with the bridge — the one overlap the world
     // forbids. Decisively expensive so clean candidates always rank above
@@ -557,16 +631,12 @@ function tryLine(
     const a = pts[k], b = pts[k + 1];
     const len = cum[k + 1] - cum[k];
     if (len < 0.001) continue;
-    for (const L of lines) {
+    for (const L of streets.near((a.x + b.x) / 2, (a.z + b.z) / 2, len / 2 + 1)) {
       const va = across(L, a.x, a.z), vb = across(L, b.x, b.z);
       if (va * vb >= 0) continue;
+      const sa = along(L, a.x, a.z);
+      if (!inSpan(L, sa + (along(L, b.x, b.z) - sa) * (-va / (vb - va)))) continue;
       hitArcs.push(cum[k] + (-va / (vb - va)) * len);
-      // |cos| of the crossing angle: shallower than ~59 degrees rides the
-      // road corridor for tens of metres however it's squared up later
-      if (Math.abs(vb - va) / len < 0.85) score += 20;
-      // a crossing spilling into a junction tile would go unrecorded (the
-      // collector keeps crossings away from nodes) — avoid those hard
-      if (L.nodeGap(along(L, (a.x + b.x) / 2, (a.z + b.z) / 2)) < 20) score += 25;
     }
   }
   // two street hits within ~30 m of arc means the rail cuts a junction corner
@@ -577,8 +647,8 @@ function tryLine(
   // hugging a street line near-parallel (the rails would sit on the asphalt
   // edge) — same 55° window the clearance pusher treats as "riding"
   for (const p of pts) {
-    for (const L of lines) {
-      if (Math.abs(across(L, p.x, p.z)) < 10 && lineDev(L, p.h) < 55 * Math.PI / 180) score += 0.75;
+    for (const L of streets.near(p.x, p.z, 10)) {
+      if (Math.abs(across(L, p.x, p.z)) < 10 && inSpan(L, along(L, p.x, p.z), 2) && lineDev(L, p.h) < 55 * Math.PI / 180) score += 0.75;
     }
   }
   // R31: meet the other line only at the diamond, and never run close by it
@@ -591,16 +661,17 @@ function tryLine(
       if (other.near(p.x, p.z, 14)) score += 4;
     }
   }
-  return { control, score, path };
+  return { control, score, path, veto };
 }
 
 /** deterministic last resort: stems + diamond guides, straight in between */
-function forcedLine(f: Frame): Attempt {
+function forcedLine(f: Frame, streets: StreetCandidates, pre: Set<number>): Attempt {
   const { head, mid, tail } = stemControls(f);
   const la = toXZ(f, (STEM + f.du - 22) / 2, (f.v0 + f.dv) / 2);
   const lb = toXZ(f, (f.du + 22 + ISLAND - STEM) / 2, (f.dv + f.v1) / 2);
   const control = [...head, la, ...mid, lb, ...tail];
-  return { control, score: 0, path: makePath(control, false) };
+  const path = makePath(control, false);
+  return { control, score: 0, path, veto: vetoesFor(path, streets, pre) };
 }
 
 /** shared deformation sequence. Order matters: tangential grazes are lifted
@@ -612,7 +683,7 @@ function forcedLine(f: Frame): Attempt {
  * shape) and after the final sweep (which can push rail back into water). */
 function deform(
   pts: Array<{ x: number; z: number; h: number }>,
-  lines: StreetLine[],
+  lines: StreetCandidates,
   river: RiverRoute, zones: Array<{ x: number; z: number }>,
 ): Array<{ x: number; z: number }> {
   const swung = riverSwing(pts, river, zones);
@@ -934,7 +1005,8 @@ function riverSwing(
 
 function finalize(
   f: Frame, control: Array<{ x: number; z: number }>, path: WorldPath,
-  lines: StreetLine[], river: RiverRoute, zones: Array<{ x: number; z: number }>,
+  lines: StreetCandidates, river: RiverRoute, zones: Array<{ x: number; z: number }>,
+  veto: Set<number>,
 ): RailRoute {
   // the spline pays no attention to the street lattice, so wherever it
   // happens to meet a road it is reshaped to do so properly: grazes are
@@ -976,6 +1048,7 @@ function finalize(
       return s + Math.hypot(n.p.x - p2.pts[n.i].x, n.p.z - p2.pts[n.i].z);
     },
     rimOut,
+    vetoed: [...veto].sort((p, q) => p - q),
     control,
   };
 }
@@ -1011,8 +1084,9 @@ const CROSS_ZONE = 24;
  */
 export function clearancePush(
   pts: Array<{ x: number; z: number }>,
-  lines: StreetLine[],
+  streets: StreetCandidates,
 ): Array<{ x: number; z: number }> {
+  const lines = streets.lines;
   const N = pts.length;
   const CLEAR = 11.5, BAND = 10, NEAR = 12, SWING = 30, PARALLEL = (55 * Math.PI) / 180;
   const clamp = (k: number): number => Math.max(0, Math.min(N - 1, k));
@@ -1053,6 +1127,7 @@ export function clearancePush(
           const f = -va / (vb - va);
           const wa = along(L, a.x, a.z);
           const cross = wa + (along(L, b.x, b.z) - wa) * f;
+          if (!inSpan(L, cross)) continue;
           const s = cum[k] + f * (cum[k + 1] - cum[k]);
           if (L.nodeGap(cross) >= 18) kept.push(s);
           else raw.push({ s, k });
@@ -1083,12 +1158,15 @@ export function clearancePush(
       const p = cur[k];
       const a = cur[clamp(k - 2)], b = cur[clamp(k + 2)];
       const h = Math.atan2(b.x - a.x, b.z - a.z);
+      const nearby = streets.near(p.x, p.z, BAND);
       families.forEach((fam, fi) => {
         if (keep.get(fam.key)!.some(c => Math.abs(cum[k] - c) < NEAR)) return;
-        for (const L of fam.lines) {
+        for (const L of nearby) {
+          if (L.family !== fam.key) continue;
           const d = across(L, p.x, p.z);
           const ad = Math.abs(d);
           if (ad >= BAND) continue;
+          if (!inSpan(L, along(L, p.x, p.z), 7)) continue;
           if (lineDev(L, h) >= PARALLEL) continue;
           let swing: number | null = null, best = SWING;
           for (const sw of swings.get(L.id)!) {
@@ -1127,7 +1205,7 @@ export function clearancePush(
 
 export function perpendicularCrossings(
   path: WorldPath,
-  lines: StreetLine[],
+  streets: StreetCandidates,
 ): Array<{ x: number; z: number }> {
   const pts = path.pts;
   const N = pts.length;
@@ -1140,7 +1218,7 @@ export function perpendicularCrossings(
   for (let k = 0; k < N - 1; k++) {
     const p = pts[k], q = pts[k + 1];
     const segLen = cum[k + 1] - cum[k];
-    for (const L of lines) {
+    for (const L of streets.near((p.x + q.x) / 2, (p.z + q.z) / 2, segLen / 2 + 1)) {
       const va = across(L, p.x, p.z), vb = across(L, q.x, q.z);
       if (va === vb) continue; // runs parallel to the line
       // a vertex landing exactly ON the line still crosses (the deformers
@@ -1148,7 +1226,9 @@ export function perpendicularCrossings(
       if (va * vb > 0) continue;
       const t = -va / (vb - va);
       const sa = along(L, p.x, p.z);
-      hits.push({ s: cum[k] + t * segLen, a: sa + (along(L, q.x, q.z) - sa) * t, L });
+      const aHit = sa + (along(L, q.x, q.z) - sa) * t;
+      if (!inSpan(L, aHit)) continue;
+      hits.push({ s: cum[k] + t * segLen, a: aHit, L });
     }
   }
   hits.sort((u, v) => u.s - v.s);
@@ -1213,7 +1293,8 @@ export function perpendicularCrossings(
       const L = hit.L;
       const d0 = Math.abs(across(L, pts[k].x, pts[k].z));
       const mask = d0 >= 12 ? 0 : d0 <= 7 ? 1 : (12 - d0) / 5;
-      const inWindow = Math.abs(along(L, pts[k].x, pts[k].z) - hit.a) < 30;
+      const ak = along(L, pts[k].x, pts[k].z);
+      const inWindow = Math.abs(ak - hit.a) < 30 && inSpan(L, ak, 7);
       const w = Math.max(arcW, inWindow ? mask : 0);
       if (w <= 0) continue;
       // slide the point along its street onto the hit's cross-line

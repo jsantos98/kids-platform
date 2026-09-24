@@ -9,7 +9,7 @@ import { cityAt } from '../../worlds/cityGrid.js';
 import { graphFor, type SEdge } from '../../worlds/streetGraph.js';
 import { occupancyFor, ROAD, RAIL, RIVER, PLAZA } from '../../worlds/grid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
-import type { CollisionBox } from '../../worlds/cityChunk.js';
+import { inBox, type CollisionBox } from '../../worlds/cityChunk.js';
 
 export interface Spot { x: number; z: number; heading: number }
 
@@ -53,7 +53,7 @@ function drivable(x: number, z: number): boolean {
 
 function clearOf(s: Spot, boxes: CollisionBox[], r: number): boolean {
   for (const b of boxes) {
-    if (s.x > b.x1 - r && s.x < b.x2 + r && s.z > b.z1 - r && s.z < b.z2 + r) return false;
+    if (inBox(b, s.x, s.z, r)) return false;
   }
   return true;
 }

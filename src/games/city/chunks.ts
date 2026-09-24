@@ -9,7 +9,7 @@ import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { coastFor, clipToRect } from '../../worlds/coast.js';
-import { nodeArms } from '../../worlds/roadLayout.js';
+import { trafficPoles } from '../../worlds/roadLayout.js';
 import { lightState } from './lights.js';
 import { makeTrafficLights, setHead, type TrafficLightProps } from './lampProps.js';
 
@@ -23,7 +23,8 @@ export interface Chunk {
   wz: number;
   cx: number;
   cz: number;
-  lights: TrafficLightProps | null;
+  /** working traffic lights at this chunk's signalized junctions */
+  lights: Array<{ x: number; z: number; props: TrafficLightProps }>;
 }
 
 export class ChunkManager {
@@ -59,14 +60,21 @@ export class ChunkManager {
     mesh.position.set(ox, 0, oz); // chunk geometry is city-local
     this.scene.add(mesh);
     // collision boxes move from city-local to world coordinates
-    const wboxes = boxes.map(b => ({ ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz }));
+    const wboxes = boxes.map(b => ({
+      ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz,
+      obb: b.obb ? { ...b.obb, cx: b.obb.cx + ox, cz: b.obb.cz + oz } : undefined,
+    }));
     // working kit traffic lights at real intersections: one pole per
     // approach arm, on the driver's near-side right corner
     const plan = cityPlanFor(bx, by);
-    const lights = plan.signalized(cx, cz)
-      ? makeTrafficLights(ox + cx * this.CH, oz + cz * this.CH, nodeArms(plan, cx, cz))
-      : null;
-    if (lights) this.scene.add(lights.group);
+    const X0 = cx * this.CH, Z0 = cz * this.CH;
+    const lights: Chunk['lights'] = [];
+    for (const n of plan.nodes) {
+      if (!n.signalized || n.x < X0 || n.x >= X0 + this.CH || n.z < Z0 || n.z >= Z0 + this.CH) continue;
+      const props = makeTrafficLights(trafficPoles(plan, n).map(p => ({ ...p, x: p.x + ox, z: p.z + oz })));
+      this.scene.add(props.group);
+      lights.push({ x: n.x, z: n.z, props });
+    }
     const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
     this.chunks.set(key, { mesh, boxes: wboxes, wx, wz, cx, cz, lights });
   }
@@ -109,7 +117,7 @@ export class ChunkManager {
       if (Math.max(Math.abs(ch.wx - wcx), Math.abs(ch.wz - wcz)) > VIEW_R + 1) {
         this.scene.remove(ch.mesh);
         ch.mesh.geometry.dispose();
-        if (ch.lights) this.scene.remove(ch.lights.group);
+        for (const l of ch.lights) this.scene.remove(l.props.group);
         this.chunks.delete(key);
       }
     }
@@ -128,12 +136,13 @@ export class ChunkManager {
   /** Sync every visible traffic light to its intersection's phase. */
   updateLights(elapsed: number): void {
     for (const ch of this.chunks.values()) {
-      if (!ch.lights) continue;
-      const st = lightState(ch.cx * this.CH, ch.cz * this.CH, elapsed);
-      const ew = st === 'ew' ? 'go' : st === 'ewY' ? 'slow' : 'stop';
-      const ns = st === 'ns' ? 'go' : st === 'nsY' ? 'slow' : 'stop';
-      for (const h of ch.lights.ew) setHead(h, ew);
-      for (const h of ch.lights.ns) setHead(h, ns);
+      for (const l of ch.lights) {
+        const st = lightState(l.x, l.z, elapsed);
+        const ew = st === 'ew' ? 'go' : st === 'ewY' ? 'slow' : 'stop';
+        const ns = st === 'ns' ? 'go' : st === 'nsY' ? 'slow' : 'stop';
+        for (const h of l.props.ew) setHead(h, ew);
+        for (const h of l.props.ns) setHead(h, ns);
+      }
     }
   }
 }

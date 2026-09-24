@@ -4,14 +4,10 @@
 // THIS, never the lattice (segH/segV) directly, so the non-grid street
 // generator only has to hand in a different graph.
 //
-// Today graphFromLattice() lifts the city plan's open lattice segments into a
-// graph; node and edge order are deterministic (east-west edges by line then
-// column, then north-south by line then row).
+// graphFromPlan() lifts the city plan's street web (streetGen.ts + the
+// plan's vetoes) into the graph, node and edge order as the plan has them.
 import { cityPlanFor, type CityPlan, type Crossing } from './cityPlan.js';
 import { citySeed } from './cityGrid.js';
-import { WORLD_CHUNKS } from './world.js';
-
-const CH = 64;
 
 export interface SNode {
   id: number;
@@ -77,54 +73,18 @@ export function leaving(g: StreetGraph, e: SEdge, n: number): { x: number; z: nu
   return e.a === n ? { x: e.ux, z: e.uz } : { x: -e.ux, z: -e.uz };
 }
 
-function graphFromLattice(plan: CityPlan): StreetGraph {
-  const W = WORLD_CHUNKS;
-  const nodes: SNode[] = [];
-  const edges: SEdge[] = [];
-  const byKey = new Map<number, SNode>();
-  const keyOf = (i: number, j: number): number => i * 1000 + j;
-  const e = plan.exits;
-  const nodeFor = (i: number, j: number): SNode => {
-    let n = byKey.get(keyOf(i, j));
-    if (!n) {
-      n = {
-        id: nodes.length, x: i * CH, z: j * CH, edges: [],
-        signalized: plan.signalized(i, j), plaza: plan.plaza(i, j),
-        mouth: (i === e.n && j === 0) || (i === e.s && j === W) || (i === 0 && j === e.w) || (i === W && j === e.e),
-        frame: Math.PI / 2,
-      };
-      nodes.push(n);
-      byKey.set(keyOf(i, j), n);
-    }
-    return n;
-  };
-  const link = (ai: number, aj: number, bi: number, bj: number): void => {
-    const a = nodeFor(ai, aj), b = nodeFor(bi, bj);
-    const ux = Math.sign(bi - ai), uz = Math.sign(bj - aj);
-    const ed: SEdge = { id: edges.length, a: a.id, b: b.id, ux, uz, len: CH, heading: Math.atan2(ux, uz), crossings: [] };
-    edges.push(ed);
-    a.edges.push(ed.id);
-    b.edges.push(ed.id);
-  };
-  for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) link(i, j, i + 1, j);
-  for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) link(i, j, i, j + 1);
-
-  const g = makeGraph(plan.bx, plan.by, nodes, edges);
-  // level crossings onto the edges they sit on (the street direction must
-  // match, and the crossing must lie within the edge's span)
-  for (const c of plan.crossings) {
-    let best: SEdge | null = null, bestD = Infinity, bestS = 0;
-    for (const ed of edges) {
-      if (Math.abs(Math.sin(ed.heading - c.heading)) > 0.1) continue;
-      const a = nodes[ed.a];
-      const s = (c.x - a.x) * ed.ux + (c.z - a.z) * ed.uz;
-      if (s < 0 || s > ed.len) continue;
-      const d = Math.abs((c.x - a.x) * ed.uz - (c.z - a.z) * ed.ux);
-      if (d < bestD) { bestD = d; best = ed; bestS = s; }
-    }
-    if (best && bestD < 1) best.crossings.push({ s: bestS, c });
-  }
-  return g;
+function graphFromPlan(plan: CityPlan): StreetGraph {
+  const nodes: SNode[] = plan.nodes.map(n => ({
+    id: n.id, x: n.x, z: n.z, edges: [...n.edges],
+    signalized: n.signalized, plaza: n.plaza, mouth: n.mouth, frame: n.frame,
+  }));
+  const edges: SEdge[] = plan.edges.map(e => ({
+    id: e.id, a: e.a, b: e.b, ux: e.ux, uz: e.uz, len: e.len, heading: e.heading, crossings: [],
+  }));
+  // level crossings onto the edges they were recorded on
+  for (const c of plan.crossings) edges[c.edge].crossings.push({ s: c.s, c });
+  for (const e of edges) e.crossings.sort((p, q) => p.s - q.s);
+  return makeGraph(plan.bx, plan.by, nodes, edges);
 }
 
 function makeGraph(bx: number, by: number, nodes: SNode[], edges: SEdge[]): StreetGraph {
@@ -202,16 +162,16 @@ function makeGraph(bx: number, by: number, nodes: SNode[], edges: SEdge[]): Stre
   return g;
 }
 
-const cache = new Map<number, StreetGraph>();
+const cache = new Map<string, StreetGraph>();
 
 /** the street graph of city (bx, by), built once and cached */
 export function graphFor(bx: number, by: number): StreetGraph {
-  const key = citySeed(bx, by);
+  const key = `${bx},${by},${citySeed(bx, by)}`;
   let g = cache.get(key);
   if (!g) {
-    g = graphFromLattice(cityPlanFor(bx, by));
+    g = graphFromPlan(cityPlanFor(bx, by));
     cache.set(key, g);
-    if (cache.size > 8) cache.delete(cache.keys().next().value as number);
+    if (cache.size > 8) cache.delete(cache.keys().next().value as string);
   }
   return g;
 }

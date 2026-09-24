@@ -103,14 +103,32 @@ export class Missions {
       }
       return n;
     };
-    const corners: Array<[number, number]> = [[11, -11], [-11, 11], [11, 11], [-11, -11]];
-    for (let k = corners.length - 1; k > 0; k--) {
-      const m = (r() * (k + 1)) | 0;
-      [corners[k], corners[m]] = [corners[m], corners[k]];
-    }
+    /** a junction's corners: along the bisector between neighbouring arms,
+     * 7.8 m from both streets' centrelines (11 m out at a square corner) */
+    const cornersOf = (n: { id: number; edges: number[] }): Array<[number, number]> => {
+      const arms = n.edges.map(id => {
+        const e = this.graph.edges[id];
+        return e.a === n.id ? { x: e.ux, z: e.uz } : { x: -e.ux, z: -e.uz };
+      }).sort((p, q) => Math.atan2(p.x, p.z) - Math.atan2(q.x, q.z));
+      const out: Array<[number, number]> = [];
+      for (let i = 0; i < arms.length; i++) {
+        const u = arms[i], v = arms[(i + 1) % arms.length];
+        let th = Math.atan2(v.x, v.z) - Math.atan2(u.x, u.z);
+        while (th <= 0) th += Math.PI * 2;
+        if (th >= Math.PI - 0.01) continue; // no corner on an open side
+        const bx = u.x + v.x, bz = u.z + v.z, bl = Math.hypot(bx, bz) || 1;
+        const d = Math.min(16, 7.8 / Math.sin(th / 2));
+        out.push([(bx / bl) * d, (bz / bl) * d]);
+      }
+      for (let k = out.length - 1; k > 0; k--) {
+        const m = (r() * (k + 1)) | 0;
+        [out[k], out[m]] = [out[m], out[k]];
+      }
+      return out;
+    };
     const taken = (x: number, z: number): boolean =>
       this.objectives.some(o => Math.hypot(o.pos.x - x, o.pos.z - z) < 20);
-    let gx = 0, gz = 0, ox2 = corners[0][0], oz2 = corners[0][1];
+    let gx = 0, gz = 0, ox2 = 11, oz2 = 11;
     // best corner so far: a clear one ends the search, else the corner with
     // the fewest tree rows around it is kept as the fallback
     let bestTrees = Infinity;
@@ -119,7 +137,7 @@ export class Missions {
       const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
       const n = this.graph.nearestNode(px, pz);
       if (!n || !n.signalized) continue;
-      for (const [cx, cz] of corners) {
+      for (const [cx, cz] of cornersOf(n)) {
         if (taken(n.x + cx + this.ox, n.z + cz + this.oz)) continue;
         const t = treesNear(n.x + cx, n.z + cz);
         if (t < bestTrees) {

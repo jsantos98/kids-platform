@@ -2,13 +2,15 @@
 // Run: npx tsx tools/audit-world.ts [baseSeed]
 // Every check maps to a rule in AGENTS.md; a FAIL means the change that
 // caused it must be fixed before commit.
-import { setCityBase, streetLinesFor, CITY_PITCH } from '../src/worlds/cityGrid.js';
+import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK } from '../src/worlds/grid.js';
 import { clearCoastCache } from '../src/worlds/coast.js';
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
-import { cityRoadPieces, pieceRect, segmentPieces, nodeReach } from '../src/worlds/roadLayout.js';
+import { cityRoadPieces, edgePieces, pieceOutline, nodeReach } from '../src/worlds/roadLayout.js';
+import { MIN_ANGLE, MIN_EDGE, segDist, clearStreetNetCache } from '../src/worlds/streetGen.js';
+import { EXIT_IN } from '../src/worlds/streetLines.js';
 import { graphFor, clearGraphCache } from '../src/worlds/streetGraph.js';
 import { clearStreetLineCache } from '../src/worlds/streetLines.js';
 import * as THREE from 'three';
@@ -25,6 +27,7 @@ const clearAllWorldCaches = (): void => {
   clearStreetLineCache();
   clearCoastCache();
   clearTimetableCache();
+  clearStreetNetCache();
 };
 
 const W = 14;
@@ -74,33 +77,46 @@ let diamondClashes = 0;
 let teleports = 0;
 let tailgates = 0;
 let lowDecks = 0;
+let narrowArms = 0;
+let shortEdges = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
   const net = railNetFor(bx, by);
 
-  // R1 + R19: no dead ends except the four causeway mouths; causeways intact
-  const deg = (i: number, j: number): number =>
-    (plan.segH(j, i - 1) ? 1 : 0) + (plan.segH(j, i) ? 1 : 0) +
-    (plan.segV(i, j - 1) ? 1 : 0) + (plan.segV(i, j) ? 1 : 0);
-  const tips = new Set([
-    `${plan.exits.n},0`, `${plan.exits.s},${W}`, `0,${plan.exits.w}`, `${W},${plan.exits.e}`,
-  ]);
-  for (let i = 0; i <= W; i++) for (let j = 0; j <= W; j++) {
-    if (deg(i, j) === 1 && !tips.has(`${i},${j}`)) deadEnds++;
-  }
-  for (const [vert, line, rimK] of [
-    [true, plan.exits.n, 0], [true, plan.exits.s, W - 1],
-    [false, plan.exits.w, 0], [false, plan.exits.e, W - 1],
-  ] as Array<[boolean, number, number]>) {
-    const rimOpen = vert ? plan.segV(line, rimK) : plan.segH(line, rimK);
-    if (!rimOpen) { exitGaps++; continue; }
-    // the corridor must meet the street web inland (a >=3-arm node on it)
-    let attached = false;
-    for (let k = 1; k < W; k++) {
-      if ((vert ? deg(line, k) : deg(k, line)) >= 3) { attached = true; break; }
+  // R1 + R19: no dead ends except the four causeway mouths; all four mouths
+  // there, each avenue meeting the street web inland (a >=3-arm node on it)
+  for (const n of plan.nodes) if (n.edges.length === 1 && !n.mouth) deadEnds++;
+  const mouths = plan.nodes.filter(n => n.mouth);
+  exitGaps += Math.max(0, 4 - mouths.length);
+  if (mouths.length < 4) console.log(`  R19 detail: city ${bx},${by} has ${mouths.length} causeway mouths`);
+  for (const m of mouths) {
+    let cur = m.id, prev = -1, attached = false;
+    for (let g = 0; g < 40; g++) {
+      const nd = plan.nodes[cur];
+      if (nd.edges.length >= 3) { attached = true; break; }
+      const nx = nd.edges.map(id => plan.edges[id]).map(e => (e.a === cur ? e.b : e.a)).find(o => o !== prev);
+      if (nx === undefined) break;
+      prev = cur; cur = nx;
     }
     if (!attached) corridorsUnattached++;
+  }
+
+  // R34: arms at every node at least 55 degrees apart, every edge at least
+  // MIN_EDGE long (a pad at each end still leaves straights between them)
+  for (const n of plan.nodes) {
+    const hs = n.edges.map(id => { const e = plan.edges[id]; return e.a === n.id ? e.heading : Math.atan2(-e.ux, -e.uz); });
+    for (let i = 0; i < hs.length; i++) for (let k = i + 1; k < hs.length; k++) {
+      let d = Math.abs(hs[i] - hs[k]) % (Math.PI * 2);
+      if (d > Math.PI) d = Math.PI * 2 - d;
+      if (d < MIN_ANGLE - 1e-3) { narrowArms++; console.log(`  R34 detail: city ${bx},${by} node (${n.x.toFixed(0)},${n.z.toFixed(0)}) arms ${(d * 180 / Math.PI).toFixed(0)} deg apart`); }
+    }
+  }
+  for (const e of plan.edges) {
+    if (e.len < MIN_EDGE - 0.5 && !plan.nodes[e.a].mouth && !plan.nodes[e.b].mouth) {
+      shortEdges++;
+      console.log(`  R34 detail: city ${bx},${by} edge ${e.id} only ${e.len.toFixed(1)} m`);
+    }
   }
 
   // R7: every recorded crossing is square; R10: some crossings exist.
@@ -132,28 +148,24 @@ for (const [bx, by] of cells) {
   // R8: no near-parallel rail run inside the road corridor (d < 7 m for
   // >= 8 m with the rail headed along the road — square crossings excluded;
   // 8 m of rail on asphalt is already an eye-catching brush)
-  const scanSeg = (horiz: boolean, line: number, i: number): void => {
-    const a = i * 64, c0 = line * 64;
+  for (const e of plan.edges) {
+    const a = plan.nodes[e.a];
     let run = 0;
-    for (let t = 0; t <= 64; t += 2) {
-      const x = horiz ? a + t : c0, z = horiz ? c0 : a + t;
-      const h = net.headingAt(x, z);
-      let dev = Math.abs(h - (horiz ? Math.PI / 2 : 0));
-      if (dev > Math.PI) dev = Math.PI * 2 - dev;
-      const parallel = Math.min(dev, Math.PI - dev) < Math.PI / 3;
-      if (net.distTo(x, z) < 7 && parallel) {
+    for (let t = 0; t <= e.len; t += 2) {
+      const x = a.x + e.ux * t, z = a.z + e.uz * t;
+      let dev = Math.abs(net.headingAt(x, z) - e.heading) % Math.PI;
+      if (dev > Math.PI / 2) dev = Math.PI - dev;
+      if (net.distTo(x, z) < 7 && dev < Math.PI / 3) {
         run += 2;
         if (run >= 8) {
           railOnRoadSegs++;
           worstRide = Math.max(worstRide, run);
-          console.log(`  R8 detail: city ${bx},${by} ${horiz ? 'h' : 'v'} line at ${c0}, ride from x=${horiz ? a + (t - run) : c0} z=${horiz ? c0 : a + (t - run)} (run ${run} m)`);
-          return;
+          console.log(`  R8 detail: city ${bx},${by} street ${e.id} (${e.kind}) ridden near (${x.toFixed(0)},${z.toFixed(0)}) for ${run} m`);
+          break;
         }
       } else run = 0;
     }
-  };
-  for (let j = 1; j < W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) scanSeg(true, j, i);
-  for (let i = 1; i < W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) scanSeg(false, i, j);
+  }
 
   // R9: lots keep 16 m from the rail centreline (0.5 m tolerance)
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
@@ -248,27 +260,22 @@ for (const [bx, by] of cells) {
     }
   }
 
-  // R1b: ONE connected street web — the R22/R22b vetoes used to strand
-  // little "private" roads away from the network
+  // R1b: ONE connected street web — the vetoes used to strand little
+  // "private" roads away from the network
   {
-    const adj = new Map<string, Set<string>>();
-    const link = (i: number, j: number, ni: number, nj: number): void => {
-      const k = `${i},${j}`;
-      if (!adj.has(k)) adj.set(k, new Set());
-      adj.get(k)!.add(`${ni},${nj}`);
-    };
-    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) { link(i, j, i + 1, j); link(i + 1, j, i, j); }
-    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) { link(i, j, i, j + 1); link(i, j + 1, i, j); }
-    const seen = new Set<string>();
+    const seen = new Set<number>();
     const comps: number[] = [];
-    for (const n0 of adj.keys()) {
-      if (seen.has(n0)) continue;
+    for (const n0 of plan.nodes) {
+      if (seen.has(n0.id)) continue;
       let size = 0;
-      const q = [n0];
-      seen.add(n0);
+      const q = [n0.id];
+      seen.add(n0.id);
       while (q.length) {
         const cur = q.pop()!; size++;
-        for (const nx of adj.get(cur) ?? []) if (!seen.has(nx)) { seen.add(nx); q.push(nx); }
+        for (const id of plan.nodes[cur].edges) {
+          const o = plan.other(plan.edges[id], cur).id;
+          if (!seen.has(o)) { seen.add(o); q.push(o); }
+        }
       }
       comps.push(size);
     }
@@ -276,52 +283,57 @@ for (const [bx, by] of cells) {
     for (let k = 1; k < comps.length; k++) strayNodes += comps[k];
   }
 
-  // R10b: every rail x open-street crossing carries a recorded crossing —
-  // no barrierless bumps where the track meets asphalt. A rail vertex
-  // pinned exactly ON the street line counts as a crossing too (the
-  // deformers land pins dead-centre; a strict sign test misses those).
+  // R10b: every rail x street crossing carries a recorded crossing — no
+  // barrierless bumps where the track meets asphalt
   for (const route of net.lines) {
     const pts = route.pts;
     for (let k = 0; k + 1 < pts.length; k++) {
       const p = pts[k], q = pts[k + 1];
-      for (let j = 0; j <= W; j++) {
-        const c = j * 64;
-        if (p.z !== q.z && (p.z - c) * (q.z - c) <= 0) {
-          const t = (c - p.z) / (q.z - p.z);
-          const x = p.x + (q.x - p.x) * t, i = Math.floor(x / 64);
-          if (plan.segH(j, i) && !plan.crossings.some(cc =>
-            horizCross(cc) && Math.abs(cc.x - x) < 4 && Math.abs(cc.z - c) < 4)) bareCrossings++;
-        }
-      }
-      for (let i = 0; i <= W; i++) {
-        const c = i * 64;
-        if (p.x !== q.x && (p.x - c) * (q.x - c) <= 0) {
-          const t = (c - p.x) / (q.x - p.x);
-          const z = p.z + (q.z - p.z) * t, j = Math.floor(z / 64);
-          if (plan.segV(i, j) && !plan.crossings.some(cc =>
-            !horizCross(cc) && Math.abs(cc.z - z) < 4 && Math.abs(cc.x - c) < 4)) bareCrossings++;
-        }
+      for (const e of plan.edges) {
+        const a = plan.nodes[e.a], b = plan.nodes[e.b];
+        const d1x = q.x - p.x, d1z = q.z - p.z, d2x = b.x - a.x, d2z = b.z - a.z;
+        const den = d1x * d2z - d1z * d2x;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((a.x - p.x) * d2z - (a.z - p.z) * d2x) / den;
+        const u = ((a.x - p.x) * d1z - (a.z - p.z) * d1x) / den;
+        if (t < 0 || t >= 1 || u < 0 || u > 1) continue;
+        const x = p.x + d1x * t, z = p.z + d1z * t;
+        if (!plan.crossings.some(c => c.edge === e.id && Math.hypot(c.x - x, c.z - z) < 4)) bareCrossings++;
       }
     }
   }
 
-  // R26: the river spans shore to shore, lives inside one N-S lane (never
-  // crossing or riding beneath a N-S street), and flows due south across
-  // every E-W street line so bridges meet it at a right angle
+  // R26: the river spans shore to shore, keeps clear of the north / south
+  // causeway avenues (12 m water to kerb), never runs beneath a street, and
+  // meets every street bridge at a right angle
   {
     const river = riverFor(bx, by);
-    let zmin = Infinity, zmax = -Infinity, laneMin = Infinity, hDev = 0;
+    let zmin = Infinity, zmax = -Infinity, laneMin = Infinity;
     for (const p of river.pts) {
       zmin = Math.min(zmin, p.z); zmax = Math.max(zmax, p.z);
-      laneMin = Math.min(laneMin, Math.abs(p.x - Math.round(p.x / 64) * 64));
-      const jn = Math.round(p.z / 64);
-      if (jn >= 1 && jn <= 13 && Math.abs(p.z - jn * 64) < 8) {
-        hDev = Math.max(hDev, Math.abs(p.h) > Math.PI / 2 ? Math.PI - Math.abs(p.h) : Math.abs(p.h));
+      if (p.z < EXIT_IN) laneMin = Math.min(laneMin, Math.abs(p.x - plan.exits.n * 64));
+      if (p.z > ISLAND - EXIT_IN) laneMin = Math.min(laneMin, Math.abs(p.x - plan.exits.s * 64));
+    }
+    let under = 0, bridgeDev = 0;
+    for (const e of plan.edges) {
+      const a = plan.nodes[e.a];
+      const bridges = plan.riverBridges.filter(br => segDist(br, a, plan.nodes[e.b]) < 1.5);
+      for (let t = 0; t <= e.len; t += 2) {
+        const x = a.x + e.ux * t, z = a.z + e.uz * t;
+        if (!river.inWater(x, z)) continue;
+        if (bridges.some(br => Math.hypot(br.x - x, br.z - z) < (e.kind === 'exit' ? 18 : 12))) continue;
+        under++;
       }
     }
-    if (zmin > 0 || zmax < ISLAND || laneMin < 12 || (hDev * 180) / Math.PI > 12) {
+    for (const br of plan.riverBridges) {
+      const near = river.path.nearest(br.x, br.z);
+      let d = Math.abs(river.pts[near.i].h - br.heading) % Math.PI;
+      if (d > Math.PI / 2) d = Math.PI - d;
+      bridgeDev = Math.max(bridgeDev, Math.abs(90 - (d * 180) / Math.PI));
+    }
+    if (zmin > 0 || zmax < ISLAND || laneMin < 12 + 7 || under > 0 || bridgeDev > 12) {
       riverFails++;
-      console.log(`  R26 detail: city ${bx},${by} z ${zmin.toFixed(0)}..${zmax.toFixed(0)}, lane margin ${laneMin.toFixed(1)} m, street-crossing flow dev ${(hDev * 180 / Math.PI).toFixed(1)} deg`);
+      console.log(`  R26 detail: city ${bx},${by} z ${zmin.toFixed(0)}..${zmax.toFixed(0)}, avenue margin ${laneMin.toFixed(1)} m, street under water ${under * 2} m, worst bridge ${bridgeDev.toFixed(1)} deg off square`);
     }
     // R27: trestles meet the water at a right angle too
     let skew = 0;
@@ -337,28 +349,53 @@ for (const [bx, by] of cells) {
     worstTrestleSkew = Math.max(worstTrestleSkew, skew);
   }
 
-  // R35: road pieces never overlap, and together they cover every open
-  // street segment end to end (node pad reach + straights = 64 m)
+  // R35: road pieces never overlap, and together they cover every street
+  // end to end (pad reach + straights + pad reach = the edge's length)
   {
     const pieces = cityRoadPieces(plan);
-    const rects = pieces.map(pieceRect);
-    for (let a = 0; a < rects.length; a++) {
-      for (let b = a + 1; b < rects.length; b++) {
-        const ox = Math.min(rects[a].x2, rects[b].x2) - Math.max(rects[a].x1, rects[b].x1);
-        const oz = Math.min(rects[a].z2, rects[b].z2) - Math.max(rects[a].z1, rects[b].z1);
-        if (ox > 0.05 && oz > 0.05) {
+    const outlines = pieces.map(pieceOutline);
+    // separating-axis test on the convex hull of each outline
+    const hull = (pts: Array<{ x: number; z: number }>) => {
+      const q = [...pts].sort((a, b) => a.x - b.x || a.z - b.z);
+      const cr = (o: { x: number; z: number }, a: { x: number; z: number }, b: { x: number; z: number }) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+      const lo: typeof q = [], up: typeof q = [];
+      for (const p of q) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+      for (const p of [...q].reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+      return [...lo.slice(0, -1), ...up.slice(0, -1)];
+    };
+    // a straight is convex; a pad polygon is star-shaped about its node, so
+    // it is tested as the fan of triangles from its centre
+    const parts = pieces.map((p, i) => p.poly
+      ? p.poly.map((v, k) => [{ x: p.x, z: p.z }, v, p.poly![(k + 1) % p.poly!.length]])
+      : [hull(outlines[i])]);
+    const overlapDepth = (A: Array<{ x: number; z: number }>, Bh: Array<{ x: number; z: number }>): number => {
+      let depth = Infinity;
+      for (const poly of [A, Bh]) {
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i], q = poly[(i + 1) % poly.length];
+          const ax = -(q.z - p.z), az = q.x - p.x, al = Math.hypot(ax, az) || 1;
+          let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+          for (const v of A) { const t = (v.x * ax + v.z * az) / al; a0 = Math.min(a0, t); a1 = Math.max(a1, t); }
+          for (const v of Bh) { const t = (v.x * ax + v.z * az) / al; b0 = Math.min(b0, t); b1 = Math.max(b1, t); }
+          depth = Math.min(depth, Math.min(a1, b1) - Math.max(a0, b0));
+          if (depth <= 0) return 0;
+        }
+      }
+      return depth;
+    };
+    for (let a = 0; a < pieces.length; a++) {
+      for (let b = a + 1; b < pieces.length; b++) {
+        if (Math.hypot(pieces[a].x - pieces[b].x, pieces[a].z - pieces[b].z) > 70) continue;
+        if (parts[a].some(pa => parts[b].some(pb => overlapDepth(pa, pb) > 0.05))) {
           roadOverlaps++;
           if (roadOverlaps <= 3) console.log(`  R35 detail: city ${bx},${by} ${pieces[a].kind}@(${pieces[a].x.toFixed(0)},${pieces[a].z.toFixed(0)}) overlaps ${pieces[b].kind}@(${pieces[b].x.toFixed(0)},${pieces[b].z.toFixed(0)})`);
         }
       }
     }
-    const cover = (horiz: boolean, line: number, k: number): void => {
-      const [ia, ja, ib, jb] = horiz ? [k, line, k + 1, line] : [line, k, line, k + 1];
-      const len = segmentPieces(plan, horiz, line, k).reduce((s, p) => s + p.lx, 0);
-      if (Math.abs(len + nodeReach(plan, ia, ja) + nodeReach(plan, ib, jb) - 64) > 0.05) roadGaps++;
-    };
-    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) cover(true, j, i);
-    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) cover(false, i, j);
+    for (const e of plan.edges) {
+      const len = edgePieces(plan, e).reduce((s2, p) => s2 + p.lx, 0);
+      if (Math.abs(len + nodeReach(plan, plan.nodes[e.a], e) + nodeReach(plan, plan.nodes[e.b], e) - e.len) > 0.05) roadGaps++;
+    }
   }
 
   // G-graph: the street graph mirrors the plan — one edge per open segment,
@@ -366,9 +403,7 @@ for (const [bx, by] of cells) {
   // only dead ends are causeway mouths
   {
     const g = graphFor(bx, by);
-    let segs = 0;
-    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs++;
-    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs++;
+    const segs = plan.edges.length;
     const seated = g.edges.reduce((n, e) => n + e.crossings.length, 0);
     const seen = new Set<number>([0]);
     const stack = [0];
@@ -504,6 +539,8 @@ if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestl
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
 if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);
+if (narrowArms > 0) fail('R34', `${narrowArms} junction arm pairs closer than 55 degrees`);
+if (shortEdges > 0) fail('R34', `${shortEdges} streets shorter than ${MIN_EDGE} m between junctions`);
 if (portalFaults > 0) fail('R30', `${portalFaults} railway portal faults (lines must end on the shared rim portals with straight stems)`);
 if (diamondFaults > 0) fail('R31', `${diamondFaults} islands whose two lines don't cross exactly once, square, at the diamond`);
 if (diamondClashes > 0) fail('R31', `${diamondClashes} islands where two timetable trains share the diamond`);
@@ -524,15 +561,18 @@ const jac = (a: Set<string>, b: Set<string>): number => {
   return inter / (a.size + b.size - inter || 1);
 };
 const fingerprint = (bx: number, by: number) => {
-  const { H, V } = streetLinesFor(bx, by);
   const plan = cityPlanFor(bx, by);
   const rail = railNetFor(bx, by).lines.flatMap(L => L.pts);
-  const segs = new Set<string>();
-  for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs.add(`h${j},${i}`);
-  for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs.add(`v${i},${j}`);
+  const q = (v: number) => Math.round(v / 16);
+  const segs = new Set<string>(plan.edges.map(e => {
+    const a = plan.nodes[e.a], b = plan.nodes[e.b];
+    const k1 = `${q(a.x)},${q(a.z)}`, k2 = `${q(b.x)},${q(b.z)}`;
+    return k1 < k2 ? `${k1}-${k2}` : `${k2}-${k1}`;
+  }));
+  const nodes = new Set<string>(plan.nodes.map(n => `${q(n.x)},${q(n.z)}`));
   const dists = new Set<string>();
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) dists.add(`${cx},${cz}:${plan.district(cx, cz)}`);
-  return { H: new Set(H.map(String)), V: new Set(V.map(String)), segs, dists, rail };
+  return { H: nodes, V: nodes, segs, dists, rail };
 };
 for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] as Array<[number, number]>) {
   for (const [bx, by] of [[0, 0], [1, 1]] as Array<[number, number]>) {

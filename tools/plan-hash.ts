@@ -34,26 +34,18 @@ function dumpCity(bx: number, by: number): string {
   const plan = cityPlanFor(bx, by);
   const net = railNetFor(bx, by);
   const out: string[] = [`city ${bx},${by} seed ${plan.seed}`];
-  const segs: string[] = [];
-  for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) segs.push(`h${j},${i}`);
-  for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) segs.push(`v${i},${j}`);
-  out.push('segs ' + segs.join(' '));
-  const nodes: string[] = [];
-  for (let i = 0; i <= W; i++) for (let j = 0; j <= W; j++) {
-    if (plan.signalized(i, j)) nodes.push(`L${i},${j}`);
-    if (plan.plaza(i, j)) nodes.push(`P${i},${j}`);
-  }
-  out.push('nodes ' + nodes.join(' '));
+  out.push('nodes ' + plan.nodes.map(n => `${f2(n.x)},${f2(n.z)}${n.mouth ? 'M' : ''}${n.signalized ? 'L' : ''}${n.plaza ? 'P' : ''}`).join(' '));
+  out.push('edges ' + plan.edges.map(e => `${e.a}-${e.b}${e.kind[0]}`).join(' '));
   const dist: string[] = [];
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) dist.push(plan.district(cx, cz)[0] + plan.district(cx, cz)[1]);
   out.push('districts ' + dist.join(''));
   out.push('exits ' + JSON.stringify(plan.exits));
   out.push('crossings ' + plan.crossings.map(c => `${f2(c.x)},${f2(c.z)},${crossDir(c as unknown as Record<string, unknown>)},${f2(c.d)}`).join(' '));
-  out.push('bridges ' + plan.riverBridges.map(b => `${f2(b.x)},${f2(b.z)},${b.axis},${b.exit ? 1 : 0}`).join(' '));
+  out.push('bridges ' + plan.riverBridges.map(b => `${f2(b.x)},${f2(b.z)},${f2(b.heading)},${b.exit ? 1 : 0}`).join(' '));
   out.push('stations ' + plan.stations.map(s => `${f2(s.x)},${f2(s.z)},${f2(s.d)}`).join(' '));
   const lots: string[] = [];
   for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
-    for (const l of plan.lots(cx, cz)) lots.push(`${l.kind[0]}${f2(l.x)},${f2(l.z)},${f2(l.w)},${f2(l.d)}`);
+    for (const l of plan.lots(cx, cz)) lots.push(`${l.kind[0]}${f2(l.x)},${f2(l.z)},${f2(l.w)},${f2(l.d)},${f2(l.ry)}`);
   }
   out.push('lots ' + lots.join(' '));
   for (const rail of net.lines) out.push(`rail ${rail.kind} ${f2(rail.total)} ` + rail.pts.map(p => `${f2(p.x)},${f2(p.z)}`).join(" "));

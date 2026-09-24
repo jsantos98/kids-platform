@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { cityPlanFor, type District, type Lot } from './cityPlan.js';
+import { cityPlanFor, ROAD_HALF, ROUNDABOUT_REACH, type District, type Lot, type PNode, type PEdge } from './cityPlan.js';
+import { segDist } from './streetGen.js';
 import { railNetFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
@@ -16,7 +17,7 @@ import { coastFor, clipToRect, insetShore } from './coast.js';
 import { spansOf, deckProfile, deckSlope, type Span } from './causeway.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
 import { STRAIT } from './cityGrid.js';
-import { chunkRoadPieces, nodeArms, nodeReach, TRAFFIC_POLES, ROUNDABOUT_REACH } from './roadLayout.js';
+import { chunkRoadPieces, nodePiece, nodeReach, armDir, pieceOutline, trafficPoles } from './roadLayout.js';
 
 export { WORLD_CHUNKS }; // re-exported for the game layer
 
@@ -26,8 +27,23 @@ const CAUSEWAY_CURB = 0xcfc9ba;
 const CAUSEWAY_CAP = 0x9a948a;
 
 export interface CollisionBox {
+  /** the axis-aligned bound (the whole box, when there is no obb) */
   x1: number; x2: number; z1: number; z2: number;
   small?: number;
+  /** a footprint turned to its street: centre, half extents, rotation */
+  obb?: { cx: number; cz: number; hx: number; hz: number; ry: number };
+}
+
+/** is (x, z) within r of box b? (turned footprints tested in their frame) */
+export function inBox(b: CollisionBox, x: number, z: number, r: number): boolean {
+  if (x < b.x1 - r || x > b.x2 + r || z < b.z1 - r || z > b.z2 + r) return false;
+  const o = b.obb;
+  if (!o) return true;
+  const dx = x - o.cx, dz = z - o.cz;
+  const c = Math.cos(o.ry), s = Math.sin(o.ry);
+  // local x = along (cos, -sin), local z = depth (sin, cos)
+  const lx = dx * c - dz * s, lz = dx * s + dz * c;
+  return Math.abs(lx) < o.hx + r && Math.abs(lz) < o.hz + r;
 }
 
 export interface CityChunkResult {
@@ -94,7 +110,8 @@ const BRIDGE_STEEL = 0x8f97a3;
 const SIDEWALK = 0xa1a9c9; // the road kit's pavement (tile-low) colour
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
-const ROAD_HALF = 7;      // 14 m carriageway — roomy for little drivers
+/** the kit road's asphalt, for the procedural polygon pads */
+const ROAD_ASPHALT = 0x5b6170;
 
 export function slabColor(d: District): number {
   switch (d) {
@@ -202,21 +219,19 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       }
     }
   }
-  // street bridges over the river: steel girders + cream rail caps + abutments
+  // street bridges over the river: steel girders + cream rail caps + abutments,
+  // turned to the street
   for (const b of bridges) {
-    const alongX = b.axis === 'h';
+    const ux = Math.sin(b.heading), uz = Math.cos(b.heading);
+    const nx = uz, nz = -ux;
     const hw = river.halfAt(b.x, b.z) + 5.5; // span past the water
-    for (const s of [-1, 1]) {
+    for (const sd of [-1, 1]) {
       const off = ROAD_HALF + 0.9;
-      const gx = b.x + (alongX ? 0 : s * off);
-      const gz = b.z + (alongX ? s * off : 0);
-      B.box(alongX ? 20 : 0.55, 0.62, alongX ? 0.55 : 20, BRIDGE_STEEL, gx, 0.4, gz);
-      B.box(alongX ? 20 : 0.34, 0.14, alongX ? 0.34 : 20, 0xe8e4d8, gx, 0.78, gz);
+      B.box(0.55, 0.62, 20, BRIDGE_STEEL, b.x + nx * sd * off, 0.4, b.z + nz * sd * off, 0, b.heading, 0);
+      B.box(0.34, 0.14, 20, 0xe8e4d8, b.x + nx * sd * off, 0.78, b.z + nz * sd * off, 0, b.heading, 0);
     }
-    for (const s of [-1, 1]) {
-      const ax = b.x + (alongX ? s * 10.2 : 0);
-      const az = b.z + (alongX ? 0 : s * 10.2);
-      B.box(alongX ? 1.3 : hw * 2 + 6, 0.55, alongX ? hw * 2 + 6 : 1.3, BRIDGE_STEEL, ax, 0.28, az);
+    for (const sd of [-1, 1]) {
+      B.box(hw * 2 + 6, 0.55, 1.3, BRIDGE_STEEL, b.x + ux * sd * 10.2, 0.28, b.z + uz * sd * 10.2, 0, b.heading, 0);
     }
   }
 
@@ -286,27 +301,56 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
 
   // ---- roads: the complete Kenney City Kit Roads where it loaded, the
   // procedural pastel slabs otherwise. roadLayout.ts decides every piece:
-  // each street node owns ONE pad (crossroad / T / bend / in-line straight /
-  // roundabout) and straights fill only the span between two pads, so no
-  // piece ever lies on another (R35). Every piece is laid at the uniform
-  // 14 m unit — the kit straight's full cross-section IS the R5 carriageway.
-  // Thickness is scaled x4 (0.08 m) so the surface clears the slab without
-  // z-fighting, while the rail heads (RAIL_TOP) still ride above it.
-  const TY = 0.11;                   // legacy slab surface height
+  // each street node owns ONE pad (a kit piece rotated to a square node's
+  // frame, or a polygon pad at an oblique junction) and straights fill only
+  // the span between two pads, so no piece ever lies on another (R35). Every
+  // piece is laid at the uniform 14 m unit — the kit straight's full
+  // cross-section IS the R5 carriageway. Thickness is scaled x4 (0.08 m) so
+  // the surface clears the slab without z-fighting, while the rail heads
+  // (RAIL_TOP) still ride above it.
   const ROAD_Y = 0.1;                // kit pieces rest on the slab top
   const ROAD_THICK = 4;
+  const PAD_Y = 0.18;                // polygon pads: flush with the kit asphalt
   const R = TPL.road;
   const hasRoadKit = !!(R.straight && R.cross && R.tee && R.bend && R.end && R.round);
-  const roadS = plan.segH(cz, cx);
-  const roadW = plan.segV(cx, cz);
-  // the TRUE [west, east, north, south] arms of this chunk's SW node —
-  // plan.arms() filters out the closed arms (legacy fillet path below)
-  const a0 = nodeArms(plan, cx, cz);
-  const armN = a0.filter(Boolean).length;
-  if (hasRoadKit) {
-    for (const p of chunkRoadPieces(plan, cx, cz)) {
-      // past the shore a causeway corridor is a deck, not road tiles
-      if (occ.bits(p.x, p.z) & SEA) continue;
+  const inChunk = (x: number, z: number): boolean => x >= X0 && x < X0 + CH && z >= Z0 && z < Z0 + CH;
+  const flat = (poly: Array<{ x: number; z: number }>, color: number, y: number): void => {
+    if (poly.length < 3) return;
+    // wind counter-clockwise in shape space so the face looks up
+    let area = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      area += p.x * -q.z - q.x * -p.z;
+    }
+    const pts = area < 0 ? [...poly].reverse() : poly;
+    const geo = new THREE.ShapeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, -p.z))));
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, y, 0);
+    B.add(geo, color);
+  };
+  /** a thin strip from p to q (kerbs, sidewalks) */
+  const strip = (p: { x: number; z: number }, q: { x: number; z: number }, w: number, h: number, color: number, y: number): void => {
+    const len = Math.hypot(q.x - p.x, q.z - p.z);
+    if (len < 0.05) return;
+    B.box(w, h, len, color, (p.x + q.x) / 2, y, (p.z + q.z) / 2, 0, Math.atan2(q.x - p.x, q.z - p.z), 0);
+  };
+  for (const p of chunkRoadPieces(plan, cx, cz)) {
+    // past the shore a causeway avenue is a deck, not road tiles
+    if (occ.bits(p.x, p.z) & SEA) continue;
+    if (p.kind === 'pad') {
+      flat(p.poly!, ROAD_ASPHALT, PAD_Y);
+      // kerb strips along the corners between arms
+      const poly = p.poly!;
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        // the arm ends (carriageway mouths) carry no kerb: they are exactly
+        // 14 m across and look out along an arm
+        if (Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - ROAD_HALF * 2) < 0.05) continue;
+        strip(a, b, 0.45, 0.12, CAUSEWAY_CURB, PAD_Y + 0.02);
+      }
+      continue;
+    }
+    if (hasRoadKit) {
       const tpl = p.kind === 'cross' ? (p.crosswalks ? R.crossPath ?? R.cross : R.cross)
         : p.kind === 'tee' ? (p.crosswalks ? R.teePath ?? R.tee : R.tee)
           : R[p.kind];
@@ -315,170 +359,146 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       // placed piece spans exactly p.lx x p.lz
       const units = p.kind === 'round' ? 3 : 1;
       bakeModel(B, tpl, p.x, ROAD_Y, p.z, p.ry, 1, [p.lx / units, ROAD_THICK, p.lz / units]);
+    } else {
+      // no kit: a plain slab with kerbs
+      flat(pieceOutline(p), ROAD_ASPHALT, PAD_Y);
     }
-    // sidewalk bands in the built-up districts: the kit's kerb strip
-    // widened out to the lot line (7 -> 8.1 m), in the kit's own pavement
-    // colour, running only along the span between node pads
-    if (district === 'urban' || district === 'downtown' || district === 'industrial') {
-      // the roundabout's arms keep a straight kerb for their outer 5.8 m
-      // before the ring flares, so the band runs on up to the flare
-      // (and straight through an in-line node, whose pad is a plain straight)
-      const walkReach = (i: number, j: number): number => {
-        if (plan.plaza(i, j)) return ROUNDABOUT_REACH - 5.8;
-        const a = nodeArms(plan, i, j);
-        if (a.filter(Boolean).length === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) return 0;
-        return nodeReach(plan, i, j);
+  }
+
+  // sidewalk bands in the built-up districts: the kit's kerb strip widened
+  // out to the lot line (7 -> 8.1 m), in the kit's own pavement colour, along
+  // every street span between pads (each street's bands belong to the chunk
+  // holding its midpoint), broken at river bridges and at the shore
+  const builtD = (d: string): boolean => d === 'urban' || d === 'downtown' || d === 'industrial';
+  const walkReach = (n: PNode, e: PEdge): number => {
+    if (n.mouth) return 0;
+    if (n.plaza) return ROUNDABOUT_REACH - 5.8;
+    if (n.square && n.edges.length === 2) {
+      const [p, q] = n.edges.map(id => armDir(plan, n, plan.edges[id]));
+      if (p.x * q.x + p.z * q.z < -0.9) return 0; // an in-line straight pad
+    }
+    return nodeReach(plan, n, e);
+  };
+  for (const e of plan.edges) {
+    const a = plan.nodes[e.a], b = plan.nodes[e.b];
+    const mx = a.x + e.ux * e.len / 2, mz = a.z + e.uz * e.len / 2;
+    if (!inChunk(mx, mz) || !builtD(plan.district(cx, cz))) continue;
+    const s0 = walkReach(a, e), s1 = e.len - walkReach(b, e);
+    const cuts: Array<[number, number]> = [];
+    for (const br of plan.riverBridges) {
+      const along = (br.x - a.x) * e.ux + (br.z - a.z) * e.uz;
+      const acr = Math.abs((br.x - a.x) * e.uz - (br.z - a.z) * e.ux);
+      if (acr > 1.5 || along < -2 || along > e.len + 2) continue;
+      cuts.push([along - 13, along + 13]);
+    }
+    let t0 = s0;
+    const runs: Array<[number, number]> = [];
+    for (const [c0, c1] of cuts.sort((p, q) => p[0] - q[0])) {
+      if (c1 <= t0 || c0 >= s1) continue;
+      if (c0 > t0) runs.push([t0, c0]);
+      t0 = Math.max(t0, c1);
+    }
+    if (s1 > t0) runs.push([t0, s1]);
+    const nx = -e.uz, nz = e.ux;
+    for (const [r0, r1] of runs) {
+      // and nothing past the shore
+      let open: number | null = null;
+      const flush = (end: number): void => {
+        if (open === null || end - open < 1) { open = null; return; }
+        for (const side of [-1, 1]) {
+          strip({ x: a.x + e.ux * open + nx * side * 7.55, z: a.z + e.uz * open + nz * side * 7.55 },
+            { x: a.x + e.ux * end + nx * side * 7.55, z: a.z + e.uz * end + nz * side * 7.55 }, 1.1, 0.06, SIDEWALK, 0.13);
+        }
+        open = null;
       };
-      const walk = (horiz: boolean, line: number, k: number): void => {
-        const [ia, ja, ib, jb] = horiz ? [k, line, k + 1, line] : [line, k, line, k + 1];
-        const s0 = k * CH + walkReach(ia, ja), s1 = (k + 1) * CH - walkReach(ib, jb);
-        // the band breaks where the street bridges the river
-        const cuts: Array<[number, number]> = [];
-        for (const b of plan.riverBridges) {
-          if ((b.axis === 'h') !== horiz || Math.abs((horiz ? b.z : b.x) - line * CH) > 1) continue;
-          const at = horiz ? b.x : b.z;
-          cuts.push([at - 13, at + 13]);
-        }
-        let a = s0;
-        const runs: Array<[number, number]> = [];
-        for (const [c0, c1] of cuts.sort((p, q) => p[0] - q[0])) {
-          if (c1 <= a || c0 >= s1) continue;
-          if (c0 > a) runs.push([a, c0]);
-          a = Math.max(a, c1);
-        }
-        if (s1 > a) runs.push([a, s1]);
-        // and nothing past the shore (a causeway corridor goes out to sea)
-        const landRuns: Array<[number, number]> = [];
-        for (const [r0, r1] of runs) {
-          let a0: number | null = null;
-          for (let t = r0; t <= r1; t += 2) {
-            const [wx, wz] = horiz ? [t, line * CH] : [line * CH, t];
-            const dry = coast.inLand(wx, wz, 10);
-            if (dry && a0 === null) a0 = t;
-            if (!dry && a0 !== null) { landRuns.push([a0, t]); a0 = null; }
-          }
-          if (a0 !== null) landRuns.push([a0, r1]);
-        }
-        for (const [r0, r1] of landRuns) {
-          if (r1 - r0 < 1) continue;
-          const mid = (r0 + r1) / 2, len = r1 - r0;
-          for (const side of [-1, 1]) {
-            const off = line * CH + side * 7.55;
-            if (horiz) B.box(len, 0.06, 1.1, SIDEWALK, mid, 0.13, off);
-            else B.box(1.1, 0.06, len, SIDEWALK, off, 0.13, mid);
-          }
-        }
-      };
-      if (roadS) walk(true, cz, cx);
-      if (roadW) walk(false, cx, cz);
-      // corner squares where two bands meet at this chunk's SW junction
-      if (!plan.plaza(cx, cz)) {
-        for (const [ea, eb, sx, sz] of [[0, 2, -1, -1], [1, 2, 1, -1], [0, 3, -1, 1], [1, 3, 1, 1]] as const) {
-          if (a0[ea] && a0[eb]) B.box(1.1, 0.06, 1.1, SIDEWALK, X0 + sx * 7.55, 0.13, Z0 + sz * 7.55);
-        }
-        // a T's closed side: the through street's band runs past the pad
-        if (armN === 3) {
-          const miss = a0.indexOf(false);
-          if (miss === 2) B.box(14, 0.06, 1.1, SIDEWALK, X0, 0.13, Z0 - 7.55);
-          if (miss === 3) B.box(14, 0.06, 1.1, SIDEWALK, X0, 0.13, Z0 + 7.55);
-          if (miss === 0) B.box(1.1, 0.06, 14, SIDEWALK, X0 - 7.55, 0.13, Z0);
-          if (miss === 1) B.box(1.1, 0.06, 14, SIDEWALK, X0 + 7.55, 0.13, Z0);
-        }
+      for (let t = r0; t <= r1; t += 2) {
+        const dry = coast.inLand(a.x + e.ux * t, a.z + e.uz * t, 10);
+        if (dry && open === null) open = t;
+        if (!dry) flush(t);
       }
+      flush(r1);
     }
-  } else {
-    const openJunction = (i: number, j: number): boolean => {
-      // unfiltered [west, east, north, south] — bends must read as junctions
-      const a = [plan.segH(j, i - 1), plan.segH(j, i), plan.segV(i, j - 1), plan.segV(i, j)];
-      const n = a.filter(Boolean).length;
-      if (plan.plaza(i, j) || n >= 3) return true;
-      return n === 2 && !((a[0] && a[1]) || (a[2] && a[3]));
-    };
-    const TS = 64 / 6;
-    const jSW = openJunction(cx, cz);
-    const jS = openJunction(cx + 1, cz);
-    const jW = openJunction(cx, cz + 1);
-    for (let k = 0; k < 6; k++) {
-      const c = TS / 2 + k * TS;
-      const markS = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jS);
-      const markW = (k > 0 && k < 5) || (k === 0 && !jSW) || (k === 5 && !jW);
-      if (roadS) {
-        B.box(TS + 0.02, 0.04, 14, CAUSEWAY_ASPHALT, X0 + c, TY, Z0);
-        if (markS) {
-          for (const side of [-6.9, 6.9]) B.box(TS + 0.02, 0.09, 0.5, CAUSEWAY_CURB, X0 + c, TY + 0.02, Z0 + side);
-          for (const d of [c - TS / 3, c, c + TS / 3]) B.box(2.8, 0.02, 0.3, CAUSEWAY_DASH, X0 + d, TY + 0.03, Z0);
+  }
+  // sidewalk corners around this chunk's junction pads
+  for (const n of plan.nodes) {
+    if (!inChunk(n.x, n.z) || n.mouth || n.plaza || !builtD(plan.district(cx, cz))) continue;
+    const arms = n.edges.map(id => armDir(plan, n, plan.edges[id]));
+    const k = arms.length;
+    if (n.square) {
+      // corner squares where two perpendicular bands meet
+      for (let i = 0; i < k; i++) {
+        const u = arms[i], v = arms[(i + 1) % k];
+        if (Math.abs(u.x * v.x + u.z * v.z) > 0.2) continue;
+        B.box(1.1, 0.06, 1.1, SIDEWALK, n.x + (u.x + v.x) * 7.55, 0.13, n.z + (u.z + v.z) * 7.55, 0, Math.atan2(u.x, u.z), 0);
+      }
+      // a T's closed side: the through street's band runs past the pad
+      if (k === 3) {
+        const f = n.frame;
+        for (let q = 0; q < 4; q++) {
+          const d = { x: Math.sin(f + (q * Math.PI) / 2), z: Math.cos(f + (q * Math.PI) / 2) };
+          if (arms.some(a => a.x * d.x + a.z * d.z > 0.9)) continue;
+          const t = { x: d.z, z: -d.x };
+          strip({ x: n.x + d.x * 7.55 - t.x * 7, z: n.z + d.z * 7.55 - t.z * 7 },
+            { x: n.x + d.x * 7.55 + t.x * 7, z: n.z + d.z * 7.55 + t.z * 7 }, 1.1, 0.06, SIDEWALK, 0.13);
         }
       }
-      if (roadW) {
-        B.box(14, 0.04, TS + 0.02, CAUSEWAY_ASPHALT, X0, TY, Z0 + c);
-        if (markW) {
-          for (const side of [-6.9, 6.9]) B.box(0.5, 0.09, TS + 0.02, CAUSEWAY_CURB, X0 + side, TY + 0.02, Z0 + c);
-          for (const d of [c - TS / 3, c, c + TS / 3]) B.box(0.3, 0.02, 2.8, CAUSEWAY_DASH, X0, TY + 0.03, Z0 + d);
-        }
-      }
-    }
-    // corner fillets: wherever two arms meet, an asphalt disc rounds the
-    // inner corner, and the elbow of an L-bend gets a bigger disc curving
-    // the outer edge — no hard 90-degree asphalt corners anywhere
-    {
-      const corners: Array<[boolean, boolean, number, number]> = [
-        [a0[0], a0[2], -1, -1], // NW: west + north
-        [a0[1], a0[2], 1, -1],  // NE: east + north
-        [a0[0], a0[3], -1, 1],  // SW: west + south
-        [a0[1], a0[3], 1, 1],   // SE: east + south
-      ];
-      const armCount = armN;
-      for (const [armA, armB, sx, sz] of corners) {
-        if (armA && armB) {
-          B.cyl(5, 5, 0.04, 12, CAUSEWAY_ASPHALT, X0 + sx * 5, TY, Z0 + sz * 5);
-        } else if (!armA && !armB && armCount === 2) {
-          B.cyl(7, 7, 0.04, 14, CAUSEWAY_ASPHALT, X0 + sx * 7, TY, Z0 + sz * 7);
-        }
+    } else {
+      // an oblique pad: the band follows its kerbs, 0.55 m outside them
+      const pad = nodePiece(plan, n);
+      const poly = pad?.poly ?? [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        if (Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - ROAD_HALF * 2) < 0.05) continue;
+        const mx = (a.x + b.x) / 2 - n.x, mz = (a.z + b.z) / 2 - n.z;
+        const ml = Math.hypot(mx, mz) || 1;
+        const o = { x: (mx / ml) * 0.55, z: (mz / ml) * 0.55 };
+        strip({ x: a.x + o.x, z: a.z + o.z }, { x: b.x + o.x, z: b.z + o.z }, 1.1, 0.06, SIDEWALK, 0.13);
       }
     }
   }
 
-  // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
-  if (plan.plaza(cx, cz)) {
-    // kit roundabout: a little fountain on its centre island; the legacy
-    // slab path keeps the paved fountain square
-    if (hasRoadKit) bakeIslandFountain(X0, Z0);
-    else bakePlaza(X0, Z0);
-  }
-
-  // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
-  // chunks only keep the poles' collision boxes: one pole per approach arm
-  // (roadLayout TRAFFIC_POLES — the same spots chunks.ts plants the kit
-  // lights on)
-  if (plan.signalized(cx, cz)) {
-    for (const [dx, dz, , arm] of TRAFFIC_POLES) {
-      if (!a0[arm]) continue;
-      const tx = X0 + dx, tz = Z0 + dz;
-      boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
+  // ---- junction dressing ----
+  for (const n of plan.nodes) {
+    if (!inChunk(n.x, n.z)) continue;
+    // kit roundabout: a little fountain on its centre island
+    if (n.plaza) bakeIslandFountain(n.x, n.z);
+    // working traffic lights are dynamic objects (chunks.ts) at signalized
+    // nodes; chunks only keep the poles' collision boxes
+    if (n.signalized) {
+      for (const tp of trafficPoles(plan, n)) boxes.push({ x1: tp.x - 0.4, x2: tp.x + 0.4, z1: tp.z - 0.4, z2: tp.z + 0.4, small: 1 });
     }
   }
 
-  // street lamps along surviving streets (urban fabric + industry), kept
-  // clear of the railway corridor, off the junction pads (a roundabout's
-  // ring reaches 21 m up its arms) and out of the front corners of corner lots
-  const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
-  if (lampDistrict) {
-    const padH0 = nodeReach(plan, cx, cz), padH1 = nodeReach(plan, cx + 1, cz);
-    const padV1 = nodeReach(plan, cx, cz + 1);
-    for (let d = 11; d < CH; d += 18) {
-      const offH = d < padH0 + 1.5 || d > CH - padH1 - 1.5;
-      const offV = d < padH0 + 1.5 || d > CH - padV1 - 1.5;
-      const clearH = roadS && !offH && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT | SEA);
-      const clearV = roadW && !offV && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT | SEA);
-      if (clearH && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
-      if (clearV && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
-      if (clearH) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
-      if (clearV) boxes.push({ x1: X0 + 7.5, x2: X0 + 8.1, z1: Z0 + d - 0.3, z2: Z0 + d + 0.3, small: 1 });
+  // street lamps along the streets of the built-up districts (each street's
+  // belong to the chunk holding its midpoint), on its right-hand side,
+  // clear of the pads, the track, the lots, the sea and other streets
+  if (TPL.lightCurved) {
+    for (const e of plan.edges) {
+      const a = plan.nodes[e.a], b = plan.nodes[e.b];
+      const mx = a.x + e.ux * e.len / 2, mz = a.z + e.uz * e.len / 2;
+      if (!inChunk(mx, mz) || !builtD(plan.district(cx, cz))) continue;
+      const rx = -e.uz, rz = e.ux; // right of a -> b
+      const s0 = nodeReach(plan, a, e) + 4, s1 = e.len - nodeReach(plan, b, e) - 4;
+      for (let t = s0 + 7; t < s1; t += 18) {
+        const x = a.x + e.ux * t + rx * 7.8, z = a.z + e.uz * t + rz * 7.8;
+        if (rail.near(x, z, 9) || occ.claims(x, z, 0.9, LOT | SEA)) continue;
+        if (plan.edges.some(o => o.id !== e.id && segDist({ x, z }, plan.nodes[o.a], plan.nodes[o.b]) < 8.5)) continue;
+        // the lamp's arm (native -z) reaches back over the road
+        bakeModel(B, TPL.lightCurved, x, 0.1, z, Math.atan2(-rx, -rz) - Math.PI, 5.5);
+        boxes.push({ x1: x - 0.3, x2: x + 0.3, z1: z - 0.3, z2: z + 0.3, small: 1 });
+      }
     }
   }
 
   // ---- lots: buildings, tree rows and parking, laid out by the plan ----
   for (const lot of plan.lots(cx, cz)) bakeLot(lot);
+
+  /** a collision box for a footprint turned by ry (an AABB bound + the OBB) */
+  function obbBox(x: number, z: number, hx: number, hz: number, ry: number): CollisionBox {
+    const c = Math.abs(Math.cos(ry)), s = Math.abs(Math.sin(ry));
+    const ex = hx * c + hz * s, ez = hx * s + hz * c;
+    return { x1: x - ex, x2: x + ex, z1: z - ez, z2: z + ez, obb: { cx: x, cz: z, hx, hz, ry } };
+  }
 
   function bakeLot(lot: Lot): void {
     if (lot.kind === 'bldg') {
@@ -491,36 +511,26 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
           : tpls[((lot.v * tpls.length) | 0) % tpls.length];
         const s = Math.min((lot.w * 0.92) / tpl.size.x, (lot.d * 0.92) / tpl.size.z);
         bakeModel(B, tpl, lot.x, 0.1, lot.z, lot.ry, s);
-        // collision AABB from the rotated footprint (ry is axis-aligned)
-        const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
-        const hx = (flip ? lot.d : lot.w) / 2, hz = (flip ? lot.w : lot.d) / 2;
-        boxes.push({ x1: lot.x - hx, x2: lot.x + hx, z1: lot.z - hz, z2: lot.z + hz });
+        boxes.push(obbBox(lot.x, lot.z, lot.w / 2, lot.d / 2, lot.ry));
       } else {
         // procedural fallback house
         const h = 2.9 * (2 + ((lot.v * 3) | 0)) + 0.6;
-        const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
-        const hx = (flip ? lot.d : lot.w) / 2.4, hz = (flip ? lot.w : lot.d) / 2.4;
-        B.box(hx * 2, h, hz * 2, HOUSE_COLORS[(lot.v * HOUSE_COLORS.length) | 0], lot.x, h / 2, lot.z);
-        B.box(hx * 2 + 0.3, 0.3, hz * 2 + 0.3, ROOFS[(lot.v * ROOFS.length) | 0], lot.x, h + 0.15, lot.z);
-        boxes.push({ x1: lot.x - hx, x2: lot.x + hx, z1: lot.z - hz, z2: lot.z + hz });
+        B.box(lot.w / 1.2, h, lot.d / 1.2, HOUSE_COLORS[(lot.v * HOUSE_COLORS.length) | 0], lot.x, h / 2, lot.z, 0, lot.ry, 0);
+        B.box(lot.w / 1.2 + 0.3, 0.3, lot.d / 1.2 + 0.3, ROOFS[(lot.v * ROOFS.length) | 0], lot.x, h + 0.15, lot.z, 0, lot.ry, 0);
+        boxes.push(obbBox(lot.x, lot.z, lot.w / 2.4, lot.d / 2.4, lot.ry));
       }
     } else if (lot.kind === 'trees') {
       bakeTrees(lot.x, lot.z, 2 + ((lot.v * 2) | 0), lot.w / 2, lot);
     } else {
-      // parking lot: slab + a car or two
-      const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
-      const wx = flip ? lot.d : lot.w, wz = flip ? lot.w : lot.d;
-      B.box(wx, 0.06, wz, 0x828a96, lot.x, 0.14, lot.z);
+      // parking lot: slab + a car or two, nosed in from the street
+      B.box(lot.w, 0.06, lot.d, 0x828a96, lot.x, 0.14, lot.z, 0, lot.ry, 0);
       const n = 1 + ((lot.v * 2) | 0);
+      const ax = Math.cos(lot.ry), az = -Math.sin(lot.ry); // along the street
       for (let i = 0; i < n; i++) {
         const off = (i - (n - 1) / 2) * (lot.w / 2.2);
-        const cxx = flip ? lot.x : lot.x + off;
-        const czz = flip ? lot.z + off : lot.z;
-        bakeParkedCar(cxx, czz, flip ? Math.PI / 2 : 0);
-        boxes.push({
-          x1: cxx - (flip ? 2.3 : 1.0), x2: cxx + (flip ? 2.3 : 1.0),
-          z1: czz - (flip ? 1.0 : 2.3), z2: czz + (flip ? 1.0 : 2.3),
-        });
+        const x = lot.x + ax * off, z = lot.z + az * off;
+        bakeParkedCar(x, z, lot.ry);
+        boxes.push(obbBox(x, z, 1.0, 2.3, lot.ry));
       }
     }
   }
@@ -538,8 +548,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       // any other lot's building
       if (occ.claims(tx, tz, 0.8, STRUCTURED)) continue;
       if (occ.claims(tx, tz, 0.9, LOT)) {
-        const inOwn = own && tx > own.x - own.w / 2 - 1 && tx < own.x + own.w / 2 + 1
-          && tz > own.z - own.d / 2 - 1 && tz < own.z + own.d / 2 + 1;
+        const inOwn = own && inBox(obbBox(own.x, own.z, own.w / 2 + 1, own.d / 2 + 1, own.ry), tx, tz, 0);
         if (!inOwn) continue;
       }
       if (TPL.trees.length) {
@@ -558,31 +567,6 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     B.cyl(1.1, 1.1, 0.16, 12, 0x9fd8ef, x, 1.5, z);    // upper dish
     B.sphere(0.25, 0xbfe3ff, x, 1.75, z);              // finial
     boxes.push({ x1: x - 2.6, x2: x + 2.6, z1: z - 2.6, z2: z + 2.6, small: 1 });
-  }
-
-  /** paved plaza with a fountain, benches and planters — the meeting place */
-  function bakePlaza(x: number, z: number): void {
-    B.cyl(9.4, 9.4, 0.055, 26, 0xcfc6b0, x, 0.14, z);    // apron
-    B.cyl(9.0, 9.0, 0.07, 26, 0xd8d0bc, x, 0.145, z);    // paved circle
-    B.cyl(6.4, 6.4, 0.06, 26, 0xcfc6b0, x, 0.1475, z);   // ring pattern
-    B.cyl(5.9, 5.9, 0.065, 26, 0xd8d0bc, x, 0.15, z);
-    // the fountain
-    B.cyl(2.9, 3.1, 0.5, 16, 0x9aa1ab, x, 0.35, z);      // basin wall
-    B.cyl(2.6, 2.6, 0.44, 16, 0x6fb7d9, x, 0.4, z);      // water
-    B.cyl(0.9, 1.15, 1.4, 12, 0xcfccc2, x, 0.8, z);      // pedestal
-    B.cyl(1.55, 1.55, 0.18, 12, 0x9fd8ef, x, 1.55, z);   // upper dish
-    B.sphere(0.3, 0xbfe3ff, x, 1.8, z);                  // finial
-    boxes.push({ x1: x - 2.2, x2: x + 2.2, z1: z - 2.2, z2: z + 2.2, small: 1 });
-    // benches + planter pots around the circle
-    for (let k = 0; k < 4; k++) {
-      const ang = k * Math.PI / 2 + Math.PI / 4;
-      const bx = x + Math.cos(ang) * 4.9, bz = z + Math.sin(ang) * 4.9;
-      B.box(1.7, 0.1, 0.5, 0xa9805a, bx, 0.55, bz, 0, -ang, 0);
-      const px = x + Math.cos(ang + Math.PI / 4) * 7.6, pz = z + Math.sin(ang + Math.PI / 4) * 7.6;
-      B.cyl(0.55, 0.7, 0.5, 10, 0xb5651d, px, 0.35, pz); // terracotta pot
-      B.cyl(0.4, 0.4, 0.45, 8, 0xa4cf85, px, 0.72, pz);  // shrub
-      boxes.push({ x1: px - 0.7, x2: px + 0.7, z1: pz - 0.7, z2: pz + 0.7, small: 1 });
-    }
   }
 
   function bakeParkedCar(x: number, z: number, ry: number): void {

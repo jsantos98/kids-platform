@@ -9,7 +9,7 @@ import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { bridgeLayout } from './bridge.js';
 import { deckAt, BOAT_CLEAR } from '../../worlds/causeway.js';
-import type { CollisionBox } from '../../worlds/cityChunk.js';
+import { inBox, type CollisionBox } from '../../worlds/cityChunk.js';
 
 /** how a vehicle moves: on the streets, hovering, flying, sailing or on rails */
 export type MoveKind = 'ground' | 'heli' | 'plane' | 'boat' | 'rail';
@@ -270,6 +270,12 @@ export function physicsStep(
         const ddx = st.x + Math.sin(st.heading) * V.front - px2;
         const ddz = st.z + Math.cos(st.heading) * V.front - pz2;
         if (ddx * ddx + ddz * ddz < pr * pr) poleHit = true;
+        continue;
+      }
+      if (b.obb) {
+        // a footprint turned to its street: tested in its own frame
+        if (inBox(b, nx, st.z, V.radius)) hitX = true;
+        if (inBox(b, st.x, nz, V.radius)) hitZ = true;
         continue;
       }
       if (nx > b.x1 - V.radius && nx < b.x2 + V.radius && st.z > b.z1 - 0.8 && st.z < b.z2 + 0.8) hitX = true;

@@ -1,12 +1,13 @@
 // Static road-tile inspection rig: bakes real chunks of a real city with the
 // same pipeline the game uses, then renders them from fixed cameras. No game
 // loop, no streaming — what you see is stable while tuning tile placement.
-//   /dev-roads.html?seed=3            -> auto-framed junction examples
+//   /dev-roads.html?seed=3            -> lists one node of every pad kind
 //   ?x=320&z=512&h=140&tilt=90        -> manual camera (world x/z, height, tilt°)
 import * as THREE from 'three';
 import { prepBakedModels } from '../engine/assets.js';
 import { generateCityChunk } from '../worlds/cityChunk.js';
-import { graphFor, leaving } from '../worlds/streetGraph.js';
+import { cityPlanFor } from '../worlds/cityPlan.js';
+import { nodePiece } from '../worlds/roadLayout.js';
 import { setCityBase, citySeed } from '../worlds/cityGrid.js';
 import { ISLAND, WORLD_CHUNKS } from '../worlds/world.js';
 import { KITDEFS } from '../games/city/kitdefs.js';
@@ -74,26 +75,14 @@ camera.position.set(wx + Math.sin(yaw) * dist * Math.sin(tilt), h, wz + Math.cos
 camera.lookAt(wx, 0, wz);
 renderer.render(scene, camera);
 
-// archetype finder: first node of each road-junction kind, for quick framing
-// (arms read from the street graph: which compass directions leave the node)
-const graph = graphFor(0, 0);
+// archetype finder: first node of each pad kind (a kit piece rotated to a
+// square node, or a polygon pad at an oblique one), for quick framing
+const plan = cityPlanFor(0, 0);
 const kinds: Record<string, string> = {};
-for (const n of graph.nodes) {
-  const a = [false, false, false, false]; // w e n s
-  for (const eid of n.edges) {
-    const d = leaving(graph, graph.edges[eid], n.id);
-    if (Math.abs(d.x) > Math.abs(d.z)) a[d.x < 0 ? 0 : 1] = true;
-    else a[d.z < 0 ? 2 : 3] = true;
-  }
-  const cnt = a.filter(Boolean).length;
-  let k: string | null = null;
-  if (n.plaza) k = 'roundabout';
-  else if (cnt === 4) k = n.signalized ? 'cross-lights' : 'cross';
-  else if (cnt === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) k = 'pass-' + (a[0] ? 'ew' : 'ns');
-  else if (cnt === 3) k = 'T-miss-' + 'wens'[a.findIndex(v => !v)];
-  else if (cnt === 2) k = 'bend-' + (a[0] && a[3] ? 'ws' : a[1] && a[3] ? 'se' : a[1] && a[2] ? 'en' : 'wn');
-  else if (cnt === 1) k = (n.mouth ? 'mouth-' : 'end-') + 'wens'[a.findIndex(v => v)];
-  if (k && !kinds[k]) kinds[k] = `${n.x},${n.z}`;
+for (const n of plan.nodes) {
+  const p = nodePiece(plan, n);
+  const k = n.mouth ? 'mouth' : !p ? 'none' : `${p.kind}${p.kind === 'pad' ? '-' + n.edges.length : ''}${n.signalized ? '-lights' : ''}`;
+  if (!kinds[k]) kinds[k] = `${n.x.toFixed(0)},${n.z.toFixed(0)}`;
 }
 
 const info = document.createElement('pre');

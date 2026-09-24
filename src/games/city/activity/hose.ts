@@ -37,6 +37,8 @@ export class HoseActivity implements Activity {
   private yAmp: number;
   private particles;
   private nozzle = new THREE.Vector3(0, 3.1, 6.6);
+  /** mean depth of the flames: where the water stream lands */
+  private frontZ = TARGET_Z;
 
   constructor(seed: number, readonly variant: FireVariant) {
     const r: Rng = rng(seed);
@@ -55,39 +57,84 @@ export class HoseActivity implements Activity {
       truck.add(g);
     }).catch(() => {});
 
-    // the burning thing and where its flames sit (x across, y up)
-    let spots: Array<[number, number]> = [];
+    this.camera.position.set(0, 7.2, 19);
+    this.camera.lookAt(0, 2.6, TARGET_Z);
+    this.camera.updateMatrixWorld(true);
+
+    // the burning thing and where its flames may sit (x across, y up)
+    let target: THREE.Object3D;
+    let cands: Array<[number, number]>;
+    let want: number;
     if (variant === 'house') {
       const body = [C.pink, C.yellow, C.blue, C.cream][(r() * 4) | 0];
-      const house = makeHouse({ w: 8, d: 5, h: 4.4, body, roof: C.purple, windows: 3, chimney: true });
-      house.position.set(0, 0, TARGET_Z - 2.5);
-      this.scene.add(house);
-      spots = scatter(r, 6, -3.4, 3.4, 0.8, 5);
+      target = makeHouse({ w: 8, d: 5, h: 4.4, body, roof: C.purple, windows: 3, chimney: true });
+      target.position.set(0, 0, TARGET_Z - 2.5);
+      cands = scatter(r, 18, -3.4, 3.4, 0.8, 5);
+      want = 6;
     } else if (variant === 'tree') {
-      const tree = makeTree(r, 4.2);
-      tree.rotation.y = 0;
-      tree.position.set(0, 0, TARGET_Z);
-      this.scene.add(tree);
-      spots = scatter(r, 5, -2.8, 2.8, 3, 6.4);
+      target = makeTree(r, 4.2);
+      target.rotation.y = 0;
+      target.position.set(0, 0, TARGET_Z);
+      cands = scatter(r, 15, -2.8, 2.8, 3, 5.8); // below the top leaf ball
+      want = 5;
     } else {
-      const car = new THREE.Group();
-      car.position.set(0, 0, TARGET_Z + 1);
-      car.rotation.y = Math.PI / 2;
-      car.add(makeCar({ body: C.blue }));
-      car.scale.setScalar(1.25);
-      this.scene.add(car);
-      spots = scatter(r, 4, -2.6, 2.6, 0.9, 2.1);
+      target = new THREE.Group();
+      target.position.set(0, 0, TARGET_Z + 1);
+      target.rotation.y = Math.PI / 2;
+      target.add(makeCar({ body: C.blue }));
+      target.scale.setScalar(1.25);
+      cands = scatter(r, 14, -2.6, 2.6, 0.9, 2.1);
+      want = 4;
     }
-    spots.forEach(([x, y], k) => {
-      const f = new Flame(x, y, TARGET_Z + 0.4, variant === 'car' ? 0.9 : 1.1, k);
+    this.scene.add(target);
+    target.updateMatrixWorld(true);
+    // every flame sits ON the side the camera sees: cast from the camera
+    // toward the spot and put the flame where the ray first meets the
+    // burning thing, pulled a little toward the camera. A flame placed at a
+    // fixed depth ended up buried inside the tree's canopy (and the car).
+    const ray = new THREE.Raycaster();
+    const onSurface: THREE.Vector3[] = [], inAir: THREE.Vector3[] = [];
+    for (const [x, y] of cands) {
+      const aim = new THREE.Vector3(x, y, TARGET_Z);
+      const dir = aim.clone().sub(this.camera.position).normalize();
+      ray.set(this.camera.position, dir);
+      const hit = ray.intersectObject(target, true)[0];
+      if (hit) onSurface.push(hit.point.clone().addScaledVector(dir, -0.7));
+      else inAir.push(aim.setZ(TARGET_Z + 1.2));
+    }
+    const spots = [...onSurface, ...inAir].slice(0, want);
+    // then prove it: nudge any flame the burning thing still hides — at its
+    // base, middle or tip (the camera looks down, so a leaf ball overhead
+    // can cover a flame's top) — toward the camera until all three are clear
+    const hidden = (p: THREE.Vector3): THREE.Vector3 | null => {
+      for (const dy of [0.2, 0.55, 0.9]) {
+        const pt = p.clone().add(new THREE.Vector3(0, dy, 0));
+        const dir = pt.clone().sub(this.camera.position);
+        const dist = dir.length();
+        ray.set(this.camera.position, dir.normalize());
+        ray.far = dist - 0.1;
+        if (ray.intersectObject(target, true).length) return dir;
+      }
+      return null;
+    };
+    for (const p of spots) {
+      for (let step = 0; step < 12; step++) {
+        const dir = hidden(p);
+        if (!dir) break;
+        p.addScaledVector(dir, -0.5);
+      }
+    }
+    spots.forEach((p, k) => {
+      const f = new Flame(p.x, p.y, p.z, variant === 'car' ? 0.9 : 1.1, k);
       this.flames.push(f);
       this.scene.add(f.group);
     });
-    const ys = spots.map(s => s[1]);
+    this.frontZ = spots.reduce((s, p) => s + p.z, 0) / spots.length;
+    const ys = spots.map(s => s.y);
     const lo = Math.min(...ys), hi = Math.max(...ys);
     this.yMid = (lo + hi) / 2;
     this.yAmp = Math.max(0.6, (hi - lo) / 2 + 0.3);
-    this.range = Math.max(...spots.map(s => Math.abs(s[0]))) + 0.6;
+    this.range = Math.max(...spots.map(s => Math.abs(s.x))) + 0.6;
     // smoke
     for (let k = 0; k < 4; k++) {
       const puff = P.sphere(0.8 + k * 0.3, C.smoke, (r() - 0.5) * 2, 6 + k * 1.6, TARGET_Z, { transparent: true, opacity: 0.35 });
@@ -96,9 +143,6 @@ export class HoseActivity implements Activity {
       this.scene.add(puff);
     }
     this.jet = new WaterJet(this.scene);
-
-    this.camera.position.set(0, 7.2, 19);
-    this.camera.lookAt(0, 2.6, TARGET_Z);
   }
 
   update(dt: number, elapsed: number, inp: ActivityInput): ActivityState {
@@ -106,7 +150,7 @@ export class HoseActivity implements Activity {
     this.aimX = ease(this.aimX, inp.steer * this.range, 4, dt);
     // up/down bounces by itself across every flame's height
     const aimY = this.yMid + this.yAmp * Math.sin(elapsed * 1.9);
-    const target = new THREE.Vector3(this.aimX, aimY, TARGET_Z + 0.5);
+    const target = new THREE.Vector3(this.aimX, aimY, this.frontZ);
     // the stream douses the one burning flame it's closest to
     let hit: Flame | null = null, best = Infinity;
     for (const f of this.flames) {

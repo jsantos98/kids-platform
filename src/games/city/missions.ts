@@ -8,6 +8,7 @@ import { C } from '../../engine/palette.js';
 import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { graphFor, type StreetGraph } from '../../worlds/streetGraph.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { makeBeacon } from './guide3d.js';
 
 export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue';
@@ -57,7 +58,12 @@ export class Missions {
    * fire truck: fire, fire, cat; the ambulance: patients...) */
   constructor(private scene: THREE.Scene, readonly calls: ObjectiveType[] = ['fire', 'fire', 'cat']) {}
 
+  private bx = 0;
+  private by = 0;
+
   setCity(bx: number, by: number, ox: number, oz: number): void {
+    this.bx = bx;
+    this.by = by;
     this.graph = graphFor(bx, by);
     this.ox = ox;
     this.oz = oz;
@@ -78,21 +84,50 @@ export class Missions {
     const lx = player.x - this.ox, lz = player.z - this.oz;
     // the call stands on a junction corner, 11 m out on the diagonal: past
     // the traffic-light poles (8.6 m) yet short of every corner lot, whose
-    // buildings start 12 m up the street. Never on a corner another call
-    // already occupies.
-    const corner = (r() * 2) | 0;
-    const ox2 = corner ? -11 : 11, oz2 = corner ? 11 : -11;
+    // buildings start 12 m up the street. Of the four corners it prefers
+    // one with no tree row within 6 m — a canopy right beside the call hid
+    // the fire from the road — and never a corner another call already has.
+    const plan = cityPlanFor(this.bx, this.by);
+    const treesNear = (x: number, z: number): number => {
+      let n = 0;
+      for (let cx = Math.floor(x / 64) - 1; cx <= Math.floor(x / 64) + 1; cx++) {
+        for (let cz = Math.floor(z / 64) - 1; cz <= Math.floor(z / 64) + 1; cz++) {
+          for (const l of plan.lots(cx, cz)) {
+            if (l.kind !== 'trees') continue;
+            const flip = Math.abs(Math.abs(l.ry) - Math.PI / 2) < 0.01;
+            const hx = (flip ? l.d : l.w) / 2 + 3, hz = (flip ? l.w : l.d) / 2 + 3; // + canopy
+            const dx = Math.max(0, Math.abs(x - l.x) - hx), dz = Math.max(0, Math.abs(z - l.z) - hz);
+            if (Math.hypot(dx, dz) < 6) n++;
+          }
+        }
+      }
+      return n;
+    };
+    const corners: Array<[number, number]> = [[11, -11], [-11, 11], [11, 11], [-11, -11]];
+    for (let k = corners.length - 1; k > 0; k--) {
+      const m = (r() * (k + 1)) | 0;
+      [corners[k], corners[m]] = [corners[m], corners[k]];
+    }
     const taken = (x: number, z: number): boolean =>
       this.objectives.some(o => Math.hypot(o.pos.x - x, o.pos.z - z) < 20);
-    let gx = 0, gz = 0;
-    for (let attempt = 0; attempt < 24; attempt++) {
+    let gx = 0, gz = 0, ox2 = corners[0][0], oz2 = corners[0][1];
+    // best corner so far: a clear one ends the search, else the corner with
+    // the fewest tree rows around it is kept as the fallback
+    let bestTrees = Infinity;
+    for (let attempt = 0; attempt < 24 && bestTrees > 0; attempt++) {
       const aa = a + attempt * 2.39996;
       const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
       const n = this.graph.nearestNode(px, pz);
-      if (!n) break;
-      gx = n.x;
-      gz = n.z;
-      if (n.signalized && !taken(gx + ox2 + this.ox, gz + oz2 + this.oz)) break;
+      if (!n || !n.signalized) continue;
+      for (const [cx, cz] of corners) {
+        if (taken(n.x + cx + this.ox, n.z + cz + this.oz)) continue;
+        const t = treesNear(n.x + cx, n.z + cz);
+        if (t < bestTrees) {
+          bestTrees = t;
+          gx = n.x; gz = n.z; ox2 = cx; oz2 = cz;
+          if (t === 0) break;
+        }
+      }
     }
     const pos = new THREE.Vector3(gx + ox2 + this.ox, 0.15, gz + oz2 + this.oz);
     forceChunkAt(pos.x, pos.z);

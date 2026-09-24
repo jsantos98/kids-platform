@@ -68,8 +68,10 @@ export class CatLadderActivity implements Activity {
         this.scene.add(b);
         this.spots.push({ x, y });
       }
+      // the canopy sits BEHIND the branches (z -3.2): every cat spot stays
+      // clear of the leaves, so the cat is always in plain sight
       for (const [x, y, s] of [[0, 6.6, 2.6], [-2.4, 5.6, 1.9], [2.5, 5.4, 1.9], [0, 5.2, 2.2]] as const) {
-        this.scene.add(P.sphere(s, C.leaf, x, y, -1.6));
+        this.scene.add(P.sphere(s, C.leaf, x, y, -3.2));
       }
     } else {
       // a two-storey house front; the cat sits on an upstairs window ledge

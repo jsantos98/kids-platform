@@ -27,6 +27,7 @@ import { baseRiverFor, type RiverRoute } from './riverRoute.js';
 import { railNetFor, STEM } from './railRoute.js';
 import { EXIT_IN } from './streetLines.js';
 import { ISLAND, CENTER } from './world.js';
+import { blocksOf, type Block } from './blocks.js';
 
 export type EdgeKind = 'exit' | 'ring' | 'river' | 'bridge' | 'railside' | 'railx' | 'seam' | 'street' | 'link';
 
@@ -63,6 +64,9 @@ const CLEARANCE = 15;   // two streets that don't meet stay this far apart
 const PAD_CLEAR = 20;   // and a junction this far from a street it doesn't meet (two kit pads' corners reach 10 m each)
 const SNAP = 16;        // a crossing this close to a node joins it
 const RING_INSET = 58;
+/** blocks longer than this get a street cut through them (m) */
+const BLOCK_MAX = 130;
+const BLOCK_MIN_CUT = 5000;
 const RIVER_OK = (25 * Math.PI) / 180;
 /** the ring road and the exit avenues must get across: a bit more slack */
 const RIVER_OK_TRUNK = (35 * Math.PI) / 180;
@@ -218,6 +222,12 @@ export interface Builder {
   insertPolyline(pts: P[], kind: EdgeKind, closed?: boolean): void;
   /** link stranded pieces and exits to the main web with straight links */
   linkUp(): void;
+  /** drop what the plan's dead-end trim would: stubs and stranded pieces */
+  prune(): void;
+  /** save / roll back the network (a trial insertion) */
+  snapshot(): () => void;
+  /** does any edge with id >= `from` survive the dead-end trim? */
+  survives(from: number): boolean;
   /** the network so far: alive edges, renumbered */
   result(): StreetNet;
 }
@@ -607,7 +617,58 @@ export function makeBuilder(
     });
     return { nodes: outNodes, edges: outEdges, riverCrossings };
   };
-  return { nodes, edges, riverCrossings, insert, insertDry, insertPolyline, linkUp, result };
+  const mainOf = (sizes: Map<number, number>): number => {
+    let main = -1, best = -1;
+    for (const [c, n] of sizes) if (n > best) { best = n; main = c; }
+    return main;
+  };
+  const prune = (): void => {
+    const { comp, sizes } = skeleton();
+    const main = mainOf(sizes);
+    // an edge survives when both its ends are in the main web after the trim
+    // (the skeleton leaves a trimmed node out of `comp`, or keeps a mouth)
+    const alive = new Set<number>();
+    {
+      const live = new Set(edges.filter(e => e.alive).map(e => e.id));
+      const d = (n: number): number => nodes[n].edges.filter(id => live.has(id)).length;
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const nd of nodes) {
+          if (nd.mouth || d(nd.id) !== 1) continue;
+          for (const id of nd.edges) if (live.has(id)) { live.delete(id); changed = true; }
+        }
+      }
+      for (const id of live) {
+        const e = edges[id];
+        if (comp.get(e.a) === main && comp.get(e.b) === main) alive.add(id);
+      }
+    }
+    for (const e of edges) if (e.alive && !alive.has(e.id)) detach(e);
+  };
+  const snapshot = (): (() => void) => {
+    const ns = nodes.length, es = edges.length, rc = riverCrossings.length;
+    const nodeEdges = nodes.map(n => [...n.edges]);
+    const aliveE = edges.map(e => e.alive);
+    return () => {
+      nodes.length = ns; edges.length = es; riverCrossings.length = rc;
+      nodes.forEach((n, i) => { n.edges = nodeEdges[i]; });
+      edges.forEach((e, i) => { e.alive = aliveE[i]; });
+    };
+  };
+  const survives = (from: number): boolean => {
+    const live = new Set(edges.filter(e => e.alive).map(e => e.id));
+    const d = (n: number): number => nodes[n].edges.filter(id => live.has(id)).length;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const nd of nodes) {
+        if (nd.mouth || d(nd.id) !== 1) continue;
+        for (const id of nd.edges) if (live.has(id)) { live.delete(id); changed = true; }
+      }
+    }
+    for (const id of live) if (id >= from) return true;
+    return false;
+  };
+  return { nodes, edges, riverCrossings, insert, insertDry, insertPolyline, linkUp, prune, snapshot, survives, result };
 }
 
 function generate(bx: number, by: number): StreetNet {
@@ -902,6 +963,176 @@ function generate(bx: number, by: number): StreetNet {
   // ---- 6. link up what the rules stranded: every exit, and every piece of
   // street bigger than a block, joins the main web with a straight link ----
   B.linkUp();
+
+  // ---- 7. subdivide: whatever the rules left too big is cut in two by a
+  // straight street square to one of its sides, T-ing into the blocks'
+  // edges at both ends — until every block is at most BLOCK_MAX long (or
+  // no cut through it can meet the rules). Cuts keep off the track and the
+  // water: their crossings are the corridors' own streets. ----
+  const railCells = new Map<string, Array<{ x: number; z: number; h: number }>>();
+  for (const L of rail.lines) for (const rp of L.pts) {
+    const k = `${Math.floor(rp.x / 32)},${Math.floor(rp.z / 32)}`;
+    if (!railCells.has(k)) railCells.set(k, []);
+    railCells.get(k)!.push(rp);
+  }
+  B.prune();
+  const tried = new Set<string>();
+  for (let round = 0; round < 160; round++) {
+    const faces = blocksOf(B.result()).sort((p, q) => q.area - p.area);
+    let did = false;
+    for (const f of faces) {
+      const fk = `${Math.round(f.cx)},${Math.round(f.cz)},${Math.round(f.area / 10)}`;
+      if (tried.has(fk) || f.area < BLOCK_MIN_CUT) continue;
+      if (cutBlock(f)) { did = true; break; }
+      tried.add(fk);
+    }
+    if (!did) break;
+  }
+  /** cheap geometry first: would the rules at both ends, beside the
+   * block's corners and across the track even let this cut stand? */
+  function cutPlausible(poly: P[], p: P, q: P): boolean {
+    const L = dist(p, q);
+    const u = { x: (q.x - p.x) / L, z: (q.z - p.z) / L };
+    const N = poly.length;
+    const own = new Set<number>(); // the sides each end meets
+    for (const [end, inward] of [[p, u], [q, { x: -u.x, z: -u.z }]] as const) {
+      let side = -1;
+      for (let i = 0; i < N && side < 0; i++) {
+        if (segDist(end, poly[i], poly[(i + 1) % N]) < 0.05) side = i;
+      }
+      if (side < 0) return false;
+      const a = poly[side], b = poly[(side + 1) % N];
+      const da = dist(end, a), db = dist(end, b);
+      own.add(side);
+      if (Math.min(da, db) <= SNAP) {
+        // snapped onto a corner: fair angles to both of its sides
+        const c = da <= db ? side : (side + 1) % N;
+        const prev = (c - 1 + N) % N;
+        own.add(prev); own.add(c);
+        for (const o of [poly[prev], poly[(c + 1) % N]]) {
+          const dl = dist(poly[c], o);
+          const cos = ((o.x - poly[c].x) * inward.x + (o.z - poly[c].z) * inward.z) / dl;
+          if (cos > Math.cos(MIN_ANGLE)) return false;
+        }
+      } else {
+        // a T at least a street's length from both corners, at a fair angle
+        if (da < MIN_EDGE || db < MIN_EDGE) return false;
+        const sn = Math.abs(((b.x - a.x) * u.z - (b.z - a.z) * u.x) / dist(a, b));
+        if (sn < Math.sin(MIN_ANGLE)) return false;
+      }
+    }
+    // clear of every side it doesn't meet (streets CLEARANCE, pads PAD_CLEAR)
+    for (let j = 0; j < N; j++) {
+      if (own.has(j)) continue;
+      const a = poly[j], b = poly[(j + 1) % N];
+      if (segDist(p, a, b) < PAD_CLEAR || segDist(q, a, b) < PAD_CLEAR) return false;
+      for (let t = 12; t <= L - 12; t += 4) {
+        if (segDist({ x: p.x + u.x * t, z: p.z + u.z * t }, a, b) < CLEARANCE) return false;
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      const v = poly[i];
+      if (dist(v, p) < SNAP + 1 || dist(v, q) < SNAP + 1) continue;
+      if (segDist(v, p, q) < PAD_CLEAR) return false;
+    }
+    // over the track only square, clear of the diamond and of the junctions
+    if (segDist(rail.diamond, p, q) < 30) return false;
+    const g0 = Math.floor((Math.min(p.x, q.x) - 14) / 32), g1 = Math.floor((Math.max(p.x, q.x) + 14) / 32);
+    const h0 = Math.floor((Math.min(p.z, q.z) - 14) / 32), h1 = Math.floor((Math.max(p.z, q.z) + 14) / 32);
+    for (let gx = g0; gx <= g1; gx++) for (let gz = h0; gz <= h1; gz++) {
+      for (const rp of railCells.get(`${gx},${gz}`) ?? []) {
+        if (segDist(rp, p, q) >= 14) continue;
+        const t = (rp.x - p.x) * u.x + (rp.z - p.z) * u.z;
+        if (t < 22 || t > L - 22) return false;
+        if (Math.abs(Math.sin(rp.h) * u.x + Math.cos(rp.h) * u.z) > Math.cos((76 * Math.PI) / 180)) return false;
+      }
+    }
+    return true;
+  }
+  function cutBlock(f: Block): boolean {
+    const poly = f.poly;
+    // candidate cut directions: square to each side of the block (a cut
+    // meets that side, and every side parallel to it, at a right angle)
+    const hs: number[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      if (dist(a, b) < 20) continue;
+      const h = Math.atan2(b.x - a.x, b.z - a.z);
+      if (hs.some(o => Math.abs(Math.sin(o - h)) < 0.05)) continue;
+      hs.push(h);
+    }
+    // ... and square to the track where it runs through the block (a cut
+    // across it is a level crossing)
+    for (const L of rail.lines) {
+      for (let k = 0; k < L.pts.length; k += 4) {
+        const rp = L.pts[k];
+        if (!inPoly(rp, poly)) continue;
+        if (hs.some(o => Math.abs(Math.sin(o - rp.h)) < 0.05)) continue;
+        hs.push(rp.h);
+      }
+    }
+    // ... and square to the river (a cut across it is a bridge)
+    for (let k = 0; k < river.pts.length; k += 3) {
+      const rp = river.pts[k];
+      if (!inPoly(rp, poly)) continue;
+      if (hs.some(o => Math.abs(Math.sin(o - rp.h)) < 0.05)) continue;
+      hs.push(rp.h);
+    }
+    // (and each a little turned, so a cut square to the track or the water
+    // can still meet the block's sides at a fair angle)
+    const cands: Array<{ h: number; len: number; lo: number; base: boolean }> = [];
+    for (const d of [0, 8, -8, 16, -16]) for (const h0 of hs) {
+      const h = h0 + (d * Math.PI) / 180;
+      const ux = Math.sin(h), uz = Math.cos(h);
+      let lo = Infinity, hi = -Infinity;
+      for (const p of poly) { const t = p.x * ux + p.z * uz; lo = Math.min(lo, t); hi = Math.max(hi, t); }
+      if (hi - lo > BLOCK_MAX) cands.push({ h, len: hi - lo, lo, base: d === 0 });
+    }
+    // the untouched directions first, longest first
+    cands.sort((p, q) => (p.base === q.base ? q.len - p.len : p.base ? -1 : 1));
+    for (const c of cands) {
+      const ux = Math.sin(c.h), uz = Math.cos(c.h);
+      const cut = { x: uz, z: -ux }; // the cut runs square to the side
+      for (const frac of [0.5, 0.44, 0.56, 0.38, 0.62, 0.32, 0.68, 0.26, 0.74]) {
+        const t = c.lo + c.len * frac;
+        // the line (p . u = t), clipped to the block: the piece nearest the centre
+        const o = { x: f.cx + ux * (t - (f.cx * ux + f.cz * uz)), z: f.cz + uz * (t - (f.cx * ux + f.cz * uz)) };
+        const R = 2000;
+        const pieces = clipToPoly({ x: o.x - cut.x * R, z: o.z - cut.z * R }, { x: o.x + cut.x * R, z: o.z + cut.z * R }, poly);
+        pieces.sort((m, n) => segDist(o, m[0], m[1]) - segDist(o, n[0], n[1]));
+        for (const [p, q] of pieces.slice(0, 2)) {
+          const L = dist(p, q);
+          if (L < MIN_EDGE * 1.5) continue;
+          if (!cutPlausible(poly, p, q)) continue;
+          // on land, and over the river only dead square (the track is the
+          // rail cut's business: only a square level crossing survives it)
+          let wet = false;
+          const hc = Math.atan2(q.x - p.x, q.z - p.z);
+          for (let s = 0; s <= L && !wet; s += 3) {
+            const x = p.x + ((q.x - p.x) * s) / L, z = p.z + ((q.z - p.z) * s) / L;
+            if (!coast.inLand(x, z, 20)) wet = true;
+            else if (river.distTo(x, z) < river.halfAt(x, z) + 18) {
+              const rh = river.pts[river.path.nearest(x, z).i].h;
+              if (Math.abs(Math.cos(rh - hc)) > Math.sin(RIVER_OK_LINK)) wet = true;
+            }
+          }
+          if (wet) continue;
+          const undo = B.snapshot();
+          const e0 = B.edges.length;
+          // a hair past both sides, so each end finds its side's edge
+          const ext = { x: (q.x - p.x) / L, z: (q.z - p.z) / L };
+          B.insertDry({ x: p.x - ext.x * 0.4, z: p.z - ext.z * 0.4 }, { x: q.x + ext.x * 0.4, z: q.z + ext.z * 0.4 }, 'street');
+          const sv = B.edges.length > e0 && B.survives(e0);
+          if (sv) {
+            B.prune();
+            return true;
+          }
+          undo();
+        }
+      }
+    }
+    return false;
+  }
 
   // the river is straightened at the crossings as BUILT: a snap at a node
   // can kink a street a few degrees off the line it was laid along

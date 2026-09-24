@@ -3,10 +3,15 @@
 // Every check maps to a rule in AGENTS.md; a FAIL means the change that
 // caused it must be fixed before commit.
 import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
-import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
+import { cityPlanFor, clearCityPlanCache, builtD, polePoints, type CityPlan, type CityBlock } from '../src/worlds/cityPlan.js';
+import { inBlock } from '../src/worlds/blocks.js';
+import { coastFor, type Coast } from '../src/worlds/coast.js';
+import type { RailNet } from '../src/worlds/railRoute.js';
+import type { RiverRoute } from '../src/worlds/riverRoute.js';
+import type { CityGrid } from '../src/worlds/grid.js';
 import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK } from '../src/worlds/grid.js';
-import { clearCoastCache } from '../src/worlds/coast.js';
+import { clearCoastCache } from '../src/worlds/coast.js'; // (coastFor imported above)
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, edgePieces, pieceOutline, nodeReach } from '../src/worlds/roadLayout.js';
 import { MIN_ANGLE, MIN_EDGE, segDist, clearStreetNetCache } from '../src/worlds/streetGen.js';
@@ -68,6 +73,10 @@ let selfOverlap = 0;
 let riverFails = 0;
 let worstTrestleSkew = 0;
 let roadOverlaps = 0;
+let thinBlocks = 0;
+let worstFill = 1;
+let districtFaults = 0;
+let polesInLots = 0;
 let graphFaults = 0;
 let roadGaps = 0;
 let portalFaults = 0;
@@ -437,6 +446,40 @@ for (const [bx, by] of cells) {
     if ((b & SEA) && (b & RAIL) && !(b & DECK)) seaBuiltTotal++;
     if ((b & SEA) && (b & ROAD) && !(b & DECK)) seaRoadTotal++;
   }
+
+  // R33: every built block is at least 55% built over — of the ground a
+  // small (7 m) lot could legally stand on, LOT cells cover >= 55%; and the
+  // districts ring out from the centre (business, mixed, residential), with
+  // industry only beside the railway
+  const rail = net, river33 = riverFor(bx, by), coast33 = coastFor(bx, by);
+  const ringD: Record<string, number[]> = { downtown: [], urban: [], residential: [] };
+  for (const b of plan.blocks) {
+    if (!builtD(b.district)) continue;
+    if (b.district in ringD) ringD[b.district].push(Math.hypot(b.cx - ISLAND / 2, b.cz - ISLAND / 2));
+    if (b.district === 'industrial' && !rail.near(b.cx, b.cz, 70) && !rail.lines.some(L => L.pts.some(p => inBlock(b, p.x, p.z)))) {
+      districtFaults++;
+      console.log(`  R33 detail: city ${bx},${by} industrial block at (${b.cx.toFixed(0)},${b.cz.toFixed(0)}) is nowhere near the railway`);
+    }
+    const { buildable, built } = blockFillShare(plan, b, occ, rail, river33, coast33);
+    if (buildable < 600) continue; // a scrap of a block, a lot or two
+    const f = built / buildable;
+    worstFill = Math.min(worstFill, f);
+    if (f < 0.55) {
+      thinBlocks++;
+      console.log(`  R33 detail: city ${bx},${by} ${b.district} block at (${b.cx.toFixed(0)},${b.cz.toFixed(0)}) only ${(f * 100).toFixed(0)}% built`);
+    }
+  }
+  // R6: no traffic-light pole stands in a lot
+  for (const n of plan.nodes) {
+    if (!n.signalized) continue;
+    for (const p of polePoints(plan.edges, n)) if (occ.claims(p.x, p.z, 0.4, LOT)) polesInLots++;
+  }
+  const mean = (a: number[]): number => a.reduce((p, q) => p + q, 0) / (a.length || 1);
+  const rings = ['downtown', 'urban', 'residential'].filter(k => ringD[k].length).map(k => mean(ringD[k]));
+  if (rings.some((v, i) => i > 0 && v <= rings[i - 1])) {
+    districtFaults++;
+    console.log(`  R33 detail: city ${bx},${by} districts don't ring out from the centre (${rings.map(v => v.toFixed(0)).join(' / ')} m)`);
+  }
 }
 
 // R31b: the timetable never puts two trains on a diamond at once (the
@@ -537,6 +580,9 @@ if (selfOverlap > 0) fail('R28', `${selfOverlap} rail samples overlap a differen
 if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
+if (thinBlocks > 0) fail('R33', `${thinBlocks} built blocks under 55% built over (worst ${(worstFill * 100).toFixed(0)}%)`);
+if (polesInLots > 0) fail('R6', `${polesInLots} traffic-light poles stand inside a lot`);
+if (districtFaults > 0) fail('R33', `${districtFaults} district placement faults (rings from the centre, industry by the rail)`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
 if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);
 if (narrowArms > 0) fail('R34', `${narrowArms} junction arm pairs closer than 55 degrees`);
@@ -605,10 +651,54 @@ console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} cr
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
   `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg, ` +
-  `road overlaps ${roadOverlaps}, road gaps ${roadGaps}, portal faults ${portalFaults}, diamond faults ${diamondFaults}`);
+  `road overlaps ${roadOverlaps}, road gaps ${roadGaps}, portal faults ${portalFaults}, diamond faults ${diamondFaults}, ` +
+  `thinnest block ${(worstFill * 100).toFixed(0)}% built`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {
   console.log(`FAIL — ${failures} rule violation(s); see AGENTS.md`);
   process.exitCode = 1;
+}
+
+/** R33: LOT share of a block's buildable ground (where a 7 m lot could legally stand) */
+function blockFillShare(p: CityPlan, b: CityBlock, occ: CityGrid, rail: RailNet, river: RiverRoute, coast: Coast): { buildable: number; built: number } {
+  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (const q of b.poly) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
+  x0 = Math.floor(x0); z0 = Math.floor(z0);
+  const W = Math.ceil(x1) - x0 + 1, H = Math.ceil(z1) - z0 + 1;
+  const ok = new Uint8Array(W * H);
+  const near = p.edges.filter(e => segDist({ x: b.cx, z: b.cz }, p.nodes[e.a], p.nodes[e.b]) < Math.hypot(W, H));
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const x = x0 + i + 0.5, z = z0 + j + 0.5;
+    if (!inBlock(b, x, z)) continue;
+    if (occ.bits(x, z) & (ROAD | RAIL | RIVER | PLAZA | SEA)) continue;
+    if (near.some(e => segDist({ x, z }, p.nodes[e.a], p.nodes[e.b]) < 8.5)) continue;
+    if (p.nodes.some(n => Math.hypot(n.x - x, n.z - z) < (n.plaza ? 22.5 : Math.max(7, ...n.reach) + 3))) continue;
+    if (rail.near(x, z, 16) || river.near(x, z, 14.25) && river.near(x, z, river.halfAt(x, z) + 6.5) || !coast.inLand(x, z, 4)) continue;
+    ok[j * W + i] = 1;
+  }
+  // opening with a 7 x 7 square: only ground a small lot could stand on
+  const R = 3;
+  const pass = (src: Uint8Array, erode: boolean): Uint8Array => {
+    const tmp = new Uint8Array(W * H), out = new Uint8Array(W * H);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      let v = erode ? 1 : 0;
+      for (let d = -R; d <= R; d++) { const ii = i + d; const s = ii >= 0 && ii < W ? src[j * W + ii] : 0; v = erode ? v & s : v | s; }
+      tmp[j * W + i] = v;
+    }
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      let v = erode ? 1 : 0;
+      for (let d = -R; d <= R; d++) { const jj = j + d; const s = jj >= 0 && jj < H ? tmp[jj * W + i] : 0; v = erode ? v & s : v | s; }
+      out[j * W + i] = v;
+    }
+    return out;
+  };
+  const open = pass(pass(ok, true), false);
+  let buildable = 0, built = 0;
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    if (!open[j * W + i] || !ok[j * W + i]) continue;
+    buildable++;
+    if (occ.bits(x0 + i + 0.5, z0 + j + 0.5) & LOT) built++;
+  }
+  return { buildable, built };
 }

@@ -13,6 +13,8 @@ export interface WorldPath {
   sample(dist: number): PathPt;
   /** nearest dense sample to a world point (with its index) */
   nearest(x: number, z: number): { d2: number; p: PathPt; i: number };
+  /** is the path within r of (x, z)? (exactly nearest().d2 < r * r, faster) */
+  within(x: number, z: number, r: number): boolean;
 }
 
 export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean): WorldPath {
@@ -46,14 +48,123 @@ export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean):
       while (dh < -Math.PI) dh += Math.PI * 2;
       return { x: a.x + (b.x - a.x) * fr, z: a.z + (b.z - a.z) * fr, h: a.h + dh * fr };
     },
-    nearest(x: number, z: number): { d2: number; p: PathPt; i: number } {
+    ...vertexNearest(pts),
+  };
+}
+
+// ---- exact nearest-neighbour search on a uniform grid: cells hold the
+// items (vertices or segments) whose bounds touch them; rings are searched
+// outward until nothing unexplored could be closer than the best so far ----
+interface Grid {
+  cell: number; x0: number; z0: number; nx: number; nz: number; cells: number[][];
+  /** per cell: rings (Chebyshev, in cells) to the nearest non-empty cell */
+  ring: Int32Array;
+  /** visit stamps (no Set per query) */
+  stamp: Int32Array; tick: number;
+}
+const GRID_CELL = 16;
+/** queries a path answers by plain scan before it builds its grid */
+const LAZY_GRID = 40;
+function buildGrid(n: number, bounds: (i: number) => [number, number, number, number]): Grid {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  const bs: Array<[number, number, number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const b = bounds(i);
+    bs.push(b);
+    x0 = Math.min(x0, b[0]); z0 = Math.min(z0, b[1]); x1 = Math.max(x1, b[2]); z1 = Math.max(z1, b[3]);
+  }
+  const nx = Math.max(1, Math.ceil((x1 - x0) / GRID_CELL) + 1), nz = Math.max(1, Math.ceil((z1 - z0) / GRID_CELL) + 1);
+  const cells: number[][] = Array.from({ length: nx * nz }, () => []);
+  bs.forEach(([a, b, c, d], i) => {
+    const gx0 = Math.floor((a - x0) / GRID_CELL), gx1 = Math.floor((c - x0) / GRID_CELL);
+    const gz0 = Math.floor((b - z0) / GRID_CELL), gz1 = Math.floor((d - z0) / GRID_CELL);
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) cells[gz * nx + gx].push(i);
+  });
+  // multi-source BFS over the 8-neighbourhood: exact Chebyshev ring counts
+  const ring = new Int32Array(nx * nz).fill(-1);
+  let q: number[] = [];
+  cells.forEach((c, k) => { if (c.length) { ring[k] = 0; q.push(k); } });
+  for (let d = 1; q.length; d++) {
+    const next: number[] = [];
+    for (const k of q) {
+      const gx = k % nx, gz = (k / nx) | 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const ax = gx + dx, az = gz + dz;
+        if (ax < 0 || az < 0 || ax >= nx || az >= nz) continue;
+        const m = az * nx + ax;
+        if (ring[m] >= 0) continue;
+        ring[m] = d;
+        next.push(m);
+      }
+    }
+    q = next;
+  }
+  return { cell: GRID_CELL, x0, z0, nx, nz, cells, ring, stamp: new Int32Array(n), tick: 0 };
+}
+function searchGrid(g: Grid, x: number, z: number, visit: (i: number) => void, best: () => number, n: number, maxD = Infinity): void {
+  if (!n) return;
+  const fx = (x - g.x0) / g.cell, fz = (z - g.z0) / g.cell;
+  const cx = Math.floor(fx), cz = Math.floor(fz);
+  // rings before the first non-empty one hold nothing (triangle inequality
+  // from the nearest in-grid cell when the query lies outside the grid)
+  const kx = Math.max(0, Math.min(g.nx - 1, cx)), kz = Math.max(0, Math.min(g.nz - 1, cz));
+  const r0 = Math.max(0, g.ring[kz * g.nx + kx] - Math.max(Math.abs(cx - kx), Math.abs(cz - kz)));
+  const maxR = Math.max(Math.abs(cx), Math.abs(cz), Math.abs(cx - g.nx), Math.abs(cz - g.nz)) + 1;
+  const tick = ++g.tick;
+  const cellAt = (gx: number, gz: number): void => {
+    if (gx < 0 || gz < 0 || gx >= g.nx || gz >= g.nz) return;
+    for (const i of g.cells[gz * g.nx + gx]) {
+      if (g.stamp[i] === tick) continue;
+      g.stamp[i] = tick;
+      visit(i);
+    }
+  };
+  for (let r = r0; r <= maxR; r++) {
+    if (r === 0) cellAt(cx, cz);
+    else {
+      for (let gx = cx - r; gx <= cx + r; gx++) { cellAt(gx, cz - r); cellAt(gx, cz + r); }
+      for (let gz = cz - r + 1; gz <= cz + r - 1; gz++) { cellAt(cx - r, gz); cellAt(cx + r, gz); }
+    }
+    // everything unexplored lies outside the square of rings 0..r
+    const edge = Math.min(fx - (cx - r), cx + r + 1 - fx, fz - (cz - r), cz + r + 1 - fz) * g.cell;
+    const b = best();
+    if (b < Infinity && b <= edge * edge) return;
+    if (edge >= maxD) return; // nothing unexplored lies within maxD
+  }
+}
+function vertexNearest(pts: PathPt[]): Pick<WorldPath, 'nearest' | 'within'> {
+  let g: Grid | null = null;
+  const grid = (): Grid => (g ??= buildGrid(pts.length, i => [pts[i].x, pts[i].z, pts[i].x, pts[i].z]));
+  // a path asked only a few times isn't worth a grid: scan those
+  let asked = 0;
+  const all = (visit: (i: number) => void): void => { for (let i = 0; i < pts.length; i++) visit(i); };
+  return {
+    nearest(x, z) {
       let bi = 0, bd = Infinity;
-      for (let i = 0; i < pts.length; i++) {
+      const visit = (i: number): void => {
         const dx = pts[i].x - x, dz = pts[i].z - z;
         const d2 = dx * dx + dz * dz;
-        if (d2 < bd) { bd = d2; bi = i; }
-      }
+        if (d2 < bd || (d2 === bd && i < bi)) { bd = d2; bi = i; }
+      };
+      if (++asked < LAZY_GRID) all(visit);
+      else searchGrid(grid(), x, z, visit, () => bd, pts.length);
       return { d2: bd, p: pts[bi], i: bi };
+    },
+    within(x, z, r) {
+      let hit = false;
+      const r2 = r * r;
+      if (++asked < LAZY_GRID) {
+        for (let i = 0; i < pts.length && !hit; i++) {
+          const dx = pts[i].x - x, dz = pts[i].z - z;
+          if (dx * dx + dz * dz < r2) hit = true;
+        }
+        return hit;
+      }
+      searchGrid(grid(), x, z, i => {
+        const dx = pts[i].x - x, dz = pts[i].z - z;
+        if (dx * dx + dz * dz < r2) hit = true;
+      }, () => (hit ? 0 : Infinity), pts.length, r);
+      return hit;
     },
   };
 }
@@ -88,6 +199,11 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
     cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
   }
   const total = cum[S];
+  let segGrid: Grid | null = null, asked = 0;
+  const segGridOf = (): Grid => (segGrid ??= buildGrid(S, i => {
+    const a = pts[i], b = pts[(i + 1) % N];
+    return [Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z)];
+  }));
   return {
     total,
     pts,
@@ -110,7 +226,7 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
       // samples, and the polyline between two far-apart vertices is real
       // rail that vertex-based guards would miss entirely
       let bi = 0, bd = Infinity, bt = 0;
-      for (let i = 0; i < S; i++) {
+      const seg = (i: number): void => {
         const a = pts[i], b = pts[(i + 1) % N];
         const abx = b.x - a.x, abz = b.z - a.z;
         const len2 = abx * abx + abz * abz;
@@ -118,8 +234,11 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const dx = a.x + abx * t - x, dz = a.z + abz * t - z;
         const d2 = dx * dx + dz * dz;
-        if (d2 < bd) { bd = d2; bi = i; bt = t; }
-      }
+        // (ties go to the lowest index, as a plain scan would)
+        if (d2 < bd || (d2 === bd && i < bi)) { bd = d2; bi = i; bt = t; }
+      };
+      if (++asked < LAZY_GRID) for (let i = 0; i < S; i++) seg(i);
+      else searchGrid(segGridOf(), x, z, seg, () => bd, S);
       const a = pts[bi], b = pts[(bi + 1) % N];
       let dh = b.h - a.h;
       while (dh > Math.PI) dh -= Math.PI * 2;
@@ -129,6 +248,22 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
         p: { x: a.x + (b.x - a.x) * bt, z: a.z + (b.z - a.z) * bt, h: a.h + dh * bt },
         i: bi,
       };
+    },
+    within(x: number, z: number, r: number): boolean {
+      let hit = false;
+      const r2 = r * r;
+      const seg = (i: number): void => {
+        const a = pts[i], b = pts[(i + 1) % N];
+        const abx = b.x - a.x, abz = b.z - a.z;
+        const len2 = abx * abx + abz * abz;
+        let t = len2 > 1e-9 ? ((x - a.x) * abx + (z - a.z) * abz) / len2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = a.x + abx * t - x, dz = a.z + abz * t - z;
+        if (dx * dx + dz * dz < r2) hit = true;
+      };
+      if (++asked < LAZY_GRID) { for (let i = 0; i < S && !hit; i++) seg(i); return hit; }
+      searchGrid(segGridOf(), x, z, seg, () => (hit ? 0 : Infinity), S, r);
+      return hit;
     },
   };
 }

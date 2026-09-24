@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { Baked } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
-import { cityPlanFor, ROAD_HALF, ROUNDABOUT_REACH, type District, type Lot, type PNode, type PEdge } from './cityPlan.js';
+import { cityPlanFor, builtD, ROAD_HALF, ROUNDABOUT_REACH, type District, type Lot, type PNode, type PEdge } from './cityPlan.js';
 import { segDist } from './streetGen.js';
 import { railNetFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
@@ -97,6 +97,20 @@ function kenneyTPL() {
     indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
       .map(bakedModel).filter((t): t is BakedTemplate => !!t),
     chimney: bakedModel('ind-chimney-l') ?? bakedModel('ind-chimney-m'),
+    // the block filler's lots: suburban houses, garden / courtyard / works-yard props
+    houses: [...'abcdefghijklmnopqrstu'].map(b => bakedModel('house-' + b)).filter((t): t is BakedTemplate => !!t),
+    gardenTrees: ['sub-tree-large', 'sub-tree-small', 'for-tree', 'for-tree-high', 'sv-tree-autumn']
+      .map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    /** garden bits with their scale (kit units -> metres) */
+    gardenBits: ([['for-plant', 4], ['sub-planter', 4.5], ['for-rocks-low', 2], ['for-stones', 2], ['sv-bucket', 3],
+      ['for-tent', 2.2], ['sv-campfire-pit', 5]] as const)
+      .map(([n, sc]) => ({ tpl: bakedModel(n), sc, solid: n === 'for-tent' || n === 'for-rocks-low' }))
+      .filter((b): b is { tpl: BakedTemplate; sc: 4 | 4.5 | 2 | 3 | 2.2 | 5; solid: boolean } => !!b.tpl),
+    planter: bakedModel('sub-planter'),
+    flag: bakedModel('for-flag'),
+    yardBits: ['sv-barrel', 'sv-barrel-open', 'sv-box', 'sv-box-large', 'sv-box-large-open', 'sv-chest', 'sv-workbench',
+      'sv-workbench-anvil', 'sv-resource-planks', 'sv-resource-wood', 'sv-resource-stone-large', 'sv-signpost']
+      .map(bakedModel).filter((t): t is BakedTemplate => !!t),
     waterTower: bakedModel('ind-tower'),
     windmill: bakedModel('ind-mill'),
   };
@@ -121,6 +135,7 @@ export function slabColor(d: District): number {
     case 'green': return 0xa9c88b;
     case 'park': return 0xa4cf85;
     case 'downtown': return 0xdcd6c6;
+    case 'residential': return 0xcfe3b4; // lawns
     case 'industrial': return 0xcfccc2; // worn concrete aprons
     default: return 0xe9e1cf; // urban
   }
@@ -129,7 +144,7 @@ export function slabColor(d: District): number {
 /** ground colour of a chunk (ocean blue outside the island) — for the minimap */
 export function chunkGroundColor(bx: number, by: number, cx: number, cz: number): number {
   if (cx < 0 || cz < 0 || cx >= WORLD_CHUNKS || cz >= WORLD_CHUNKS) return 0x6fb7d9;
-  return slabColor(cityPlanFor(bx, by).district(cx, cz));
+  return slabColor(cityPlanFor(bx, by).nature(cx, cz) ?? 'green');
 }
 
 export function generateCityChunk(bx: number, by: number, cx: number, cz: number): CityChunkResult {
@@ -143,7 +158,8 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const rail = railNetFor(bx, by);
   const river = riverFor(bx, by);
   const occ = occupancyFor(bx, by);
-  const district = plan.district(cx, cz);
+  /** ground outside every block here: a nature corner, or seafront green */
+  const ground: District = plan.nature(cx, cz) ?? 'green';
 
   // base slab — district ground cut to the island's shore, with a sand beach
   // band along it (R29). A chunk well inside the shore is one plain box.
@@ -155,10 +171,17 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
   if (inland) {
-    B.box(CH, 0.1, CH, slabColor(district), X0 + CH / 2, 0.05, Z0 + CH / 2);
+    B.box(CH, 0.1, CH, slabColor(ground), X0 + CH / 2, 0.05, Z0 + CH / 2);
   } else {
     slab(clipToRect(coast.pts, X0, Z0, X0 + CH, Z0 + CH), BEACH, 0.09);
-    slab(clipToRect(insetShore(coast, 7), X0, Z0, X0 + CH, Z0 + CH), slabColor(district), 0.1);
+    slab(clipToRect(insetShore(coast, 7), X0, Z0, X0 + CH, Z0 + CH), slabColor(ground), 0.1);
+  }
+  // every block's ground in its district's colour (the blocks meet under the
+  // streets, which lie on top)
+  for (const bl of plan.blocks) {
+    if (bl.district === ground) continue;
+    const piece = clipToRect(bl.poly, X0, Z0, X0 + CH, Z0 + CH);
+    if (piece.length >= 3) slab(piece, slabColor(bl.district), 0.115);
   }
   /** a flat slab of ground over polygon `poly`, top at `top`, reaching down
    * below the waterline so its edge never shows a gap */
@@ -207,8 +230,9 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       // the occupancy grid knows about the riverside lots the plan only
       // checks at their centre — a tree past the bank line lands in a yard
       if (occ.claims(tx, tz, 1.2, BLOCKED_FOR_PROPS)) continue;
-      const bankTpl = district === 'desert' ? pick(r, [...TPL.cacti, ...TPL.rocks])
-        : district === 'forest' ? pick(r, TPL.pines) : pick(r, TPL.trees);
+      const bankD = plan.districtAt(tx, tz);
+      const bankTpl = bankD === 'desert' ? pick(r, [...TPL.cacti, ...TPL.rocks])
+        : bankD === 'forest' ? pick(r, TPL.pines) : pick(r, TPL.trees);
       if (bankTpl) {
         bakeModel(B, bankTpl, tx, 0.08, tz, r() * Math.PI * 2, 4 + r() * 3);
         boxes.push({ x1: tx - 0.6, x2: tx + 0.6, z1: tz - 0.6, z2: tz + 0.6, small: 1 });
@@ -369,7 +393,14 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   // out to the lot line (7 -> 8.1 m), in the kit's own pavement colour, along
   // every street span between pads (each street's bands belong to the chunk
   // holding its midpoint), broken at river bridges and at the shore
-  const builtD = (d: string): boolean => d === 'urban' || d === 'downtown' || d === 'industrial';
+  /** a street is built up when either side of its middle is */
+  const edgeBuilt = (e: PEdge): boolean => {
+    const a = plan.nodes[e.a];
+    const mx = a.x + e.ux * e.len / 2, mz = a.z + e.uz * e.len / 2;
+    return builtD(plan.districtAt(mx - e.uz * 14, mz + e.ux * 14)) || builtD(plan.districtAt(mx + e.uz * 14, mz - e.ux * 14));
+  };
+  const nodeBuilt = (n: PNode): boolean =>
+    [[-12, -12], [12, -12], [-12, 12], [12, 12]].some(([dx, dz]) => builtD(plan.districtAt(n.x + dx, n.z + dz)));
   const walkReach = (n: PNode, e: PEdge): number => {
     if (n.mouth) return 0;
     if (n.plaza) return ROUNDABOUT_REACH - 5.8;
@@ -382,7 +413,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   for (const e of plan.edges) {
     const a = plan.nodes[e.a], b = plan.nodes[e.b];
     const mx = a.x + e.ux * e.len / 2, mz = a.z + e.uz * e.len / 2;
-    if (!inChunk(mx, mz) || !builtD(plan.district(cx, cz))) continue;
+    if (!inChunk(mx, mz) || !edgeBuilt(e)) continue;
     const s0 = walkReach(a, e), s1 = e.len - walkReach(b, e);
     const cuts: Array<[number, number]> = [];
     for (const br of plan.riverBridges) {
@@ -421,7 +452,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
   // sidewalk corners around this chunk's junction pads
   for (const n of plan.nodes) {
-    if (!inChunk(n.x, n.z) || n.mouth || n.plaza || !builtD(plan.district(cx, cz))) continue;
+    if (!inChunk(n.x, n.z) || n.mouth || n.plaza || !nodeBuilt(n)) continue;
     const arms = n.edges.map(id => armDir(plan, n, plan.edges[id]));
     const k = arms.length;
     if (n.square) {
@@ -476,7 +507,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     for (const e of plan.edges) {
       const a = plan.nodes[e.a], b = plan.nodes[e.b];
       const mx = a.x + e.ux * e.len / 2, mz = a.z + e.uz * e.len / 2;
-      if (!inChunk(mx, mz) || !builtD(plan.district(cx, cz))) continue;
+      if (!inChunk(mx, mz) || !edgeBuilt(e)) continue;
       const rx = -e.uz, rz = e.ux; // right of a -> b
       const s0 = nodeReach(plan, a, e) + 4, s1 = e.len - nodeReach(plan, b, e) - 4;
       for (let t = s0 + 7; t < s1; t += 18) {
@@ -502,7 +533,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
 
   function bakeLot(lot: Lot): void {
     if (lot.kind === 'bldg') {
-      const industrial = district === 'industrial';
+      const industrial = plan.districtAt(lot.x, lot.z) === 'industrial';
       const tpls = industrial ? TPL.industrial : TPL.buildings;
       if (tpls.length) {
         // occasionally an industrial lot is just stacked containers / a tank
@@ -521,17 +552,116 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       }
     } else if (lot.kind === 'trees') {
       bakeTrees(lot.x, lot.z, 2 + ((lot.v * 2) | 0), lot.w / 2, lot);
+    } else if (lot.kind === 'house') {
+      bakeHouse(lot);
+    } else if (lot.kind === 'garden') {
+      bakeGarden(lot);
+    } else if (lot.kind === 'court') {
+      bakeCourt(lot);
+    } else if (lot.kind === 'yard') {
+      bakeYard(lot);
     } else {
-      // parking lot: slab + a car or two, nosed in from the street
+      // parking lot: slab + rows of bays, nosed in from the street, about
+      // two in three taken
       B.box(lot.w, 0.06, lot.d, 0x828a96, lot.x, 0.14, lot.z, 0, lot.ry, 0);
-      const n = 1 + ((lot.v * 2) | 0);
-      const ax = Math.cos(lot.ry), az = -Math.sin(lot.ry); // along the street
-      for (let i = 0; i < n; i++) {
-        const off = (i - (n - 1) / 2) * (lot.w / 2.2);
-        const x = lot.x + ax * off, z = lot.z + az * off;
-        bakeParkedCar(x, z, lot.ry);
-        boxes.push(obbBox(x, z, 1.0, 2.3, lot.ry));
+      const cols = Math.max(1, Math.floor(lot.w / 2.9)), rows = Math.max(1, Math.floor(lot.d / 5.6));
+      for (let q = 0; q < rows; q++) for (let i = 0; i < cols; i++) {
+        if (r() > 0.66 && cols * rows > 1) continue;
+        const p = lotPt(lot, (i - (cols - 1) / 2) * (lot.w / cols), (q - (rows - 1) / 2) * (lot.d / rows));
+        bakeParkedCar(p.x, p.z, lot.ry);
+        boxes.push(obbBox(p.x, p.z, 1.0, 2.3, lot.ry));
       }
+    }
+  }
+
+  /** a point in lot-local metres (x along its width, z along its depth) */
+  function lotPt(lot: Lot, lx: number, lz: number): { x: number; z: number } {
+    const c = Math.cos(lot.ry), sn = Math.sin(lot.ry);
+    return { x: lot.x + lx * c + lz * sn, z: lot.z - lx * sn + lz * c };
+  }
+  /** a kit prop inside a lot: scaled to `h` metres tall, with a small box */
+  function prop(lot: Lot, tpl: BakedTemplate | null | undefined, lx: number, lz: number, h: number, yaw = 0, solid = true, scale = 0): void {
+    if (!tpl) return;
+    const p = lotPt(lot, lx, lz);
+    // scaled to a height, or (flat kit pieces: planks, logs) by a fixed factor
+    const s = scale || h / Math.max(0.01, tpl.size.y);
+    bakeModel(B, tpl, p.x, 0.12, p.z, lot.ry + yaw, s);
+    if (solid) {
+      const hx = Math.max(0.3, (tpl.size.x * s) / 2), hz = Math.max(0.3, (tpl.size.z * s) / 2);
+      boxes.push({ ...obbBox(p.x, p.z, hx, hz, lot.ry + yaw), small: 1 });
+    }
+  }
+
+  /** a suburban house (City Kit Suburban), front to the lot's street side */
+  function bakeHouse(lot: Lot): void {
+    if (!TPL.houses.length) { bakeGarden(lot); return; }
+    const tpl = TPL.houses[((lot.v * TPL.houses.length) | 0) % TPL.houses.length];
+    // the house on the front of the lot, a strip of lawn behind
+    const s = Math.min((lot.w * 0.86) / tpl.size.x, (lot.d * 0.8) / tpl.size.z);
+    const hd = (tpl.size.z * s) / 2;
+    const p = lotPt(lot, 0, lot.d / 2 - hd - 0.5);
+    B.box(lot.w - 0.3, 0.04, lot.d - 0.3, 0xa8d487, lot.x, 0.13, lot.z, 0, lot.ry, 0);
+    bakeModel(B, tpl, p.x, 0.12, p.z, lot.ry, s);
+    boxes.push(obbBox(p.x, p.z, (tpl.size.x * s) / 2, hd, lot.ry));
+    // and a tree in the back garden when there is room for one
+    if (lot.d - hd * 2 > 3.5 && TPL.gardenTrees.length && lot.v > 0.35) {
+      prop(lot, TPL.gardenTrees[((lot.v * 7) | 0) % TPL.gardenTrees.length], (lot.v - 0.5) * lot.w * 0.6, -lot.d / 2 + 1.8, 4.5 + lot.v * 1.5);
+    }
+  }
+
+  /** a fenced lawn with trees and garden bits (Mini Forest, Survival Kit) */
+  function bakeGarden(lot: Lot): void {
+    B.box(lot.w - 0.3, 0.04, lot.d - 0.3, 0x9fd07a, lot.x, 0.13, lot.z, 0, lot.ry, 0);
+    // a low white picket fence round it
+    const hw = lot.w / 2 - 0.2, hd = lot.d / 2 - 0.2;
+    for (const [lx, lz, len, along] of [[0, hd, lot.w - 0.4, true], [0, -hd, lot.w - 0.4, true], [hw, 0, lot.d - 0.4, false], [-hw, 0, lot.d - 0.4, false]] as const) {
+      const p = lotPt(lot, lx, lz);
+      B.box(along ? len : 0.08, 0.55, along ? 0.08 : len, 0xf4f1ea, p.x, 0.4, p.z, 0, lot.ry, 0);
+    }
+    const nT = lot.w * lot.d > 90 ? 2 : 1;
+    for (let i = 0; i < nT && TPL.gardenTrees.length; i++) {
+      const lx = (r() - 0.5) * (lot.w - 3.5), lz = (r() - 0.5) * (lot.d - 3.5);
+      prop(lot, pick(r, TPL.gardenTrees), lx, lz, 4 + r() * 2.2, r() * Math.PI * 2);
+    }
+    if (TPL.gardenBits.length && lot.w > 6) {
+      const bit = pick(r, TPL.gardenBits);
+      prop(lot, bit.tpl, (r() - 0.5) * (lot.w - 3), (r() - 0.5) * (lot.d - 3), 0, r() * Math.PI * 2, bit.solid, bit.sc);
+    }
+  }
+
+  /** a paved courtyard: planters with small trees, benches, a flag */
+  function bakeCourt(lot: Lot): void {
+    B.box(lot.w - 0.2, 0.05, lot.d - 0.2, 0xd9d1c1, lot.x, 0.14, lot.z, 0, lot.ry, 0);
+    const n = lot.w > 10 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      const lx = n === 1 ? 0 : (i - 0.5) * lot.w * 0.45;
+      prop(lot, TPL.planter, lx, 0, 0.9);
+      prop(lot, bakedModel('sub-tree-small') ?? TPL.gardenTrees[0], lx, 0, 3.6, r() * 6, false);
+    }
+    for (const sd of [-1, 1]) {
+      const p = lotPt(lot, sd * lot.w * 0.3, sd * (lot.d / 2 - 1.3));
+      B.box(1.6, 0.08, 0.45, 0xa9805a, p.x, 0.55, p.z, 0, lot.ry, 0);
+    }
+    if (TPL.flag && lot.v > 0.6) prop(lot, TPL.flag, lot.w / 2 - 1, -lot.d / 2 + 1, 3.2);
+  }
+
+  /** a works yard: crates, barrels, timber and stone (Survival Kit), and a
+   * shipping container on the big ones */
+  function bakeYard(lot: Lot): void {
+    B.box(lot.w - 0.2, 0.05, lot.d - 0.2, 0xbdb29c, lot.x, 0.14, lot.z, 0, lot.ry, 0);
+    if (lot.w >= 12 && TPL.indExtras.length && lot.v > 0.4) {
+      const tpl = pick(r, TPL.indExtras);
+      const s = Math.min((lot.w * 0.5) / tpl.size.x, (lot.d * 0.5) / tpl.size.z);
+      const p = lotPt(lot, -lot.w * 0.2, 0);
+      bakeModel(B, tpl, p.x, 0.12, p.z, lot.ry, s);
+      boxes.push(obbBox(p.x, p.z, (tpl.size.x * s) / 2, (tpl.size.z * s) / 2, lot.ry));
+    }
+    const n = Math.min(18, 3 + ((lot.w * lot.d) / 16 | 0));
+    for (let i = 0; i < n && TPL.yardBits.length; i++) {
+      const lx = (r() - 0.5) * (lot.w - 2.5) * (lot.w >= 12 && lot.v > 0.4 ? 0.4 : 1) + (lot.w >= 12 && lot.v > 0.4 ? lot.w * 0.25 : 0);
+      const lz = (r() - 0.5) * (lot.d - 2.5);
+      // the Survival Kit at 4x: a crate ~1 m, a plank stack ~2.5 m
+      prop(lot, pick(r, TPL.yardBits), lx, lz, 0, ((r() * 4) | 0) * (Math.PI / 2), true, 3.6 + r() * 0.8);
     }
   }
 
@@ -576,76 +706,47 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  // ---- district dressing ----
-  if (district === 'park') {
-    // a pond with a tree ring and a couple of benches
-    const px = X0 + CH / 2 + j(r, 6), pz = Z0 + CH / 2 + j(r, 6);
+  // ---- district dressing, by the district at each spot ----
+  // parks: a pond at the park block's middle (the chunk holding it lays it)
+  for (const bl of plan.blocks) {
+    if (bl.district !== 'park' || !inChunk(bl.cx, bl.cz)) continue;
+    const px = bl.cx, pz = bl.cz;
     const pr = 8 + r() * 3;
-    B.cyl(pr, pr, 0.08, 18, 0x7fc4de, px, 0.13, pz);
-    B.cyl(pr + 1.4, pr + 1.4, 0.06, 18, 0xd9cdb4, px, 0.12, pz); // sandy rim
+    if (occ.claims(px, pz, pr + 2, BLOCKED_FOR_PROPS)) continue;
+    B.cyl(pr, pr, 0.08, 18, 0x7fc4de, px, 0.16, pz);
+    B.cyl(pr + 1.4, pr + 1.4, 0.06, 18, 0xd9cdb4, px, 0.15, pz); // sandy rim
     for (let k = 0; k < 7; k++) {
       const ang = (k / 7) * Math.PI * 2 + r();
-      bakeTrees(px + Math.cos(ang) * 15, pz + Math.sin(ang) * 15, 1, 2.5);
+      bakeTrees(px + Math.cos(ang) * (pr + 6), pz + Math.sin(ang) * (pr + 6), 1, 2.5);
     }
-    for (const s of [-1, 1]) {
-      B.box(1.6, 0.08, 0.45, 0xa9805a, px + s * 11.5, 0.55, pz + j(r, 3));
-    }
-  } else if (district === 'forest' || district === 'desert' || district === 'meadow') {
-    scatterNature(district);
-  } else if (district === 'green') {
-    // streetless block: a little wooded green
-    for (let k = 0; k < 8; k++) {
-      const x = X0 + 10 + r() * (CH - 20), z = Z0 + 10 + r() * (CH - 20);
-      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS)) continue;
-      bakeModel(B, pick(r, [...TPL.trees, ...TPL.pines]), x, 0.08, z, r() * Math.PI * 2, 4 + r() * 3);
-      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
-    }
-  } else if (district === 'industrial') {
-    // works yard dressing: a chimney or water tower plus scattered junk
-    // on ground the occupancy grid shows is free of streets, lots and track
-    if (TPL.chimney || TPL.waterTower) {
-      for (let t = 0; t < 6; t++) {
-        const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
-        if (occ.claims(x, z, 1.6, BLOCKED_FOR_PROPS)) continue;
-        const big = r() < 0.5 && TPL.chimney ? TPL.chimney : TPL.waterTower;
-        if (!big) continue;
-        const s = big === TPL.chimney ? 3.2 + r() * 1.6 : 4.5 + r();
-        bakeModel(B, big, x, 0.1, z, r() * Math.PI * 2, s);
-        boxes.push({ x1: x - 1.2, x2: x + 1.2, z1: z - 1.2, z2: z + 1.2, small: 1 });
-        break;
-      }
-    }
-    if (TPL.windmill && r() < 0.3) {
-      const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
-      if (!occ.claims(x, z, 1.4, BLOCKED_FOR_PROPS)) {
-        bakeModel(B, TPL.windmill, x, 0.1, z, r() * Math.PI * 2, 4 + r() * 2);
-        boxes.push({ x1: x - 1, x2: x + 1, z1: z - 1, z2: z + 1, small: 1 });
-      }
-    }
-    for (let k = 0; k < 3; k++) {
-      const x = X0 + 9 + r() * (CH - 18), z = Z0 + 9 + r() * (CH - 18);
-      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS) || !TPL.indExtras.length) continue;
-      const tpl = pick(r, TPL.indExtras);
-      const s = 2.6 + r() * 1.4;
-      bakeModel(B, tpl, x, 0.1, z, r() * Math.PI * 2, s);
-      boxes.push({ x1: x - 1.4, x2: x + 1.4, z1: z - 1.4, z2: z + 1.4, small: 1 });
-    }
+    for (const sd of [-1, 1]) B.box(1.6, 0.08, 0.45, 0xa9805a, px + sd * (pr + 3.5), 0.55, pz + j(r, 3));
   }
-
-  function scatterNature(kind: 'forest' | 'desert' | 'meadow'): void {
-    const tries = kind === 'forest' ? 30 : kind === 'desert' ? 14 : 18;
-    for (let i = 0; i < tries; i++) {
-      const x = X0 + 7 + r() * (CH - 14);
-      const z = Z0 + 7 + r() * (CH - 14);
-      if (occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS)) continue;
-      let tpl: BakedTemplate | null = null;
-      const s = 3.5 + r() * 2.5;
-      if (kind === 'forest') tpl = pick(r, [...TPL.pines, ...TPL.trees]);
-      else if (kind === 'desert') tpl = pick(r, [...TPL.cacti, ...TPL.rocks]);
-      else tpl = pick(r, TPL.trees);
-      if (!tpl) continue;
-      bakeModel(B, tpl, x, 0.08, z, r() * Math.PI * 2, s);
-      boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
+  // trees, rocks and cacti on open ground: thick in the forest, a scatter in
+  // meadows, desert and parks, a few on the green
+  for (let i = 0; i < 30; i++) {
+    const x = X0 + 5 + r() * (CH - 10), z = Z0 + 5 + r() * (CH - 10);
+    const d = plan.districtAt(x, z);
+    const keep = d === 'forest' ? 1 : d === 'meadow' ? 0.6 : d === 'desert' ? 0.45 : d === 'park' ? 0.4 : d === 'green' ? 0.27 : 0;
+    const roll = r(), s = 3.5 + r() * 2.5, rot = r() * Math.PI * 2;
+    if (roll >= keep || occ.claims(x, z, 1.2, BLOCKED_FOR_PROPS)) continue;
+    const tpl = d === 'forest' ? pick(r, [...TPL.pines, ...TPL.trees])
+      : d === 'desert' ? pick(r, [...TPL.cacti, ...TPL.rocks])
+      : d === 'green' ? pick(r, [...TPL.trees, ...TPL.pines]) : pick(r, TPL.trees);
+    if (!tpl) continue;
+    bakeModel(B, tpl, x, 0.08, z, rot, s);
+    boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
+  }
+  // industry: a chimney or water tower on the works' open ground
+  if (TPL.chimney || TPL.waterTower) {
+    for (let t = 0; t < 6; t++) {
+      const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
+      if (plan.districtAt(x, z) !== 'industrial' || occ.claims(x, z, 1.6, BLOCKED_FOR_PROPS)) continue;
+      const big = r() < 0.5 && TPL.chimney ? TPL.chimney : TPL.waterTower;
+      if (!big) continue;
+      const s = big === TPL.chimney ? 3.2 + r() * 1.6 : 4.5 + r();
+      bakeModel(B, big, x, 0.1, z, r() * Math.PI * 2, s);
+      boxes.push({ x1: x - 1.2, x2: x + 1.2, z1: z - 1.2, z2: z + 1.2, small: 1 });
+      break;
     }
   }
 

@@ -20,7 +20,7 @@
 // local X; the T is closed on its north (-z) side; the bend joins west and
 // south; the end cap opens east. A kit piece rotated by ry turns every
 // heading by +ry (heading = atan2(x, z)).
-import { ROUNDABOUT_REACH, ROAD_HALF, type CityPlan, type PNode, type PEdge } from './cityPlan.js';
+import { ROUNDABOUT_REACH, ROAD_HALF, polePoints, type CityPlan, type PNode, type PEdge } from './cityPlan.js';
 
 export { ROUNDABOUT_REACH };
 export const ROAD_TILE = 14;
@@ -165,17 +165,5 @@ export function pieceOutline(p: RoadPiece): V[] {
  * the light phase the approach obeys.
  */
 export function trafficPoles(plan: CityPlan, n: PNode): Array<{ x: number; z: number; ry: number; axis: 'ew' | 'ns' }> {
-  return n.edges.map((id, i) => {
-    const e = plan.edges[id];
-    const u = armDir(plan, n, e);
-    // right of a driver arriving along -u is (-(-u).z, (-u).x) = (u.z, -u.x)
-    const along = Math.max(8.6, (n.reach[i] ?? ROAD_HALF) + 1.6);
-    const axis: 'ew' | 'ns' = Math.abs(Math.sin(e.heading - n.frame)) < Math.SQRT1_2 ? 'ew' : 'ns';
-    return {
-      x: n.x + u.x * along + u.z * 8.6,
-      z: n.z + u.z * along - u.x * 8.6,
-      ry: Math.atan2(u.z, -u.x),
-      axis,
-    };
-  });
+  return polePoints(plan.edges, n);
 }

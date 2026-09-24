@@ -111,7 +111,7 @@ function routeOf(samples: Array<{ x: number; z: number; w: number }>): RiverRout
       const n = path.nearest(x, z);
       return Math.sqrt(n.d2) < pts[n.i].w / 2;
     },
-    near(x, z, r) { return path.nearest(x, z).d2 < r * r; },
+    near(x, z, r) { return path.within(x, z, r); },
   };
   routeCache.set(samples, route);
   return route;

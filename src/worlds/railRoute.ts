@@ -1039,7 +1039,7 @@ function finalize(
     pts: p2.pts,
     sample: d => p2.sample(d),
     distTo(x, z) { return Math.sqrt(p2.nearest(x, z).d2); },
-    near(x, z, r) { return p2.nearest(x, z).d2 < r * r; },
+    near(x, z, r) { return p2.within(x, z, r); },
     headingAt(x, z) { return p2.nearest(x, z).p.h; },
     arcAt(x, z) {
       const n = p2.nearest(x, z);

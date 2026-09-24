@@ -93,7 +93,7 @@ export class Missions {
       for (let cx = Math.floor(x / 64) - 1; cx <= Math.floor(x / 64) + 1; cx++) {
         for (let cz = Math.floor(z / 64) - 1; cz <= Math.floor(z / 64) + 1; cz++) {
           for (const l of plan.lots(cx, cz)) {
-            if (l.kind !== 'trees') continue;
+            if (l.kind !== 'trees' && l.kind !== 'garden') continue;
             const flip = Math.abs(Math.abs(l.ry) - Math.PI / 2) < 0.01;
             const hx = (flip ? l.d : l.w) / 2 + 3, hz = (flip ? l.w : l.d) / 2 + 3; // + canopy
             const dx = Math.max(0, Math.abs(x - l.x) - hx), dz = Math.max(0, Math.abs(z - l.z) - hz);

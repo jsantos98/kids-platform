@@ -28,7 +28,9 @@
 // river bed), streetGraph (everything that navigates), transit (crossings,
 // stations), the occupancy grid and the minimap.
 import { rng, chunkSeed } from '../engine/rng.js';
-import { WORLD_CHUNKS, ISLAND } from './world.js';
+import { WORLD_CHUNKS, ISLAND, CENTER } from './world.js';
+import { blocksOf, inBlock, type Block } from './blocks.js';
+import { fillBlock, LotRaster, LOT_GAP, R_EDGE, R_CENTRE, R_LOT, R_NEAR_C, R_NEAR_E } from './blockFill.js';
 import { citySeed, southExit, eastExit } from './cityGrid.js';
 import { railNetFor, type RailRoute } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
@@ -42,11 +44,19 @@ export const ROUNDABOUT_REACH = 21;
 export const ROAD_HALF = 7;
 
 export type District =
-  | 'downtown' | 'urban' | 'industrial' | 'park' | 'green'
+  | 'downtown' | 'urban' | 'residential' | 'industrial' | 'park' | 'green'
   | 'forest' | 'meadow' | 'desert';
 
+/** a city block (a face of the street web) and the district it belongs to */
+export interface CityBlock extends Block {
+  district: District;
+}
+
 export interface Lot {
-  kind: 'bldg' | 'trees' | 'parking';
+  /** bldg: a kit building (commercial, or works in industry); house: a
+   * suburban house; trees: a tree row; parking; garden: lawn, fence, trees;
+   * court: a paved courtyard; yard: a works yard of crates and stock */
+  kind: 'bldg' | 'house' | 'trees' | 'parking' | 'garden' | 'court' | 'yard';
   x: number;               // centre
   z: number;
   ry: number;              // facing (the front looks at its street)
@@ -140,7 +150,16 @@ export interface CityPlan {
   by: number;
   nodes: PNode[];
   edges: PEdge[];
+  /** the district at a chunk's centre (the minimap, coarse dressing) */
   district(cx: number, cz: number): District;
+  /** the nature corner chunk (cx, cz) lies in, if any */
+  nature(cx: number, cz: number): District | null;
+  /** the district at any point: its block's, or nature / green outside */
+  districtAt(x: number, z: number): District;
+  /** every block of the street web */
+  blocks: CityBlock[];
+  /** the block containing (x, z), if any */
+  blockAt(x: number, z: number): CityBlock | null;
   /** lots whose centre falls inside chunk (cx, cz) */
   lots(cx: number, cz: number): Lot[];
   /** road × railway level crossings */
@@ -155,8 +174,34 @@ export interface CityPlan {
   other(e: PEdge, n: number): PNode;
 }
 
+/**
+ * The kit traffic-light poles around a signalized node (roadLayout's
+ * `trafficPoles`; the plan keeps its lots off them): one per approach arm,
+ * on the approaching driver's near-side right corner just off the pad
+ * (8.6 m out, 1.6 m past the pad's reach up the arm). `ry` turns the kit
+ * light's lamp face (native -x) toward the approaching traffic; `axis` is
+ * the light phase the approach obeys.
+ */
+export function polePoints(edges: PEdge[], n: PNode): Array<{ x: number; z: number; ry: number; axis: 'ew' | 'ns' }> {
+  return n.edges.map((id, i) => {
+    const e = edges[id];
+    const u = e.a === n.id ? { x: e.ux, z: e.uz } : { x: -e.ux, z: -e.uz };
+    // right of a driver arriving along -u is (-(-u).z, (-u).x) = (u.z, -u.x)
+    const along = Math.max(8.6, (n.reach[i] ?? ROAD_HALF) + 1.6);
+    const axis: 'ew' | 'ns' = Math.abs(Math.sin(e.heading - n.frame)) < Math.SQRT1_2 ? 'ew' : 'ns';
+    return {
+      x: n.x + u.x * along + u.z * 8.6,
+      z: n.z + u.z * along - u.x * 8.6,
+      ry: Math.atan2(u.z, -u.x),
+      axis,
+    };
+  });
+}
+
 const CH = 64;
 const W = WORLD_CHUNKS;
+/** the districts that are built up: lots, sidewalks, lamps, lights */
+export const builtD = (d: District): boolean => d === 'urban' || d === 'downtown' || d === 'industrial' || d === 'residential';
 const key = (a: number, b: number) => `${a},${b}`;
 const cache = new Map<string, CityPlan>();
 
@@ -363,65 +408,70 @@ function buildPlan(bx: number, by: number): CityPlan {
     });
   }
 
-  // ---- 4. districts ----
-  const grid: District[][] = Array.from({ length: W }, () => Array<District>(W).fill('urban'));
+  // ---- 4. districts, block by block: seeded nature corners, then rings
+  // out from the centre — downtown business, a mixed ring, residential
+  // streets toward the shore — a park beside downtown and industry along
+  // the railway. Ground outside every block (the seafront beyond the ring
+  // road) is green. ----
+  const natGrid: Array<Array<District | null>> = Array.from({ length: W }, () => Array<District | null>(W).fill(null));
   const KINDS: District[] = ['forest', 'desert', 'meadow'];
   const corners: Array<[number, number]> = [[0, 0], [W - 3, 0], [0, W - 3]];
   corners.forEach(([cx0, cz0]) => {
-    const kind: District = r() < 0.18 ? 'urban' : KINDS[(r() * 3) | 0];
-    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) grid[cx0 + dx][cz0 + dz] = kind;
+    const kind: District | null = r() < 0.18 ? null : KINDS[(r() * 3) | 0];
+    for (let dx = 0; dx < 3; dx++) for (let dz = 0; dz < 3; dz++) natGrid[cx0 + dx][cz0 + dz] = kind;
   });
-  const c0 = W >> 1;
-  const centre = [[c0 - 1, c0 - 1], [c0, c0 - 1], [c0 - 1, c0], [c0, c0]].filter(([cx, cz]) => grid[cx][cz] === 'urban');
-  const park = centre[(r() * centre.length) | 0] ?? [c0 - 1, c0 - 1];
-  grid[park[0]][park[1]] = 'park';
-  const downtown = centre.find(([cx, cz]) => !(cx === park[0] && cz === park[1])) ?? [c0, c0];
-  grid[downtown[0]][downtown[1]] = 'downtown';
-  // frontage: a chunk whose middle lies within a block's depth of a street
-  // (streets run at any angle now, so "a street crosses the chunk" would
-  // leave a checkerboard of streetless squares)
-  const front = new Set<string>();
-  for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
-    const c = { x: cx * CH + CH / 2, z: cz * CH + CH / 2 };
-    if (edges.some(e => segDist(c, nodes[e.a], nodes[e.b]) < 46)) front.add(key(cx, cz));
-  }
-  const frontage = (cx: number, cz: number): boolean => front.has(key(cx, cz));
-  const nearRail = (cx: number, cz: number): boolean => rail.near(cx * CH + CH / 2, cz * CH + CH / 2, 82);
-  const urbanLeft = (): Array<[number, number]> => {
-    const out: Array<[number, number]> = [];
-    for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
-      if (grid[cx][cz] === 'urban' && frontage(cx, cz)) out.push([cx, cz]);
-    }
-    return out;
+  const natureAt = (x: number, z: number): District | null => {
+    const cx = Math.floor(x / CH), cz = Math.floor(z / CH);
+    return cx < 0 || cz < 0 || cx >= W || cz >= W ? null : natGrid[cx][cz];
   };
-  const withRail = urbanLeft().filter(([cx, cz]) => nearRail(cx, cz));
-  const anchorList = withRail.length ? withRail : urbanLeft();
-  if (anchorList.length) {
-    const anchor = anchorList[(r() * anchorList.length) | 0];
-    const zone: Array<[number, number]> = [anchor];
-    const want = 2 + ((r() * 3) | 0);
-    while (zone.length < want) {
-      const next: Array<[number, number]> = [];
-      for (const [cx, cz] of zone) {
-        for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]] as const) {
-          if (nx < 0 || nx >= W || nz < 0 || nz >= W) continue;
-          if (grid[nx][nz] !== 'urban') continue;
-          if (zone.some(([ax, az]) => ax === nx && az === nz)) continue;
-          if (frontage(nx, nz)) next.push([nx, nz]);
-        }
+  const downtownR = 140 + r() * 40, mixedR = downtownR + 110 + r() * 40;
+  const blocks: CityBlock[] = blocksOf({ nodes, edges }).map(b => {
+    const nat = natureAt(b.cx, b.cz);
+    const dc = Math.hypot(b.cx - CENTER, b.cz - CENTER);
+    return { ...b, district: nat ?? (dc < downtownR ? 'downtown' : dc < mixedR ? 'urban' : 'residential') };
+  });
+  const railIn = (b: CityBlock): boolean => rail.lines.some(L => L.pts.some((p, k) => k % 3 === 0 && inBlock(b, p.x, p.z)));
+  // the park: a middling block just outside downtown, clear of the track
+  {
+    const cands = blocks.filter(b => !natureAt(b.cx, b.cz) && b.area > 2500 && b.area < 30000 && !railIn(b))
+      .sort((p, q) => Math.abs(Math.hypot(p.cx - CENTER, p.cz - CENTER) - downtownR) - Math.abs(Math.hypot(q.cx - CENTER, q.cz - CENTER) - downtownR));
+    const pk = cands[(r() * Math.min(3, cands.length)) | 0];
+    if (pk) pk.district = 'park';
+  }
+  // industry: the railway's big blocks, grown into a few neighbours the
+  // track also runs by
+  {
+    const railside = blocks.filter(b => b.district !== 'park' && b.district !== 'downtown' && !natureAt(b.cx, b.cz)
+      && (railIn(b) || rail.near(b.cx, b.cz, 70)));
+    railside.sort((p, q) => q.area - p.area);
+    const anchor = railside[(r() * Math.min(2, railside.length)) | 0];
+    if (anchor) {
+      const zone = new Set<CityBlock>([anchor]);
+      const want = 2 + ((r() * 3) | 0);
+      while (zone.size < want) {
+        const next = railside.filter(b => !zone.has(b) && [...zone].some(z => z.edges.some(e => b.edges.includes(e))));
+        if (!next.length) break;
+        zone.add(next[(r() * next.length) | 0]);
       }
-      if (!next.length) break;
-      zone.push(next[(r() * next.length) | 0]);
+      for (const b of zone) b.district = 'industrial';
     }
-    for (const [cx, cz] of zone) grid[cx][cz] = 'industrial';
+    // a big block the track runs through is a rail yard, wherever it lies
+    for (const b of blocks) if (b.area > 40000 && b.district !== 'park' && !natureAt(b.cx, b.cz) && railIn(b)) b.district = 'industrial';
   }
-  for (let cx = 0; cx < W; cx++) for (let cz = 0; cz < W; cz++) {
-    if (grid[cx][cz] === 'urban' && !frontage(cx, cz)) grid[cx][cz] = 'green';
+  const blockBucket = new Map<string, CityBlock[]>();
+  for (const b of blocks) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of b.poly) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+    for (let gx = Math.floor(x0 / CH); gx <= Math.floor(x1 / CH); gx++) for (let gz = Math.floor(z0 / CH); gz <= Math.floor(z1 / CH); gz++) {
+      const k = key(gx, gz);
+      if (!blockBucket.has(k)) blockBucket.set(k, []);
+      blockBucket.get(k)!.push(b);
+    }
   }
-  const district = (cx: number, cz: number): District =>
-    cx < 0 || cz < 0 || cx >= W || cz >= W ? 'urban' : grid[cx][cz];
-  const districtAt = (x: number, z: number): District => district(Math.floor(x / CH), Math.floor(z / CH));
-  const builtD = (d: District): boolean => d === 'urban' || d === 'downtown' || d === 'industrial';
+  const blockAt = (x: number, z: number): CityBlock | null =>
+    (blockBucket.get(key(Math.floor(x / CH), Math.floor(z / CH))) ?? []).find(b => inBlock(b, x, z)) ?? null;
+  const districtAt = (x: number, z: number): District => blockAt(x, z)?.district ?? natureAt(x, z) ?? 'green';
+  const district = (cx: number, cz: number): District => districtAt(cx * CH + CH / 2, cz * CH + CH / 2);
 
   // ---- 5. crossings, bridges, plazas, lights ----
   const exitLines = { n: southExit(bx, by - 1), s: southExit(bx, by), w: eastExit(bx - 1, by), e: eastExit(bx, by) };
@@ -502,6 +552,34 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   // ---- 6. lots along every street, both sides ----
   const lots: Lot[] = [];
+  // the lot rules as a raster, for the block filler's quick pre-test
+  // (painted a little lenient: addLot has the exact word)
+  const raster = new LotRaster(ISLAND);
+  for (const e of edges) raster.band(nodes[e.a], nodes[e.b], 7.6, R_EDGE);
+  for (const n of nodes) raster.disc(n.x, n.z, (n.plaza ? ROUNDABOUT_REACH + 1.5 : Math.max(ROAD_HALF, ...n.reach) + 3) - 0.4, R_EDGE);
+  // the traffic-light poles stand just past the pads, in the corner lots' ground
+  const poles: Array<{ x: number; z: number }> = nodes.filter(n => n.signalized).flatMap(n => polePoints(edges, n));
+  for (const p of poles) raster.disc(p.x, p.z, 1.8, R_EDGE);
+  // (and, painted wide, where addLot must still ask the exact distance)
+  for (const L of rail.lines) {
+    for (let k = 0; k + 1 < L.pts.length; k++) {
+      raster.band(L.pts[k], L.pts[k + 1], 2.6, R_EDGE);
+      raster.band(L.pts[k], L.pts[k + 1], 15.6, R_CENTRE);
+      raster.band(L.pts[k], L.pts[k + 1], 16 + 1.6, R_NEAR_C);
+      raster.band(L.pts[k], L.pts[k + 1], 3 + 1.6, R_NEAR_E);
+    }
+  }
+  for (let k = 0; k + 1 < river.pts.length; k++) {
+    const p = river.pts[k], q = river.pts[k + 1];
+    raster.band(p, q, p.w / 2 + 1.1, R_EDGE);
+    raster.band(p, q, p.w / 2 + 6.1, R_CENTRE);
+    raster.band(p, q, 7.75 + 6.5 + 1.6, R_NEAR_C);
+    raster.band(p, q, 7.75 + 1.5 + 1.6, R_NEAR_E);
+  }
+  for (let j = 0; j < ISLAND; j++) for (let i = 0; i < ISLAND; i++) {
+    if (!coast.inLand(i + 0.5, j + 0.5, 1.6)) raster.bits[j * ISLAND + i] |= R_EDGE | R_CENTRE;
+    else if (!coast.inLand(i + 0.5, j + 0.5, 3.6)) raster.bits[j * ISLAND + i] |= R_CENTRE;
+  }
   const lotsByChunk = new Map<string, Lot[]>();
   const lotBucket = new Map<string, Lot[]>();
   const edgeBucket = new Map<string, number[]>();
@@ -550,69 +628,128 @@ function buildPlan(bx: number, by: number): CityPlan {
     }
     return best;
   };
-  const addLot = (lot: Lot, own: number): void => {
-    if (!builtD(districtAt(lot.x, lot.z))) return; // nature/park stay clear
-    if (rail.near(lot.x, lot.z, 16)) return;
-    if (!coast.inLand(lot.x, lot.z, 4)) return;
-    if (river.near(lot.x, lot.z, river.halfAt(lot.x, lot.z) + 6.5)) return;
+  const nodeBucket = new Map<string, PNode[]>();
+  for (const n of nodes) {
+    const k = key(Math.floor(n.x / 32), Math.floor(n.z / 32));
+    if (!nodeBucket.has(k)) nodeBucket.set(k, []);
+    nodeBucket.get(k)!.push(n);
+  }
+  /** build `lot` if every rule lets it stand (own: its street, or -1) */
+  const addLot = (lot: Lot, own: number): boolean => {
+    if (!builtD(districtAt(lot.x, lot.z))) return false; // nature/park stay clear
+    const gx = Math.floor(lot.x / 32), gz = Math.floor(lot.z / 32);
+    // the other lots first: the cheapest test that fails most
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      for (const o of lotBucket.get(key(gx + dx, gz + dz)) ?? []) if (overlap(lot, o, LOT_GAP)) return false;
+    }
+    const nearC = (raster.at(lot.x, lot.z) & R_NEAR_C) !== 0;
+    if (nearC && rail.near(lot.x, lot.z, 16)) return false;
+    if (!coast.inLand(lot.x, lot.z, 4)) return false;
+    // (the river is at most 15.5 m wide: only near it is its width asked)
+    if (nearC && river.near(lot.x, lot.z, 7.75 + 6.5) && river.near(lot.x, lot.z, river.halfAt(lot.x, lot.z) + 6.5)) return false;
     const ol = outline(lot);
     for (const f of ol) {
-      if (rail.near(f.x, f.z, 3)) return;
-      if (!coast.inLand(f.x, f.z, 2)) return;
-      if (river.inWater(f.x, f.z) || river.near(f.x, f.z, river.halfAt(f.x, f.z) + 1.5)) return;
       // never on a street or a sidewalk (8.1 m from any centreline)
-      if (nearestStreet(f.x, f.z, own) < 7.9) return;
+      if (nearestStreet(f.x, f.z, own) < 7.9) return false;
     }
     // nor on a junction pad or a roundabout's ring
-    for (const n of nodes) {
-      if (Math.hypot(n.x - lot.x, n.z - lot.z) > 60) continue;
-      const pad = n.plaza ? ROUNDABOUT_REACH + 1.5 : Math.max(ROAD_HALF, ...n.reach) + 3;
-      if (ol.some(f => Math.hypot(f.x - n.x, f.z - n.z) < pad)) return;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      for (const n of nodeBucket.get(key(gx + dx, gz + dz)) ?? []) {
+        const pad = n.plaza ? ROUNDABOUT_REACH + 1.5 : Math.max(ROAD_HALF, ...n.reach) + 3;
+        if (ol.some(f => Math.hypot(f.x - n.x, f.z - n.z) < pad)) return false;
+      }
     }
-    const gx = Math.floor(lot.x / 32), gz = Math.floor(lot.z / 32);
-    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
-      for (const o of lotBucket.get(key(gx + dx, gz + dz)) ?? []) if (overlap(lot, o, 1.25)) return;
+    // nor over a traffic-light pole
+    {
+      const c = Math.cos(lot.ry), sn = Math.sin(lot.ry);
+      for (const p of poles) {
+        const dx = p.x - lot.x, dz = p.z - lot.z;
+        if (Math.abs(dx * c - dz * sn) < lot.w / 2 + 1.3 && Math.abs(dx * sn + dz * c) < lot.d / 2 + 1.3) return false;
+      }
+    }
+    for (const f of ol) {
+      if (!coast.inLand(f.x, f.z, 2)) return false;
+      if (!(raster.at(f.x, f.z) & R_NEAR_E)) continue;
+      if (rail.near(f.x, f.z, 3)) return false;
+      if (river.near(f.x, f.z, 7.75 + 1.5) && (river.inWater(f.x, f.z) || river.near(f.x, f.z, river.halfAt(f.x, f.z) + 1.5))) return false;
     }
     lots.push(lot);
+    raster.rect(lot.x, lot.z, lot.ry, lot.w, lot.d, LOT_GAP - 0.1, R_LOT);
     const bk = key(gx, gz);
     if (!lotBucket.has(bk)) lotBucket.set(bk, []);
     lotBucket.get(bk)!.push(lot);
     const ck = key(Math.floor(lot.x / CH), Math.floor(lot.z / CH));
     if (!lotsByChunk.has(ck)) lotsByChunk.set(ck, []);
     lotsByChunk.get(ck)!.push(lot);
+    return true;
+  };
+  /** what a lot of district `d` is, from a roll (frontage: facing a street) */
+  const kindFor = (d: District, roll: number, front: boolean): Lot['kind'] => {
+    const table: Array<[Lot['kind'], number]> =
+      d === 'downtown' ? (front ? [['bldg', 0.84], ['parking', 0.08], ['trees', 0.04], ['court', 0.04]] : [['bldg', 0.5], ['court', 0.3], ['parking', 0.2]])
+      : d === 'industrial' ? (front ? [['bldg', 0.66], ['yard', 0.2], ['parking', 0.14]] : [['yard', 0.55], ['bldg', 0.28], ['parking', 0.17]])
+      : d === 'residential' ? (front ? [['house', 0.8], ['garden', 0.12], ['trees', 0.08]] : [['garden', 0.6], ['house', 0.28], ['trees', 0.12]])
+      : (front ? [['bldg', 0.56], ['house', 0.2], ['parking', 0.12], ['trees', 0.07], ['court', 0.05]]
+        : [['bldg', 0.3], ['garden', 0.22], ['court', 0.18], ['parking', 0.16], ['house', 0.14]]);
+    let acc = 0;
+    for (const [k, p] of table) { acc += p; if (roll < acc) return k; }
+    return table[0][0];
   };
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b];
     const nx = -e.uz, nz = e.ux; // right of a -> b
+    // a frontage lot's street-side corner (8.1 m out) must clear each end's
+    // junction pad (the disc addLot keeps lots out of)
+    const clearOf = (n: PNode): number => {
+      const pad = n.plaza ? ROUNDABOUT_REACH + 1.5 : Math.max(ROAD_HALF, ...n.reach) + 3;
+      return Math.sqrt(Math.max(0, pad * pad - 8.1 * 8.1)) + 0.4;
+    };
     for (const side of [-1, 1]) {
-      let t = reachAt(a, e.id) + 5;
-      const tEnd = e.len - reachAt(b, e.id) - 5;
+      let t = Math.max(reachAt(a, e.id), clearOf(a));
+      const tEnd = e.len - Math.max(reachAt(b, e.id), clearOf(b));
       while (t < tEnd) {
-        const w = 8 + r() * 5;
-        if (t + w > tEnd) break;
+        let w = 9 + r() * 5;
+        // the last lot takes what room is left
+        if (t + w > tEnd) {
+          if (tEnd - t < 6) break;
+          w = tEnd - t;
+        }
         const along = t + w / 2;
         const sx = a.x + e.ux * along, sz = a.z + e.uz * along;
         const dist = districtAt(sx + nx * side * 14, sz + nz * side * 14);
         if (builtD(dist)) {
-          const dt = dist === 'downtown', ind = dist === 'industrial';
-          const roll = r();
-          const depth = ind ? 10 + r() * 5 : dt ? 11 + r() * 5 : 8 + r() * 4;
+          const kind = kindFor(dist, r(), true);
+          const depth = kind === 'parking' || kind === 'trees' ? 7
+            : dist === 'industrial' ? 12 + r() * 5 : dist === 'downtown' ? 12 + r() * 5 : 10 + r() * 3;
           // the front looks at the street: toward -side * normal
           const ry = Math.atan2(-nx * side, -nz * side);
-          const place = (kind: Lot['kind'], d: number): void => {
+          const v = r();
+          // a narrow block takes a shallower lot rather than none
+          for (const d of [depth, 9, 6.5]) {
+            if (d > depth) continue;
             const off = ROAD_HALF + 1.1 + d / 2;
-            addLot({ kind, x: sx + nx * side * off, z: sz + nz * side * off, ry, w, d, v: r() }, e.id);
-          };
-          const pBldg = ind ? 0.62 : dt ? 0.74 : 0.5;
-          const pTrees = roll + (ind ? 0.08 : dt ? 0.12 : 0.22);
-          const pPark = ind ? 0.92 : dt ? 0.86 : 0.72;
-          if (roll < pBldg) place('bldg', depth);
-          else if (roll < pTrees) place('trees', 6);
-          else if (roll < pPark) place('parking', 6.5);
+            if (addLot({ kind, x: sx + nx * side * off, z: sz + nz * side * off, ry, w, d, v }, e.id)) break;
+          }
         }
-        t += w + 1.6 + r() * 2;
+        t += w + LOT_GAP + 0.2 + r() * 0.8;
       }
     }
+  }
+  // ... and the inside of every built block (blockFill.ts)
+  for (const bl of blocks) {
+    if (!builtD(bl.district)) continue;
+    // (oblong scraps last: they fit the pockets the grain leaves)
+    const scraps: Array<[number, number]> = [[8, 5], [5, 8], [6, 4], [4, 6], [4, 4], [3, 3]];
+    const sizes: Array<[number, number]> = bl.district === 'downtown' ? [[18, 16], [13, 12], [8, 8], ...scraps]
+      : bl.district === 'industrial' ? [[20, 16], [14, 12], [8, 8], ...scraps]
+      : [[14, 12], [10, 10], [7, 7], ...scraps];
+    // (a scrap of ground too small for a building is a garden, court or yard)
+    const small: Lot['kind'] = bl.district === 'downtown' ? 'court' : bl.district === 'industrial' ? 'yard' : 'garden';
+    fillBlock(bl, { sizes }, raster, (x, z, ry, w, d) => {
+      const k = kindFor(bl.district, r(), false);
+      const kind = w * d < 40 && (k === 'bldg' || k === 'house') ? small : k;
+      return addLot({ kind, x, z, ry, w, d, v: r() }, -1);
+    });
   }
 
   // ---- 7. train stations: straight, quiet stretches away from crossings,
@@ -650,7 +787,8 @@ function buildPlan(bx: number, by: number): CityPlan {
 
   return {
     seed, bx, by, nodes, edges,
-    district,
+    district, districtAt, blocks, blockAt,
+    nature: (cx, cz) => natureAt(cx * CH + CH / 2, cz * CH + CH / 2),
     lots: (cx, cz) => lotsByChunk.get(key(cx, cz)) ?? [],
     crossings, riverBridges, stations,
     exits: exitLines,

@@ -67,3 +67,18 @@ Object.assign(KITDEFS, {
   'ind-tower': ind('water-tower'),
   'ind-mill': ind('windmill'),
 });
+
+// City Kit Suburban (houses + garden dressing), Mini Forest and Survival Kit
+// (garden, courtyard and works-yard props) — the block filler's lots (R33)
+const SUBKIT = '/assets/kenney/suburban';
+const FORKIT = '/assets/kenney/forest';
+const SURVKIT = '/assets/kenney/survival';
+const sub = (f: string): BakeDef => [`${SUBKIT}/${f}.glb`, `${SUBKIT}/Textures/colormap.png`];
+const forest = (f: string): BakeDef => [`${FORKIT}/${f}.glb`, `${FORKIT}/Textures/colormap.png`];
+const surv = (f: string): BakeDef => [`${SURVKIT}/${f}.glb`, `${SURVKIT}/Textures/colormap.png`];
+for (const b of 'abcdefghijklmnopqrstu') KITDEFS[`house-${b}`] = sub(`building-type-${b}`);
+for (const f of ['tree-large', 'tree-small', 'planter', 'fence-1x3', 'fence-1x4', 'fence', 'driveway-short', 'path-long']) KITDEFS[`sub-${f}`] = sub(f);
+for (const f of ['tree', 'tree-high', 'rocks-low', 'stones', 'tent', 'plant', 'fence', 'flag']) KITDEFS[`for-${f}`] = forest(f);
+for (const f of ['barrel', 'barrel-open', 'box', 'box-large', 'box-large-open', 'chest', 'workbench', 'workbench-anvil',
+  'resource-planks', 'resource-wood', 'resource-stone-large', 'bucket', 'signpost', 'tree-autumn', 'tree-tall',
+  'tree-log', 'rock-a', 'tent-canvas', 'campfire-pit']) KITDEFS[`sv-${f}`] = surv(f);

@@ -2,7 +2,7 @@
 // traffic-light state, missions and the player arrow. Drawn on a 2D
 // canvas, fixed on the island centre so north stays up.
 import { lightState } from './lights.js';
-import { chunkGroundColor } from '../../worlds/cityChunk.js';
+import { chunkGroundColor, slabColor } from '../../worlds/cityChunk.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
@@ -65,6 +65,14 @@ export class Minimap {
         ctx.fillStyle = hex(chunkGroundColor(this.bx, this.by, cx, cz));
         ctx.fillRect(tx(cx * CH) + 1.5, ty(cz * CH) + 1.5, CH * scale, CH * scale);
       }
+    }
+    // ... and every block in its district's colour
+    for (const bl of plan.blocks) {
+      ctx.beginPath();
+      bl.poly.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
+      ctx.closePath();
+      ctx.fillStyle = hex(slabColor(bl.district));
+      ctx.fill();
     }
     ctx.restore();
 

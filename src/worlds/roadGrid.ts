@@ -21,6 +21,10 @@ export class RoadGrid {
   hasZ(j: number): boolean {
     return this.plan.lineH(j);
   }
+  /** the node is a roundabout (plaza) — traffic circles its island */
+  plaza(i: number, j: number): boolean {
+    return this.plan.plaza(i, j);
+  }
   /** signalized intersection (≥3 street arms) — where the lights live */
   cross(i: number, j: number): boolean {
     return this.plan.signalized(i, j);

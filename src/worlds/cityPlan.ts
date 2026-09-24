@@ -34,6 +34,10 @@ import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
 
+/** half-size of the kit roundabout at plazas (3 x 14 m tiles); roadLayout.ts
+ * lays it, the lots and the occupancy grid keep clear of it */
+export const ROUNDABOUT_REACH = 21;
+
 export type District =
   | 'downtown' | 'urban' | 'industrial' | 'park' | 'green'
   | 'forest' | 'meadow' | 'desert';
@@ -557,12 +561,18 @@ function buildPlan(bx: number, by: number): CityPlan {
   const nearCrossing = (i: number, j: number, m: number): boolean =>
     crossings.some(c => Math.hypot(c.x - i * CH, c.z - j * CH) < m);
 
-  // plazas: a seeded few junctions become paved squares with a fountain
+  // plazas: a seeded few crossroads become the kit roundabout (3x3 tiles,
+  // reaching 21 m up each arm) with a fountain on its centre island. Only
+  // 4-arm nodes qualify — a roundabout's arms are all open, a missing street
+  // would leave a stub — and the ring keeps well clear of track and water.
   const plazaSet = new Set<string>();
   {
     const cands: Array<[number, number]> = [];
     for (let i = 1; i < W; i++) for (let j = 1; j < W; j++) {
-      if (armsCount(i, j) >= 3 && !nearCrossing(i, j, 30)) cands.push([i, j]);
+      if (armsCount(i, j) !== 4 || nearCrossing(i, j, 30)) continue;
+      if (rail.near(i * CH, j * CH, ROUNDABOUT_REACH + 12)) continue;
+      if (river.near(i * CH, j * CH, ROUNDABOUT_REACH + 16)) continue;
+      cands.push([i, j]);
     }
     for (let k = cands.length - 1; k > 0; k--) {
       const m = (r() * (k + 1)) | 0;
@@ -607,6 +617,13 @@ function buildPlan(bx: number, by: number): CityPlan {
       if (rail.near(fx, fz, 3)) return;
       if (river.inWater(fx, fz) ||
           river.near(fx, fz, river.halfAt(fx, fz) + 1.5)) return;
+    }
+    // nor spill onto a roundabout's ring (R23: LOT never over PLAZA)
+    for (const k of plazaSet) {
+      const [pi, pj] = k.split(',').map(Number);
+      const nx = Math.max(lot.x - hx, Math.min(pi * CH, lot.x + hx));
+      const nz = Math.max(lot.z - hz, Math.min(pj * CH, lot.z + hz));
+      if (Math.hypot(nx - pi * CH, nz - pj * CH) < ROUNDABOUT_REACH + 1.5) return;
     }
     // and no lot may overlap another — corner lots of meeting segments used
     // to intersect, baking buildings into buildings. 2.5 m apart keeps kit

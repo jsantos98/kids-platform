@@ -20,12 +20,13 @@ add it here AND add an enforcement point (code guard or audit check).
 | # | Rule | Enforced in |
 |---|------|-------------|
 | R1 | **No road ends in open space, and the web is ONE piece.** Every street tip ends at a cross street (the four causeway mouths are the only sanctioned loose ends), and every street node connects to the same component — the segment vetoes can strand little "private" roads, so prune again after them; the audit counts components. | `cityPlan.ts` trim + stage 4c prune, `audit-world.ts` |
-| R2 | **Streets are Kenney kit tiles.** The straight piece IS the carriageway (full-width asphalt slab, markings baked in): `ROAD_TILE = 14`, length axis local X, three pieces per open 64 m edge (offsets 10.67/32/53.33). Nodes overlay `road-crossroad` (4 arms), the `road-intersection` T-piece (3 arms, closed edge facing the missing arm — arms must be read unfiltered from segH/segV), the `road-curve` 2×2 piece (23.5 m unit, arms on the quarter lines → offset half a unit toward the bend) and `road-end` at causeway mouths. The procedural slab path remains only as the fallback when the kit fails to load. | `cityChunk.ts` road stage, `kitdefs.ts` |
-| R3 | **Junctions are kit intersection/curve tiles**, never a wider procedural pad. | `cityChunk.ts` node overlay |
-| R3b | **No hard 90° asphalt corners.** The tile path covers bends with the kit's curve piece; the legacy slab path rounds inner corners with fillet discs (r5) and L elbows with r7 discs. | `cityChunk.ts` |
-| R4 | **Markings come from the kit tiles** (centre line, lane lines, crosswalks on junction pieces); the tiles carry no pavement skirts — the district slab is the surroundings. In the legacy path, kerbs + dashes break only at open junctions (plus/T/L, plaza). | `cityChunk.ts` |
+| R2 | **Streets are the complete Kenney City Kit Roads** (`public/assets/kenney/city-roads/`), every piece laid at ONE uniform unit, `ROAD_TILE = 14` — the kit straight's full cross-section (kerb strip, gutter, asphalt, centre line) IS the R5 carriageway. `roadLayout.ts` decides every piece: each street node owns one pad — `road-crossroad` (4 arms), `road-intersection` T (3 arms; native closed side −z), `road-bend` (2 arms at a right angle; native joins west+south), `road-straight` (2 arms in line) or the 3×3 `road-roundabout` at plazas; the four causeway mouths own no pad. Straights fill ONLY the span between two pads (`n = round(span/14)`, straight length axis = local X). Arms are read unfiltered from segH/segV. The procedural slab path remains only as the fallback when the kit fails to load. | `roadLayout.ts`, `cityChunk.ts` road stage, `kitdefs.ts` |
+| R3 | **Junctions are kit pads**, never a wider procedural pad. Signalized pads use the `-path` variants (crosswalks). | `roadLayout.ts nodePiece` |
+| R3b | **No hard 90° asphalt corners.** Bends take the kit's `road-bend` (rounded outer kerb); the legacy slab path rounds inner corners with fillet discs (r5) and L elbows with r7 discs. Never scale the 2×2 `road-curve` to stand in for a bend — at 47 m it missed the straights and overlapped them by 35 m. | `roadLayout.ts`, `cityChunk.ts` |
+| R4 | **Markings come from the kit tiles** (centre line, lane lines, crosswalks on junction pads). Built districts add a sidewalk band from the tile edge to the lot line (7 → 8.1 m) in the kit's pavement colour, along the span between pads, around junction corners, past a T's closed side, up to a roundabout's kerb flare, and broken at river bridges. In the legacy path, kerbs + dashes break only at open junctions (plus/T/L, plaza). | `cityChunk.ts` |
+| R35 | **Road pieces never overlap, and they cover every street end to end.** No piece is laid on another (overlapping kerb bands cut across junctions and z-fight); pad reach + straights = 64 m on every open segment. Plazas are roundabouts (4-arm nodes only, ≥33 m from the rail, ≥37 m from the river); lots and the occupancy grid's PLAZA disc keep 21 m clear; traffic circles the ring counter-clockwise at 9 m (right-hand traffic) and pedestrians turn back before it. | `roadLayout.ts`, `cityPlan.ts` plazas + `addLot`, `traffic.ts roundPath`, `audit-world.ts` |
 | R5 | Carriageway is 14 m (`ROAD_HALF = 7`; the kit tile is full-width road at `ROAD_TILE = 14`). Lane logic (traffic ±3.5 m, kerbs ±6.9, lamps ±7.8, lots ≥8.1) depends on it. | `cityChunk.ts`, `traffic.ts`, `cityPlan.ts` |
-| R6 | **Traffic lights only where roads cross AND buildings surround them** — a signalized node is ≥3 street arms whose four neighbouring chunks are all urban/downtown/industrial, so no pole ever stands alone in the grass. Lights are SYNCHRONIZED into a green wave (`lights.ts`: phase shifts 8 s per 64 m of x+z); poles stand at ±12.5 m off the node, cars stop at `STOP_LINE` 18.5 m. | `cityPlan.ts signalized`, `lampProps.ts`, `lights.ts` |
+| R6 | **Traffic lights only where roads cross AND buildings surround them** — a signalized node is ≥3 street arms whose four neighbouring chunks are all urban/downtown/industrial, so no pole ever stands alone in the grass. Lights are SYNCHRONIZED into a green wave (`lights.ts`: phase shifts 8 s per 64 m of x+z). They are the kit `traffic-light` with dynamic red/yellow/green lamps: one pole per approach arm, on the approaching driver's near-side right corner at ±8.6 m, lamp face turned toward that approach (`TRAFFIC_POLES`); cars stop at `STOP_LINE` 18.5 m. | `cityPlan.ts signalized`, `roadLayout.ts TRAFFIC_POLES`, `lampProps.ts`, `lights.ts` |
 
 ## Railway
 
@@ -75,8 +76,11 @@ add it here AND add an enforcement point (code guard or audit check).
   (seeds S/S+1/S+2 must grow visibly different cities), R26 (river inside
   its lane, shore to shore, perpendicular street crossings), R27 (zero
   trestle skew), R28 (the loop never overlaps itself, checked across a
-  9×9-city ring), and — via the occupancy grid — R22/R23 (zero forbidden
-  combination cells). Extend this tool whenever you add a rule — one rule,
+  9×9-city ring), R35 (road pieces never overlap and cover every street),
+  and — via the occupancy grid — R22/R23 (zero forbidden combination cells).
+  Road looks: `dev-roads.html?seed=N` bakes real chunks and lists one node
+  of every junction type (cross, cross-lights, T-miss-*, bend-*, pass-*,
+  roundabout, end) — frame one with `&x=..&z=..&h=45&tilt=35`. Extend this tool whenever you add a rule — one rule,
   one check. Zero tolerance: the deform modes are seed-dependent, so sweep
   several seeds
   (`for s in 7 777 4242 2024 9999 3 21 5; do npx tsx tools/audit-world.ts $s; done`)

@@ -136,31 +136,6 @@ sirenBtn.addEventListener('click', () => setSiren(!sirenOn));
 
 // ---- CC0 Kenney city kit preload ----
 const KITDEFS = await import('./kitdefs.js').then(m => m.KITDEFS);
-const PETKIT = '/assets/kenney/pets';
-const PEDKIT = '/assets/kenney/mini-chars';
-for (const [n, f] of [
-  ['pet-dog', 'animal-dog'], ['pet-cat', 'animal-cat'], ['pet-bunny', 'animal-bunny'],
-  ['pet-chick', 'animal-chick'], ['pet-pig', 'animal-pig'], ['pet-fox', 'animal-fox'],
-  ['pet-panda', 'animal-panda'], ['pet-penguin', 'animal-penguin'],
-] as const) KITDEFS[n] = [`${PETKIT}/${f}.glb`, `${PETKIT}/Textures/colormap.png`];
-for (const s of 'abcdef') {
-  KITDEFS[`ped-m${s}`] = [`${PEDKIT}/character-male-${s}.glb`, `${PEDKIT}/Textures/colormap.png`];
-  KITDEFS[`ped-f${s}`] = [`${PEDKIT}/character-female-${s}.glb`, `${PEDKIT}/Textures/colormap.png`];
-}
-const INDUSKIT = '/assets/kenney/industrial';
-for (const b of 'abcdefghijklmnopqrst') KITDEFS[`ind-${b}`] = [`${INDUSKIT}/building-${b}.glb`, `${INDUSKIT}/Textures/colormap.png`];
-Object.assign(KITDEFS, {
-  'ind-chimney': [`${INDUSKIT}/chimney-basic.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-chimney-m': [`${INDUSKIT}/chimney-medium.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-chimney-l': [`${INDUSKIT}/chimney-large.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-tank': [`${INDUSKIT}/detail-tank.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-tank-l': [`${INDUSKIT}/detail-tank-large.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-box-a': [`${INDUSKIT}/shipping-container-a.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-box-b': [`${INDUSKIT}/shipping-container-b.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-box-c': [`${INDUSKIT}/shipping-container-c.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-tower': [`${INDUSKIT}/water-tower.glb`, `${INDUSKIT}/Textures/colormap.png`],
-  'ind-mill': [`${INDUSKIT}/windmill.glb`, `${INDUSKIT}/Textures/colormap.png`],
-});
 await prepBakedModels(KITDEFS).catch(() => {});
 // dev probe: ?debugbake=1 exposes which templates registered
 if (q.get('debugbake') === '1') {

@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { makeVillager } from '../../kit/index.js';
 import { Baked, bakeObjectToMesh, templateToMesh } from '../../engine/baked.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
-import { occupancyFor, LOT } from '../../worlds/grid.js';
+import { occupancyFor, LOT, PLAZA } from '../../worlds/grid.js';
+import { ROUNDABOUT_REACH } from '../../worlds/cityPlan.js';
 import { cityAt } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND } from '../../worlds/world.js';
 import type { BakedTemplate } from '../../engine/assets.js';
@@ -116,7 +117,8 @@ export class Pedestrians {
       // sidewalks run right past building fronts — the occupancy grid says
       // whether this stretch of pavement is inside someone's front yard
       const city = cityAt(this.ox + sx + 0.5, this.oz + sz + 0.5);
-      if (occupancyFor(city.bx, city.by).claims(sx, sz, 0.5, LOT)) continue;
+      const occ = occupancyFor(city.bx, city.by);
+      if (occ.claims(sx, sz, 0.5, LOT) || occ.claims(sx, sz, 1.5, PLAZA)) continue;
       const dp = Math.hypot(sx + this.ox - px, sz + this.oz - pz);
       if (dp > 130 || dp < 18) continue; // keep the crowd in the active ring
       if (!this.inSight(this.ox + sx, this.oz + sz)) {
@@ -155,8 +157,17 @@ export class Pedestrians {
         p.mesh.rotation.x = p.pet ? 0.1 : 0.18;
         pos.y = 0.1 + Math.abs(Math.sin((p.phase += dt * (p.pet ? 16 : 14)))) * 0.16;
       } else {
-        // stroll along the sidewalk
+        // stroll along the sidewalk — and turn back before a roundabout,
+        // whose ring has no sidewalk to walk on
         p.mesh.rotation.x = 0;
+        {
+          const ahead = 1.5 * p.dir;
+          const lx = pos.x - this.ox + (p.alongX ? ahead : 0), lz = pos.z - this.oz + (p.alongX ? 0 : ahead);
+          const ni = Math.round(lx / this.CH), nj = Math.round(lz / this.CH);
+          if (this.grid.plaza(ni, nj) && Math.hypot(lx - ni * this.CH, lz - nj * this.CH) < ROUNDABOUT_REACH + 1) {
+            p.dir = -p.dir;
+          }
+        }
         const move = p.dir * p.speed * dt;
         if (p.alongX) {
           pos.x += move;

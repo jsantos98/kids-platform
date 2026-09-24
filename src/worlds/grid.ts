@@ -10,7 +10,7 @@
 // the other generators (trees, lamps, traffic lights, pedestrians, scatter)
 // asks the grid instead. The vector generators stay the source of shape
 // truth; the grid is the shared authority on what occupies where.
-import { cityPlanFor } from './cityPlan.js';
+import { cityPlanFor, ROUNDABOUT_REACH } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
@@ -160,7 +160,7 @@ function paint(bx: number, by: number): CityGrid {
   }
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
     for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
-      if (plan.plaza(cx, cz)) g.disc(cx * 64, cz * 64, 9.4, PLAZA);
+      if (plan.plaza(cx, cz)) g.disc(cx * 64, cz * 64, ROUNDABOUT_REACH, PLAZA);
     }
   }
 

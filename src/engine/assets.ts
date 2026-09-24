@@ -61,10 +61,17 @@ function loadPalette(url: string): Promise<HTMLImageElement> {
   return imgCache.get(url)!;
 }
 const sceneCache = new Map<string, Promise<THREE.Group>>();
+// The baker only reads geometry + UVs and samples the palette itself, so the
+// GLBs' own texture references are never needed. Some kits live in folders
+// without the Textures/colormap.png their GLBs point at (they share a renamed
+// cmap-*.png); hand the loader a 1x1 stand-in instead of a 404 + warning.
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const bakeManager = new THREE.LoadingManager();
+bakeManager.setURLModifier(u => (/\.(png|jpe?g)$/i.test(u) ? BLANK_PNG : u));
 function loadModelScene(url: string): Promise<THREE.Group> {
   if (!sceneCache.has(url)) {
     sceneCache.set(url, new Promise((resolve, reject) => {
-      new GLTFLoader().load(url, gltf => resolve(gltf.scene), undefined, reject);
+      new GLTFLoader(bakeManager).load(url, gltf => resolve(gltf.scene), undefined, reject);
     }));
   }
   return sceneCache.get(url)!;

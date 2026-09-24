@@ -83,13 +83,14 @@ const segV = (i: number, j: number) => {
   try { return plan.segV(i, j); } catch { return false; }
 };
 const kinds: Record<string, string> = {};
-for (let i = 1; i < WORLD_CHUNKS - 1 && Object.keys(kinds).length < 10; i++) {
-  for (let j = 1; j < WORLD_CHUNKS - 1; j++) {
+for (let i = 1; i < WORLD_CHUNKS; i++) {
+  for (let j = 1; j < WORLD_CHUNKS; j++) {
     const a = [segH(j, i - 1), segH(j, i), segV(i, j - 1), segV(i, j)].map(v => !!v);
     const n = a.filter(Boolean).length;
-    if (plan.plaza(i, j)) continue;
     let k: string | null = null;
-    if (n === 4) k = 'cross';
+    if (plan.plaza(i, j)) k = 'roundabout';
+    else if (n === 4) k = plan.signalized(i, j) ? 'cross-lights' : 'cross';
+    else if (n === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) k = 'pass-' + (a[0] ? 'ew' : 'ns');
     else if (n === 3) k = 'T-miss-' + 'wens'[a.findIndex(v => !v)];
     else if (n === 2 && !(a[0] && a[1]) && !(a[2] && a[3])) k = 'bend-' + (a[0] && a[3] ? 'ws' : a[1] && a[3] ? 'se' : a[1] && a[2] ? 'en' : 'wn');
     else if (n === 1) k = 'end-' + 'wens'[a.findIndex(v => v)];
@@ -111,7 +112,8 @@ document.body.appendChild(info);
 // row north of the chunk window — pale here means the BAKE is broken
 import { bakedModel } from '../engine/assets.js';
 {
-  const names = ['road-straight', 'road-crossroad', 'road-intersection', 'road-curve', 'road-end'];
+  const names = ['road-straight', 'road-crossroad', 'road-crossroad-path', 'road-intersection',
+    'road-intersection-path', 'road-bend', 'road-end', 'road-roundabout'];
   const slate = new THREE.MeshLambertMaterial({ vertexColors: true });
   let k = 0;
   for (const n of names) {

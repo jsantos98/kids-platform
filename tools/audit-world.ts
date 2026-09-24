@@ -7,6 +7,7 @@ import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA } from '../src/worlds/grid.js';
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
+import { cityRoadPieces, pieceRect, segmentPieces, nodeReach } from '../src/worlds/roadLayout.js';
 
 const clearAllWorldCaches = (): void => {
   clearCityPlanCache();
@@ -48,6 +49,8 @@ let bareCrossings = 0;
 let selfOverlap = 0;
 let riverFails = 0;
 let worstTrestleSkew = 0;
+let roadOverlaps = 0;
+let roadGaps = 0;
 
 for (const [bx, by] of cells) {
   const plan = cityPlanFor(bx, by);
@@ -247,6 +250,30 @@ for (const [bx, by] of cells) {
     worstTrestleSkew = Math.max(worstTrestleSkew, skew);
   }
 
+  // R35: road pieces never overlap, and together they cover every open
+  // street segment end to end (node pad reach + straights = 64 m)
+  {
+    const pieces = cityRoadPieces(plan);
+    const rects = pieces.map(pieceRect);
+    for (let a = 0; a < rects.length; a++) {
+      for (let b = a + 1; b < rects.length; b++) {
+        const ox = Math.min(rects[a].x2, rects[b].x2) - Math.max(rects[a].x1, rects[b].x1);
+        const oz = Math.min(rects[a].z2, rects[b].z2) - Math.max(rects[a].z1, rects[b].z1);
+        if (ox > 0.05 && oz > 0.05) {
+          roadOverlaps++;
+          if (roadOverlaps <= 3) console.log(`  R35 detail: city ${bx},${by} ${pieces[a].kind}@(${pieces[a].x.toFixed(0)},${pieces[a].z.toFixed(0)}) overlaps ${pieces[b].kind}@(${pieces[b].x.toFixed(0)},${pieces[b].z.toFixed(0)})`);
+        }
+      }
+    }
+    const cover = (horiz: boolean, line: number, k: number): void => {
+      const [ia, ja, ib, jb] = horiz ? [k, line, k + 1, line] : [line, k, line, k + 1];
+      const len = segmentPieces(plan, horiz, line, k).reduce((s, p) => s + p.lx, 0);
+      if (Math.abs(len + nodeReach(plan, ia, ja) + nodeReach(plan, ib, jb) - 64) > 0.05) roadGaps++;
+    };
+    for (let j = 0; j <= W; j++) for (let i = 0; i < W; i++) if (plan.segH(j, i)) cover(true, j, i);
+    for (let i = 0; i <= W; i++) for (let j = 0; j < W; j++) if (plan.segV(i, j)) cover(false, i, j);
+  }
+
   // R22/R23: occupancy-grid combination invariants. The grid paints every
   // generator's output into one 1 m bitmask map — the audit proves the
   // forbidden combinations never occur anywhere in the city:
@@ -312,6 +339,8 @@ if (bareCrossings > 0) fail('R10', `${bareCrossings} rail x road crossings have 
 if (selfOverlap > 0) fail('R28', `${selfOverlap} rail samples overlap a different part of the loop (beds on beds)`);
 if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
+if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
+if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.
 // The hash tail used to leave adjacent integers partially correlated, and
@@ -365,7 +394,8 @@ for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] 
 console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} crossings, ` +
   `worst square-deviation ${worstDevDeg.toFixed(1)} deg, nearest lot ${worstLot === Infinity ? 'n/a' : worstLot.toFixed(1)} m, ` +
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
-  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg`);
+  `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg, ` +
+  `road overlaps ${roadOverlaps}, road gaps ${roadGaps}`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

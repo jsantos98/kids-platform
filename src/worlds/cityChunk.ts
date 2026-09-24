@@ -14,6 +14,7 @@ import { citySeed } from './cityGrid.js';
 import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT } from './grid.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
 import { STRAIT } from './cityGrid.js';
+import { chunkRoadPieces, nodeArms, nodeReach, TRAFFIC_POLES, ROUNDABOUT_REACH } from './roadLayout.js';
 
 export { WORLD_CHUNKS }; // re-exported for the game layer
 
@@ -62,11 +63,17 @@ function kenneyTPL() {
     cacti: ['cactus-short', 'cactus-tall'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
-    roadStraight: bakedModel('road-straight'),
-    roadInter: bakedModel('road-intersection'),
-    roadCrossroad: bakedModel('road-crossroad'),
-    roadCurve: bakedModel('road-curve'),
-    roadEnd: bakedModel('road-end'),
+    road: {
+      straight: bakedModel('road-straight'),
+      pass: bakedModel('road-straight'),
+      cross: bakedModel('road-crossroad'),
+      crossPath: bakedModel('road-crossroad-path'),
+      tee: bakedModel('road-intersection'),
+      teePath: bakedModel('road-intersection-path'),
+      bend: bakedModel('road-bend'),
+      end: bakedModel('road-end'),
+      round: bakedModel('road-roundabout'),
+    },
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     industrial: [...'abcdefghijklmnopqrst'].map(b => bakedModel('ind-' + b)).filter((t): t is BakedTemplate => !!t),
     indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
@@ -82,6 +89,7 @@ const RIVER_WATER = 0x5fadc9;
 const RIVER_BANK = 0xdfd3b4;
 const RIVER_PATH = 0xd9cdb4;
 const BRIDGE_STEEL = 0x8f97a3;
+const SIDEWALK = 0xa1a9c9; // the road kit's pavement (tile-low) colour
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
 const ROAD_HALF = 7;      // 14 m carriageway — roomy for little drivers
@@ -223,57 +231,93 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  // ---- roads: real Kenney city-kit tiles where the kit is loaded, the
-  // procedural pastel slabs otherwise. The kit's straight piece is the
-  // carriageway itself — a full-width asphalt slab (lane markings baked
-  // in, edges crowned 0.02 units) — so a 14 m tile IS the R5 carriageway.
-  // Straights run as three pieces per 64 m edge; junctions take the kit's
-  // crossroad (4 arms), its T-piece (3 arms, closed edge facing the
-  // missing arm), its curve piece at L-bends (2x2 units, arms on the
-  // quarter lines, so it sits offset half a unit toward the bend) and the
-  // dead-end cap at exit mouths. The y scale is the tile unit everywhere
-  // so kerb heights stay consistent across differently-scaled pieces.
-  const ROAD_TILE = 14;
+  // ---- roads: the complete Kenney City Kit Roads where it loaded, the
+  // procedural pastel slabs otherwise. roadLayout.ts decides every piece:
+  // each street node owns ONE pad (crossroad / T / bend / in-line straight /
+  // roundabout) and straights fill only the span between two pads, so no
+  // piece ever lies on another (R35). Every piece is laid at the uniform
+  // 14 m unit — the kit straight's full cross-section IS the R5 carriageway.
+  // Thickness is scaled x4 (0.08 m) so the surface clears the slab without
+  // z-fighting, while the rail heads (RAIL_TOP) still ride above it.
   const TY = 0.11;                   // legacy slab surface height
-  const CURVE_UNIT = 23.5;           // 2x2-unit curve piece: band of 0.6u = 14 m
-  const hasRoadKit = !!(TPL.roadStraight && TPL.roadInter && TPL.roadCrossroad && TPL.roadCurve && TPL.roadEnd);
-  const layStraight = (x: number, z: number, ry: number): void => {
-    if (TPL.roadStraight) bakeModel(B, TPL.roadStraight, x, 0, z, ry, 1, [64 / 3, ROAD_TILE, ROAD_TILE]);
-  };
-  const layNode = (tpl: BakedTemplate | null, x: number, z: number, ry: number, s = ROAD_TILE): void => {
-    if (tpl) bakeModel(B, tpl, x, 0.005, z, ry, 1, [s, ROAD_TILE, s]);
-  };
+  const ROAD_Y = 0.1;                // kit pieces rest on the slab top
+  const ROAD_THICK = 4;
+  const R = TPL.road;
+  const hasRoadKit = !!(R.straight && R.cross && R.tee && R.bend && R.end && R.round);
   const roadS = plan.segH(cz, cx);
   const roadW = plan.segV(cx, cz);
   // the TRUE [west, east, north, south] arms of this chunk's SW node —
-  // plan.arms() filters out the closed arms, which the piece rotations need
-  const a0 = [plan.segH(cz, cx - 1), plan.segH(cz, cx), plan.segV(cx, cz - 1), plan.segV(cx, cz)];
+  // plan.arms() filters out the closed arms (legacy fillet path below)
+  const a0 = nodeArms(plan, cx, cz);
   const armN = a0.filter(Boolean).length;
   if (hasRoadKit) {
-    // the tile's length axis is local X (centre line, lane lines and the
-    // end ramps all run along it): east-west streets take ry=0,
-    // north-south streets ry=pi/2
-    if (roadS) for (const off of [64 / 6, 32, 5 * 64 / 6]) layStraight(X0 + off, Z0, 0);
-    if (roadW) for (const off of [64 / 6, 32, 5 * 64 / 6]) layStraight(X0, Z0 + off, Math.PI / 2);
-    // rotation tables from the pieces' vertex layouts: the T opens
-    // west/east/south, the curve connects west+south, the cap closes west.
-    if (armN === 4) {
-      layNode(TPL.roadCrossroad, X0, Z0, 0);
-    } else if (armN === 3) {
-      const miss = a0.indexOf(false); // 0=w 1=e 2=n 3=s
-      layNode(TPL.roadInter, X0, Z0,
-        miss === 2 ? 0 : miss === 3 ? Math.PI : miss === 1 ? -Math.PI / 2 : Math.PI / 2);
-    } else if (armN === 2 && !(a0[0] && a0[1]) && !(a0[2] && a0[3])) {
-      const ws = a0[0] && a0[3]; // west + south
-      const rot = ws ? 0 : a0[1] && a0[3] ? Math.PI / 2 : a0[1] && a0[2] ? Math.PI : -Math.PI / 2;
-      // the curve's arms sit on the quarter lines: shift the piece half a
-      // unit so its arm centerlines land on the street lines
-      const ox = rot === 0 || rot === -Math.PI / 2 ? -CURVE_UNIT / 2 : CURVE_UNIT / 2;
-      const oz = rot === 0 || rot === Math.PI / 2 ? CURVE_UNIT / 2 : -CURVE_UNIT / 2;
-      layNode(TPL.roadCurve, X0 + ox, Z0 + oz, rot, CURVE_UNIT);
-    } else if (armN === 1) {
-      const rot = a0[1] ? 0 : a0[0] ? Math.PI : a0[2] ? Math.PI / 2 : -Math.PI / 2;
-      layNode(TPL.roadEnd, X0, Z0, rot);
+    for (const p of chunkRoadPieces(plan, cx, cz)) {
+      const tpl = p.kind === 'cross' ? (p.crosswalks ? R.crossPath ?? R.cross : R.cross)
+        : p.kind === 'tee' ? (p.crosswalks ? R.teePath ?? R.tee : R.tee)
+          : R[p.kind];
+      if (!tpl) continue;
+      // native pieces are 1 unit per side (the roundabout 3): scale so the
+      // placed piece spans exactly p.lx x p.lz
+      const units = p.kind === 'round' ? 3 : 1;
+      bakeModel(B, tpl, p.x, ROAD_Y, p.z, p.ry, 1, [p.lx / units, ROAD_THICK, p.lz / units]);
+    }
+    // sidewalk bands in the built-up districts: the kit's kerb strip
+    // widened out to the lot line (7 -> 8.1 m), in the kit's own pavement
+    // colour, running only along the span between node pads
+    if (district === 'urban' || district === 'downtown' || district === 'industrial') {
+      // the roundabout's arms keep a straight kerb for their outer 5.8 m
+      // before the ring flares, so the band runs on up to the flare
+      // (and straight through an in-line node, whose pad is a plain straight)
+      const walkReach = (i: number, j: number): number => {
+        if (plan.plaza(i, j)) return ROUNDABOUT_REACH - 5.8;
+        const a = nodeArms(plan, i, j);
+        if (a.filter(Boolean).length === 2 && ((a[0] && a[1]) || (a[2] && a[3]))) return 0;
+        return nodeReach(plan, i, j);
+      };
+      const walk = (horiz: boolean, line: number, k: number): void => {
+        const [ia, ja, ib, jb] = horiz ? [k, line, k + 1, line] : [line, k, line, k + 1];
+        const s0 = k * CH + walkReach(ia, ja), s1 = (k + 1) * CH - walkReach(ib, jb);
+        // the band breaks where the street bridges the river
+        const cuts: Array<[number, number]> = [];
+        for (const b of plan.riverBridges) {
+          if ((b.axis === 'h') !== horiz || Math.abs((horiz ? b.z : b.x) - line * CH) > 1) continue;
+          const at = horiz ? b.x : b.z;
+          cuts.push([at - 13, at + 13]);
+        }
+        let a = s0;
+        const runs: Array<[number, number]> = [];
+        for (const [c0, c1] of cuts.sort((p, q) => p[0] - q[0])) {
+          if (c1 <= a || c0 >= s1) continue;
+          if (c0 > a) runs.push([a, c0]);
+          a = Math.max(a, c1);
+        }
+        if (s1 > a) runs.push([a, s1]);
+        for (const [r0, r1] of runs) {
+          if (r1 - r0 < 1) continue;
+          const mid = (r0 + r1) / 2, len = r1 - r0;
+          for (const side of [-1, 1]) {
+            const off = line * CH + side * 7.55;
+            if (horiz) B.box(len, 0.06, 1.1, SIDEWALK, mid, 0.13, off);
+            else B.box(1.1, 0.06, len, SIDEWALK, off, 0.13, mid);
+          }
+        }
+      };
+      if (roadS) walk(true, cz, cx);
+      if (roadW) walk(false, cx, cz);
+      // corner squares where two bands meet at this chunk's SW junction
+      if (!plan.plaza(cx, cz)) {
+        for (const [ea, eb, sx, sz] of [[0, 2, -1, -1], [1, 2, 1, -1], [0, 3, -1, 1], [1, 3, 1, 1]] as const) {
+          if (a0[ea] && a0[eb]) B.box(1.1, 0.06, 1.1, SIDEWALK, X0 + sx * 7.55, 0.13, Z0 + sz * 7.55);
+        }
+        // a T's closed side: the through street's band runs past the pad
+        if (armN === 3) {
+          const miss = a0.indexOf(false);
+          if (miss === 2) B.box(14, 0.06, 1.1, SIDEWALK, X0, 0.13, Z0 - 7.55);
+          if (miss === 3) B.box(14, 0.06, 1.1, SIDEWALK, X0, 0.13, Z0 + 7.55);
+          if (miss === 0) B.box(1.1, 0.06, 14, SIDEWALK, X0 - 7.55, 0.13, Z0);
+          if (miss === 1) B.box(1.1, 0.06, 14, SIDEWALK, X0 + 7.55, 0.13, Z0);
+        }
+      }
     }
   } else {
     const openJunction = (i: number, j: number): boolean => {
@@ -329,26 +373,36 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
 
   // ---- junction dressing at the chunk's SW corner (X0, Z0) ----
   if (plan.plaza(cx, cz)) {
-    bakePlaza(X0, Z0);
+    // kit roundabout: a little fountain on its centre island; the legacy
+    // slab path keeps the paved fountain square
+    if (hasRoadKit) bakeIslandFountain(X0, Z0);
+    else bakePlaza(X0, Z0);
   }
 
   // working traffic lights are dynamic objects (chunks.ts) at signalized nodes;
-  // chunks only keep their corner collision boxes (skipped when the occupancy
-  // grid shows the corner is inside a lot — chunks skips that pole too)
+  // chunks only keep the poles' collision boxes: one pole per approach arm
+  // (roadLayout TRAFFIC_POLES — the same spots chunks.ts plants the kit
+  // lights on)
   if (plan.signalized(cx, cz)) {
-    for (const [tx, tz] of [[X0 + 12.5, Z0 + 12.5], [X0 - 12.5, Z0 - 12.5]]) {
-      if (occ.claims(tx, tz, 1, LOT)) continue;
+    for (const [dx, dz, , arm] of TRAFFIC_POLES) {
+      if (!a0[arm]) continue;
+      const tx = X0 + dx, tz = Z0 + dz;
       boxes.push({ x1: tx - 0.4, x2: tx + 0.4, z1: tz - 0.4, z2: tz + 0.4, small: 1 });
     }
   }
 
   // street lamps along surviving streets (urban fabric + industry), kept
-  // clear of the railway corridor and out of the front corners of corner lots
+  // clear of the railway corridor, off the junction pads (a roundabout's
+  // ring reaches 21 m up its arms) and out of the front corners of corner lots
   const lampDistrict = district === 'urban' || district === 'downtown' || district === 'industrial';
   if (lampDistrict) {
+    const padH0 = nodeReach(plan, cx, cz), padH1 = nodeReach(plan, cx + 1, cz);
+    const padV1 = nodeReach(plan, cx, cz + 1);
     for (let d = 11; d < CH; d += 18) {
-      const clearH = roadS && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT);
-      const clearV = roadW && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT);
+      const offH = d < padH0 + 1.5 || d > CH - padH1 - 1.5;
+      const offV = d < padH0 + 1.5 || d > CH - padV1 - 1.5;
+      const clearH = roadS && !offH && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT);
+      const clearV = roadW && !offV && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT);
       if (clearH && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
       if (clearV && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
       if (clearH) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });
@@ -426,6 +480,17 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       }
       boxes.push({ x1: tx - 0.55, x2: tx + 0.55, z1: tz - 0.55, z2: tz + 0.55, small: 1 });
     }
+  }
+
+  /** fountain on the roundabout's centre island (the island is ~3.5 m in
+   * radius; traffic circles it on the ring) */
+  function bakeIslandFountain(x: number, z: number): void {
+    B.cyl(2.5, 2.6, 0.45, 16, 0x9aa1ab, x, 0.35, z);   // basin wall
+    B.cyl(2.2, 2.2, 0.4, 16, 0x6fb7d9, x, 0.4, z);     // water
+    B.cyl(0.6, 0.8, 1.3, 12, 0xcfccc2, x, 0.8, z);     // pedestal
+    B.cyl(1.1, 1.1, 0.16, 12, 0x9fd8ef, x, 1.5, z);    // upper dish
+    B.sphere(0.25, 0xbfe3ff, x, 1.75, z);              // finial
+    boxes.push({ x1: x - 2.6, x2: x + 2.6, z1: z - 2.6, z2: z + 2.6, small: 1 });
   }
 
   /** paved plaza with a fountain, benches and planters — the meeting place */

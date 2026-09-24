@@ -7,10 +7,10 @@ import * as THREE from 'three';
 import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
-import { occupancyFor, LOT } from '../../worlds/grid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
+import { nodeArms } from '../../worlds/roadLayout.js';
 import { lightState } from './lights.js';
-import { LAMP_MATS, makeTrafficLights } from './lampProps.js';
+import { makeTrafficLights, setHead, type TrafficLightProps } from './lampProps.js';
 
 const CHUNKS_PER_CITY = CITY_PITCH / 64; // world-chunk stride between city cells
 
@@ -22,7 +22,7 @@ export interface Chunk {
   wz: number;
   cx: number;
   cz: number;
-  lights: { group: THREE.Group; ew: THREE.Mesh[]; ns: THREE.Mesh[] } | null;
+  lights: TrafficLightProps | null;
 }
 
 export class ChunkManager {
@@ -50,12 +50,11 @@ export class ChunkManager {
     this.scene.add(mesh);
     // collision boxes move from city-local to world coordinates
     const wboxes = boxes.map(b => ({ ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz }));
-    // working lights only at real intersections; a pole that would land in a
-    // corner lot (occupancy grid) is skipped — the junction keeps its other head
+    // working kit traffic lights at real intersections: one pole per
+    // approach arm, on the driver's near-side right corner
     const plan = cityPlanFor(bx, by);
     const lights = plan.signalized(cx, cz)
-      ? makeTrafficLights(ox + cx * this.CH, oz + cz * this.CH, (wx, wz) =>
-          occupancyFor(bx, by).claims(wx - ox, wz - oz, 1, LOT))
+      ? makeTrafficLights(ox + cx * this.CH, oz + cz * this.CH, nodeArms(plan, cx, cz))
       : null;
     if (lights) this.scene.add(lights.group);
     const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
@@ -121,10 +120,10 @@ export class ChunkManager {
     for (const ch of this.chunks.values()) {
       if (!ch.lights) continue;
       const st = lightState(ch.cx, ch.cz, elapsed);
-      const ewMat = st === 'ew' ? LAMP_MATS.green : st === 'ewY' ? LAMP_MATS.yellow : LAMP_MATS.red;
-      const nsMat = st === 'ns' ? LAMP_MATS.green : st === 'nsY' ? LAMP_MATS.yellow : LAMP_MATS.red;
-      for (const l of ch.lights.ew) l.material = ewMat;
-      for (const l of ch.lights.ns) l.material = nsMat;
+      const ew = st === 'ew' ? 'go' : st === 'ewY' ? 'slow' : 'stop';
+      const ns = st === 'ns' ? 'go' : st === 'nsY' ? 'slow' : 'stop';
+      for (const h of ch.lights.ew) setHead(h, ew);
+      for (const h of ch.lights.ns) setHead(h, ns);
     }
   }
 }

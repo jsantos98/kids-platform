@@ -81,6 +81,9 @@ let worstTrestleSkew = 0;
 let roadOverlaps = 0;
 let thinBlocks = 0;
 let worstFill = 1;
+/** R37: no block of the web is a giant (a rail yard the subdivision couldn't cut) */
+const BLOCK_GIANT = 150000;
+let giantBlocks = 0, biggestBlock = 0;
 let districtFaults = 0;
 let polesInLots = 0;
 let raceFaults = 0;
@@ -462,6 +465,11 @@ for (const [bx, by] of cells) {
   const rail = net, river33 = riverFor(bx, by), coast33 = coastFor(bx, by);
   const ringD: Record<string, number[]> = { downtown: [], urban: [], residential: [] };
   for (const b of plan.blocks) {
+    biggestBlock = Math.max(biggestBlock, b.area);
+    if (b.area > BLOCK_GIANT) {
+      giantBlocks++;
+      console.log(`  R37 detail: city ${bx},${by} ${b.district} block at (${b.cx.toFixed(0)},${b.cz.toFixed(0)}) is ${(b.area / 1000).toFixed(0)}k m2`);
+    }
     if (!builtD(b.district)) continue;
     if (b.district in ringD) ringD[b.district].push(Math.hypot(b.cx - ISLAND / 2, b.cz - ISLAND / 2));
     if (b.district === 'industrial' && !rail.near(b.cx, b.cz, 70) && !rail.lines.some(L => L.pts.some(p => inBlock(b, p.x, p.z)))) {
@@ -623,6 +631,7 @@ if (selfOverlap > 0) fail('R28', `${selfOverlap} rail samples overlap a differen
 if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
+if (giantBlocks > 0) fail('R37', `${giantBlocks} blocks over ${BLOCK_GIANT / 1000}k m2 (biggest ${(biggestBlock / 1000).toFixed(0)}k)`);
 if (thinBlocks > 0) fail('R33', `${thinBlocks} built blocks under 55% built over (worst ${(worstFill * 100).toFixed(0)}%)`);
 if (raceFaults > 0) fail('R32', `${raceFaults} race-island faults (circuit missing / open, apron built on, track by a street, mouths)`);
 if (polesInLots > 0) fail('R6', `${polesInLots} traffic-light poles stand inside a lot`);
@@ -742,7 +751,7 @@ console.log(`base seed ${baseSeed}: ${cells.length} cities, ${crossingsTotal} cr
   `dead ends ${deadEnds}, rim gaps ${exitGaps}, unattached corridors ${corridorsUnattached}, rail-on-road ${railOnRoadSegs}, ` +
   `grid clashes ${railRiverRoadTotal}/${lotClashTotal}, folds ${foldTotal}, strays ${strayNodes}, bare crossings ${bareCrossings}, river fails ${riverFails}, trestle skew ${worstTrestleSkew.toFixed(1)} deg, ` +
   `road overlaps ${roadOverlaps}, road gaps ${roadGaps}, portal faults ${portalFaults}, diamond faults ${diamondFaults}, ` +
-  `thinnest block ${(worstFill * 100).toFixed(0)}% built`);
+  `thinnest block ${(worstFill * 100).toFixed(0)}% built, biggest block ${(biggestBlock / 1000).toFixed(0)}k m2`);
 if (failures === 0) {
   console.log('PASS — all world rules hold');
 } else {

@@ -80,19 +80,20 @@ export function fillBlock(
   b: Block, spec: FillSpec, raster: LotRaster,
   place: (x: number, z: number, ry: number, w: number, d: number) => boolean,
 ): number {
-  // one pass square to each distinct side, longest side first: the first
-  // lays the block's main grain, the rest fill the wedges its grain leaves
-  // along the sides that run askew
-  const sides: Array<{ l: number; h: number }> = [];
+  // one pass square to each distinct grain, the one most of the outline
+  // runs along first (a grain serves the sides parallel AND square to it):
+  // the first lays the block's main grain, the rest fill the wedges it
+  // leaves along the sides that run askew
+  const grains: Array<{ l: number; h: number }> = [];
   for (let i = 0; i < b.poly.length; i++) {
     const p = b.poly[i], q = b.poly[(i + 1) % b.poly.length];
     const l = Math.hypot(q.x - p.x, q.z - p.z);
     const h = Math.atan2(q.x - p.x, q.z - p.z);
-    const same = sides.find(o => Math.abs(Math.sin(2 * (o.h - h))) < 0.1 && Math.cos(2 * (o.h - h)) > 0);
-    if (same) same.l = Math.max(same.l, l);
-    else if (l > 12) sides.push({ l, h });
+    const same = grains.find(o => Math.abs(Math.sin(4 * (o.h - h))) < 0.2 && Math.cos(4 * (o.h - h)) > 0);
+    if (same) same.l += l;
+    else grains.push({ l, h });
   }
-  sides.sort((p, q) => q.l - p.l);
+  const sides = grains.filter(g => g.l > 12).sort((p, q) => q.l - p.l);
   let n = 0;
   sides.forEach((sd, k) => { n += pass(b, sd.h, k === 0 ? spec.sizes : spec.sizes.slice(-7), raster, place); });
   return n;

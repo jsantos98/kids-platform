@@ -65,8 +65,6 @@ export const MIN_EDGE = 32;
 const CLEARANCE = 15;   // two streets that don't meet stay this far apart
 const PAD_CLEAR = 20;   // and a junction this far from a street it doesn't meet (two kit pads' corners reach 10 m each)
 const SNAP = 16;        // a crossing this close to a node joins it
-/** corridor roads beside the track / the river (m): tried nearest first */
-const CORRIDOR_OFFSETS = [{ rail: 30, river: 38 }, { rail: 40, river: 48 }, { rail: 52, river: 60 }];
 /** blocks longer than this get a street cut through them (m) */
 const BLOCK_MAX = 130;
 const BLOCK_MIN_CUT = 5000;
@@ -1504,77 +1502,6 @@ function generate(bx: number, by: number): StreetNet {
       const pieces = clipToPoly({ x: tp.x - cut.x * R, z: tp.z - cut.z * R }, { x: tp.x + cut.x * R, z: tp.z + cut.z * R }, poly);
       const piece = pieces.find(([p, q]) => segDist(tp, p, q) < 1);
       if (piece && tryCut(poly, piece[0], piece[1])) return true;
-    }
-    // a corridor road: where the track (or the river) winds through the
-    // block no straight cut can cross it square everywhere — both lines
-    // crossing at the diamond defeat every one — so a road follows it
-    // instead, at an offset, side to side of the block: the block splits
-    // into the corridor (cut square across the track above) and ground
-    // clear of it (cut as usual)
-    for (const off of CORRIDOR_OFFSETS) {
-      for (const L of rail.lines) for (const side of [1, -1]) if (corridorCut(poly, L.pts, off.rail * side)) return true;
-      for (const side of [1, -1]) if (corridorCut(poly, river.pts, off.river * side)) return true;
-    }
-    return false;
-  }
-  /** lay a road `off` metres beside centreline `pts` (+ = right of its
-   * direction) across block `poly`, from side to side; kept if it survives */
-  function corridorCut(poly: P[], pts: Array<{ x: number; z: number; h: number }>, off: number): boolean {
-    const line: P[] = [];
-    for (let k = 0; k < pts.length; k += 3) {
-      const p = pts[k];
-      line.push({ x: p.x + Math.cos(p.h) * off, z: p.z - Math.sin(p.h) * off });
-    }
-    // the runs of it inside the block, each from boundary to boundary
-    const runs: P[][] = [];
-    let cur: P[] | null = null;
-    for (let k = 0; k + 1 < line.length; k++) {
-      const a = line[k], b = line[k + 1];
-      const ia = inPoly(a, poly), ib = inPoly(b, poly);
-      if (ia && cur) cur.push(a);
-      if (ia !== ib) {
-        // where a -> b crosses the block's outline
-        let hit: P | null = null, bt = Infinity;
-        for (let i = 0; i < poly.length; i++) {
-          const p = poly[i], q = poly[(i + 1) % poly.length];
-          const d1x = b.x - a.x, d1z = b.z - a.z, d2x = q.x - p.x, d2z = q.z - p.z;
-          const den = d1x * d2z - d1z * d2x;
-          if (Math.abs(den) < 1e-9) continue;
-          const t = ((p.x - a.x) * d2z - (p.z - a.z) * d2x) / den;
-          const u = ((p.x - a.x) * d1z - (p.z - a.z) * d1x) / den;
-          if (t >= 0 && t <= 1 && u >= 0 && u <= 1 && t < bt) { bt = t; hit = { x: a.x + d1x * t, z: a.z + d1z * t }; }
-        }
-        if (!hit) { cur = null; continue; }
-        // a hair past the outline, so the ends find the block's sides
-        const L = dist(a, b) || 1, ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
-        if (!ia) cur = [{ x: hit.x - ux * 0.4, z: hit.z - uz * 0.4 }];
-        else if (cur) { cur.push({ x: hit.x + ux * 0.4, z: hit.z + uz * 0.4 }); runs.push(cur); cur = null; }
-      }
-    }
-    for (const run of runs) {
-      const chords = simplifyOpen(run, 3, 45);
-      let len = 0;
-      for (let k = 0; k + 1 < chords.length; k++) len += dist(chords[k], chords[k + 1]);
-      if (len < 90 || chords.length < 2) continue;
-      // on land, off the water (unless square across it) and clear of the
-      // track (the rail cut checks the crossings)
-      let bad = false;
-      for (let k = 0; k + 1 < chords.length && !bad; k++) {
-        const a = chords[k], b = chords[k + 1], l = dist(a, b);
-        for (let t = 0; t <= l && !bad; t += 4) {
-          const x = a.x + ((b.x - a.x) * t) / l, z = a.z + ((b.z - a.z) * t) / l;
-          if (!coast.inLand(x, z, 20)) bad = true;
-        }
-      }
-      if (bad) continue;
-      const undo = B.snapshot();
-      const e0 = B.edges.length;
-      insertPolyline(chords, 'railside');
-      if (B.edges.length > e0 && B.survives(e0)) {
-        B.prune(keepCircuit);
-        return true;
-      }
-      undo();
     }
     return false;
   }

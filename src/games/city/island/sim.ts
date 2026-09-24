@@ -45,7 +45,7 @@ export class IslandSim {
     this.trains.setOrigin(this.ox, this.oz);
     this.cars = new IslandCars(scene, bx, by, this.ox, this.oz, opts.extraCars);
     this.walkers = new IslandWalkers(scene, bx, by, this.ox, this.oz, opts.pets, opts.people);
-    this.fleet = new Fleet(scene, this.ox, this.oz, citySeed(bx, by));
+    this.fleet = new Fleet(scene, this.ox, this.oz, citySeed(bx, by), bx, by);
   }
 
   /** wake up (catching up on the time spent dormant) or go dormant */

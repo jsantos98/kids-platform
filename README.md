@@ -16,7 +16,8 @@ The garage at the root is the launcher — big buttons, no reading required.
 `npm run build` produces a minified `dist/`; `npm run preview` serves it.
 
 **Endless City** is an endless archipelago of seeded island cities joined by
-causeways. Every new game rolls a fresh seed and writes it into the URL, and
+causeways. Each island grows its own seeded shoreline — bays, beaches and
+headlands reaching out to the four causeways — ringed by open sea. Every new game rolls a fresh seed and writes it into the URL, and
 `?seed=N` replays that world exactly. Pick a mode from the garage (or
 `?mode=`): fire truck (fires + cats), police car (patrol gates), ambulance and
 medical helicopter (people to rescue), police helicopter and plane (sky

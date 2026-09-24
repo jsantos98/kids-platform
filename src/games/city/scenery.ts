@@ -9,6 +9,7 @@ import { waveAt, hullObject, boatLoop } from './sea.js';
 import { buildBridge } from './bridge.js';
 import { makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 interface Bobber { mesh: THREE.Object3D; x: number; z: number; amp: number; phase: number }
@@ -34,35 +35,53 @@ export class CityScenery {
     const boxes: CollisionBox[] = [];
     const bobbers: Bobber[] = [];
 
-    // surf foam hugging the beach rim
-    const strip = (w: number, d: number, x: number, z: number): void => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), this.foamMat);
-      m.position.set(x, 0.05, z);
-      group.add(m);
-    };
-    strip(3, ISLAND + 6, ox - 1.8, oz + CENTER);
-    strip(3, ISLAND + 6, ox + ISLAND + 1.8, oz + CENTER);
-    strip(ISLAND + 6, 3, ox + CENTER, oz - 1.8);
-    strip(ISLAND + 6, 3, ox + CENTER, oz + ISLAND + 1.8);
+    const coast = coastFor(bx, by);
+    // surf foam tracing the shore, just out from the beach
+    {
+      const F = new Baked();
+      const ring = coast.pts.map(p => coast.shoreToward(p.x, p.z, 1.8));
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        const len = Math.hypot(b.x - a.x, b.z - a.z) + 0.6;
+        F.box(3, 0.1, len, 0xffffff, ox + (a.x + b.x) / 2, 0.05, oz + (a.z + b.z) / 2, 0, Math.atan2(b.x - a.x, b.z - a.z), 0);
+      }
+      const foam = F.build({ cast: false, receive: false });
+      foam.material = this.foamMat;
+      group.add(foam);
+    }
 
     // the picnic-island causeway
-    const bridge = buildBridge(ox, oz);
+    const bridge = buildBridge(bx, by, ox, oz);
     group.add(bridge.group);
     boxes.push(...bridge.boxes);
 
-    // wooden pier off the south-east shore + moored dinghies
-    group.add(this.bakePier(ox, oz));
-    const px = ox + ISLAND - 50;
-    for (const [dx, dz, phase] of [[-7.5, 10, 1.2], [7.5, 14, 4.1]] as Array<[number, number, number]>) {
+    // wooden pier off the south-east shore + moored dinghies, facing out to
+    // sea from wherever the coast is (pier frame: +z outward, x across)
+    const shore = coast.shoreToward(CENTER + 1, CENTER + 1, -2);
+    const out = { x: shore.x - CENTER, z: shore.z - CENTER };
+    const ol = Math.hypot(out.x, out.z);
+    out.x /= ol; out.z /= ol;
+    const across = { x: out.z, z: -out.x };
+    const yaw = Math.atan2(out.x, out.z);
+    const at = (a: number, o: number): { x: number; z: number } =>
+      ({ x: ox + shore.x + across.x * a + out.x * o, z: oz + shore.z + across.z * a + out.z * o });
+    const pier = this.bakePier();
+    const p0 = at(0, 0);
+    pier.position.set(p0.x, 0, p0.z);
+    pier.rotation.y = yaw;
+    group.add(pier);
+    for (const [a, o, phase] of [[-7.5, 12, 1.2], [7.5, 16, 4.1]] as Array<[number, number, number]>) {
       const boat = hullObject('boat-row-large', 4, () => makeRowboat({ hull: C.brown }));
-      boat.rotation.y = Math.PI / 2;
-      boat.position.set(px + dx, 0, oz + ISLAND + dz);
+      const p = at(a, o);
+      boat.rotation.y = yaw + Math.PI / 2;
+      boat.position.set(p.x, 0, p.z);
       group.add(boat);
-      bobbers.push({ mesh: boat, x: px + dx, z: oz + ISLAND + dz, amp: 1.6, phase });
+      bobbers.push({ mesh: boat, x: p.x, z: p.z, amp: 1.6, phase });
     }
 
-    // an anchored cargo ship off the south-east shore
-    const sx = ox + ISLAND + 34, sz = oz + ISLAND - 36;
+    // an anchored cargo ship further out off the same shore
+    const sp = at(-40, 70);
+    const sx = sp.x, sz = sp.z;
     const ship = hullObject('ship-cargo-a', 30, () => new THREE.Group());
     ship.rotation.y = 0.5;
     ship.position.set(sx, 0, sz);
@@ -70,7 +89,7 @@ export class CityScenery {
     bobbers.push({ mesh: ship, x: sx, z: sz, amp: 0.5, phase: 2.8 });
 
     // course buoys just outside the sailing lane
-    const loop = boatLoop();
+    const loop = boatLoop(bx, by);
     for (let k = 0; k < 6; k++) {
       const p = loop[Math.floor((k / 6) * loop.length)];
       const nx = p.x - CENTER, nz = p.z - CENTER;
@@ -115,10 +134,12 @@ export class CityScenery {
     return out;
   }
 
-  /** pier deck, beams, posts and bollards in one baked mesh (south-east shore) */
-  private bakePier(ox: number, oz: number): THREE.Mesh {
+  /** pier deck, beams, posts and bollards in one baked mesh, in the pier's
+   * own frame: the deck runs from the beach (z = -2) out to sea (+z) */
+  private bakePier(): THREE.Mesh {
     const wood = C.brown, dark = C.brownDark;
-    const px = ox + ISLAND - 50, zc = oz + ISLAND + 9.5;
+    const ox = 0, oz = -ISLAND;
+    const px = ox, zc = oz + ISLAND + 9.5;
     const B = new Baked();
     B.box(8, 0.16, 19, wood, px, 0.42, zc);
     for (const x of [px - 3.5, px - 0.5, px + 2.5]) B.box(0.14, 0.04, 19, dark, x, 0.51, zc);

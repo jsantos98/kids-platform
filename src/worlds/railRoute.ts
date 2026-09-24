@@ -18,6 +18,7 @@ import {
 } from './streetLines.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { ISLAND, CENTER } from './world.js';
+import { coastFor, type Coast } from './coast.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
 export const RAIL_TOP = 0.21; // where train wheels sit
@@ -59,7 +60,7 @@ interface Attempt { control: Array<{ x: number; z: number }>; score: number; pat
 
 /** how clean a deformed route came out — mirrors the audit's own checks,
  * so a route is only ever shipped when the deformation provably worked */
-interface Quality { ride: number; skew: number; folds: number; bridge: number; riverSkew: number }
+interface Quality { ride: number; skew: number; folds: number; bridge: number; riverSkew: number; offLand: number }
 
 /**
  * Where the river passes within 8 m of a lattice street line, a road bridge
@@ -86,6 +87,7 @@ function bridgeZones(lines: StreetLine[], river: RiverRoute): Array<{ x: number;
 function shapeQuality(
   p: WorldPath, lines: StreetLine[],
   river: RiverRoute | null, zones: Array<{ x: number; z: number }>,
+  coast: Coast,
 ): Quality {
   const pts = p.pts, N = pts.length;
   let ride = 0, run = 0, folds = 0, skew = 0;
@@ -195,11 +197,15 @@ function shapeQuality(
       riverSkew = Math.max(riverSkew, d);
     }
   }
-  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI };
+  // R29: the whole loop runs on dry land, a bed-width clear of the beach
+  let offLand = 0;
+  for (const pt of dense) if (!coast.inLand(pt.x, pt.z, 12)) offLand++;
+  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI, offLand };
 }
 
 const qualityBetter = (a: Quality, b: Quality): boolean =>
-  a.folds !== b.folds ? a.folds < b.folds
+  a.offLand !== b.offLand ? a.offLand < b.offLand
+  : a.folds !== b.folds ? a.folds < b.folds
     : a.bridge !== b.bridge ? a.bridge < b.bridge
       : a.ride !== b.ride ? a.ride < b.ride
         : a.skew !== b.skew ? a.skew < b.skew
@@ -211,6 +217,7 @@ function buildRoute(bx: number, by: number): RailRoute {
   const lines = streets.lines;
   const river = riverFor(seed);
   const zones = bridgeZones(lines, river);
+  const coast = coastFor(bx, by);
   // rank route candidates by the cheap pre-deform score, then actually
   // deform the best few and SHIP the first whose geometry comes out clean
   // (no on-road rides, no folds, square crossings, trestles clear of road
@@ -236,7 +243,7 @@ function buildRoute(bx: number, by: number): RailRoute {
     };
     for (let attempt = 0; attempt < 120; attempt++) {
       const r = rng(chunkSeed(seed, 0x5a1, 0x7e + attempt + round * 1000));
-      const a = tryRoute(r, streets, river, zones, mul);
+      const a = tryRoute(r, streets, river, zones, coast, mul);
       if (!a) continue;
       if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
       offer(a);
@@ -244,8 +251,8 @@ function buildRoute(bx: number, by: number): RailRoute {
     if (ranked.length === 0) continue;
     for (const a of ranked) {
       const route = finalize(bx, by, a.control, a.path);
-      const q = shapeQuality(route.path, lines, river, zones);
-      if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
+      const q = shapeQuality(route.path, lines, river, zones, coast);
+      if (q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
       if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
     }
   }
@@ -253,8 +260,8 @@ function buildRoute(bx: number, by: number): RailRoute {
   for (const mul of strengths) {
     const a = forcedRoute(seed);
     const route = finalize(bx, by, a.control, a.path);
-    const q = shapeQuality(route.path, lines, river, zones);
-    if (q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
+    const q = shapeQuality(route.path, lines, river, zones, coast);
+    if (q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24 && q.riverSkew < 30) return route;
     if (!fallback || qualityBetter(q, fallback.q)) fallback = { route, q };
   }
   return fallback!.route;
@@ -264,6 +271,7 @@ function buildRoute(bx: number, by: number): RailRoute {
 function tryRoute(
   r: () => number, streets: StreetCandidates,
   river: RiverRoute, zones: Array<{ x: number; z: number }>,
+  coast: Coast,
   slideMul = 0.9,
 ): Attempt | null {
   const lines = streets.lines;
@@ -314,6 +322,13 @@ function tryRoute(
     const dz = p.z - zn.z;
     p.z += Math.max(-45, Math.min(45, Math.sign(dz || 1) * (60 - Math.min(dn, 60)) * slideMul));
   }
+  // the ring stays well inland: a control point near the shore is pulled in
+  // to 70 m from it (R29)
+  for (const p of control) {
+    if (coast.inLand(p.x, p.z, 70)) continue;
+    const q = coast.shoreToward(p.x, p.z, -70);
+    p.x = q.x; p.z = q.z;
+  }
   // adjacent control points need breathing room, or the spline kinks
   for (let k = 0; k < n; k++) {
     const a = control[k], b = control[(k + 1) % n];
@@ -326,6 +341,7 @@ function tryRoute(
   for (let k = 0; k < path.pts.length; k++) {
     const p = path.pts[k];
     if (p.x < 34 || p.x > ISLAND - 34 || p.z < 34 || p.z > ISLAND - 34) score += 3;
+    if (!coast.inLand(p.x, p.z, 30)) score += 30; // too close to the shore / at sea
     const node = streets.nearestNode(p.x, p.z);
     if (node) {
       const dx = p.x - node.x, dz = p.z - node.z;
@@ -402,7 +418,7 @@ function tryRoute(
 function forcedRoute(seed: number): Attempt {
   const r = rng(chunkSeed(seed, 0x5a2, 3));
   const ph = r() * Math.PI * 2;
-  const off = ISLAND * 0.27;
+  const off = ISLAND * 0.22; // well inside even the smallest shore
   const control: Array<{ x: number; z: number }> = [];
   const ring = (fx: number, fz: number): { x: number; z: number } => {
     const px = CENTER + fx * off, pz = CENTER + fz * off;

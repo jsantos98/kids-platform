@@ -8,6 +8,7 @@ import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js'
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
+import { coastFor, clipToRect } from '../../worlds/coast.js';
 import { nodeArms } from '../../worlds/roadLayout.js';
 import { lightState } from './lights.js';
 import { makeTrafficLights, setHead, type TrafficLightProps } from './lampProps.js';
@@ -29,6 +30,7 @@ export class ChunkManager {
   private chunks = new Map<string, Chunk>();
   private pending = new Set<string>();
   private queue: Array<[number, number, number, number, string]> = [];
+  private landCache = new Map<string, boolean>();
 
   constructor(private scene: THREE.Scene, private CH = 64, private VIEW_R = 4) {}
 
@@ -38,6 +40,14 @@ export class ChunkManager {
     const cx = wx - Math.round((city.ox / this.CH));
     const cz = wz - Math.round((city.oz / this.CH));
     if (cx < 0 || cz < 0 || cx >= WORLD_CHUNKS || cz >= WORLD_CHUNKS) return null; // open water
+    // a chunk entirely off the island's shore is sea: nothing to build
+    const k = `${city.bx},${city.by},${cx},${cz}`;
+    let land = this.landCache.get(k);
+    if (land === undefined) {
+      land = clipToRect(coastFor(city.bx, city.by).pts, cx * this.CH, cz * this.CH, (cx + 1) * this.CH, (cz + 1) * this.CH).length >= 3;
+      this.landCache.set(k, land);
+    }
+    if (!land) return null;
     return { bx: city.bx, by: city.by, cx, cz };
   }
 

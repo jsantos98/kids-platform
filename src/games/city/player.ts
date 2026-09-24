@@ -4,7 +4,10 @@ import * as THREE from 'three';
 import { makeCar, makeFireTruck, makeHelicopter, makePlane } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
 import { cityAt } from '../../worlds/cityGrid.js';
-import { ISLAND } from '../../worlds/world.js';
+import { CENTER } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { bridgeLayout } from './bridge.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 /** how a vehicle moves: on the streets, hovering, flying, sailing or on rails */
@@ -271,6 +274,16 @@ export function physicsStep(
       if (nx > b.x1 - V.radius && nx < b.x2 + V.radius && st.z > b.z1 - 0.8 && st.z < b.z2 + 0.8) hitX = true;
       if (st.x > b.x1 - 0.8 && st.x < b.x2 + 0.8 && nz > b.z1 - V.radius && nz < b.z2 + V.radius) hitZ = true;
     }
+    // the shore is a soft wall: the sea stops the wheels like a scrape
+    // (never a crash), so a kid who leaves the road on a beach just slides
+    // along the waterline
+    // (already off the land — a resume gone wrong — it may always move)
+    if (!onGround(nx, nz) && onGround(st.x, st.z)) {
+      if (onGround(nx, st.z)) st.x = nx;
+      else if (onGround(st.x, nz)) st.z = nz;
+      st.v *= 1 - Math.min(0.9, dt * 4);
+      return { crashed: false };
+    }
     if ((hitX || hitZ || (poleHit && Math.abs(st.v) > 1.0)) && Math.abs(st.v) > 1.4) {
       // crash! flash in place; the caller picks the resume spot (a
       // breadcrumb on the road behind — see breadcrumb.ts)
@@ -285,12 +298,27 @@ export function physicsStep(
   return { crashed };
 }
 
-/** would a boat of radius r at world (x, z) touch an island (beach
- * included)? Islands are the city squares; the causeways are bridges the
- * boat passes under. */
-export function onLand(x: number, z: number, r: number): boolean {
+/** can a road vehicle stand at world (x, z)? Dry land, a causeway deck (the
+ * exit corridors out over the strait) or the picnic bridge and its island. */
+export function onGround(x: number, z: number): boolean {
   const c = cityAt(x, z);
   const lx = x - c.ox, lz = z - c.oz;
-  const m = r + 1.5;
-  return lx > -m && lz > -m && lx < ISLAND + m && lz < ISLAND + m;
+  if (coastFor(c.bx, c.by).inLand(lx, lz, -1)) return true;
+  const ex = cityPlanFor(c.bx, c.by).exits;
+  const ON = 7.5;
+  if (Math.abs(lx - ex.n * 64) < ON && lz < CENTER) return true;
+  if (Math.abs(lx - ex.s * 64) < ON && lz > CENTER) return true;
+  if (Math.abs(lz - ex.w * 64) < ON && lx < CENTER) return true;
+  if (Math.abs(lz - ex.e * 64) < ON && lx > CENTER) return true;
+  const b = bridgeLayout(c.bx, c.by);
+  if (Math.abs(lx - b.X) < b.HALF_W && lz > b.Z0 - 2 && lz < b.Z1 + 2) return true;
+  return lx > b.ISLE.x1 && lx < b.ISLE.x2 && lz > b.ISLE.z1 && lz < b.ISLE.z2;
+}
+
+/** would a boat of radius r at world (x, z) touch an island (beach
+ * included)? The shore is each island's coast (coast.ts); the causeways are
+ * bridges the boat passes under. */
+export function onLand(x: number, z: number, r: number): boolean {
+  const c = cityAt(x, z);
+  return coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -(r + 1.5));
 }

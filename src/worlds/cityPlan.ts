@@ -33,6 +33,7 @@ import { citySeed, southExit, eastExit, streetLinesFor } from './cityGrid.js';
 import { railRouteFor, type RailRoute } from './railRoute.js';
 import { riverFor, type RiverRoute } from './riverRoute.js';
 import { arcGap } from './spline.js';
+import { coastFor } from './coast.js';
 
 /** half-size of the kit roundabout at plazas (3 x 14 m tiles); roadLayout.ts
  * lays it, the lots and the occupancy grid keep clear of it */
@@ -146,6 +147,16 @@ function buildPlan(bx: number, by: number): CityPlan {
   const r = rng(chunkSeed(seed, 0xc17, 0));
   const rail = railRouteFor(bx, by);
   const river = riverFor(seed);
+  // the island's shore (R29): streets, lots and stations stay on land
+  const coast = coastFor(bx, by);
+  /** any stretch of this segment's carriageway would lie in the sea */
+  const offLand = (horiz: boolean, line: number, a: number, b: number): boolean => {
+    for (let t = a; t <= b; t += 4) {
+      const x = horiz ? t : line * CH, z = horiz ? line * CH : t;
+      if (!coast.inLand(x, z, 11)) return true;
+    }
+    return false;
+  };
 
   // ---- 1. street lines: the shared seeded subset (cityGrid.ts) — the same
   // lines the railway straightens itself to cross at right angles. Two lines
@@ -248,17 +259,20 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (const j of H) for (let i = 0; i < W; i++) {
       // arterials keep all their segments (rail shadows and bridge clashes still bite)
       const keep = arterialH.has(j) || r() >= dropP;
-      if (keep && !railRunsAlong(true, j, i * CH, (i + 1) * CH) && !bridgeClash(true, j, i * CH, (i + 1) * CH)) {
+      if (keep && !railRunsAlong(true, j, i * CH, (i + 1) * CH) && !bridgeClash(true, j, i * CH, (i + 1) * CH)
+        && !offLand(true, j, i * CH, (i + 1) * CH)) {
         segHSet.add(key(j, i));
       }
     }
     for (const i of V) for (let j = 0; j < W; j++) {
       const keep = arterialV.has(i) || r() >= dropP;
-      if (keep && !railRunsAlong(false, i, j * CH, (j + 1) * CH) && !bridgeClash(false, i, j * CH, (j + 1) * CH)) {
+      if (keep && !railRunsAlong(false, i, j * CH, (j + 1) * CH) && !bridgeClash(false, i, j * CH, (j + 1) * CH)
+        && !offLand(false, i, j * CH, (j + 1) * CH)) {
         segVSet.add(key(i, j));
       }
     }
-    forceRailCrossings(rail, H, V, segHSet, segVSet, bridgeClash);
+    forceRailCrossings(rail, H, V, segHSet, segVSet,
+      (horiz, line, a, b) => bridgeClash(horiz, line, a, b) || offLand(horiz, line, a, b));
     pruneDisconnected(segHSet, segVSet);
     if (segHSet.size + segVSet.size >= 14) break;
   }
@@ -608,6 +622,7 @@ function buildPlan(bx: number, by: number): CityPlan {
     // FOOTPRINT must clear the water, not just the lot centre (a deep lot
     // whose centre clears the river can still dip its far corner into it)
     if (rail.near(lot.x, lot.z, 16)) return;
+    if (!coast.inLand(lot.x, lot.z, 4)) return;
     if (river.near(lot.x, lot.z, river.halfAt(lot.x, lot.z) + 6.5)) return;
     const flip = Math.abs(Math.abs(lot.ry) - Math.PI / 2) < 0.01;
     const hx = (flip ? lot.d : lot.w) / 2, hz = (flip ? lot.w : lot.d) / 2;
@@ -616,6 +631,7 @@ function buildPlan(bx: number, by: number): CityPlan {
     for (const [sx, sz] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
       const fx = lot.x + sx * hx, fz = lot.z + sz * hz;
       if (rail.near(fx, fz, 3)) return;
+      if (!coast.inLand(fx, fz, 2)) return; // the whole footprint on dry land (R29)
       if (river.inWater(fx, fz) ||
           river.near(fx, fz, river.halfAt(fx, fz) + 1.5)) return;
     }
@@ -709,6 +725,7 @@ function buildPlan(bx: number, by: number): CityPlan {
       if (dh > 0.16) continue; // needs ~28 m of straight track
       const p = rail.sample(d);
       if (p.x < 46 || p.x > ISLAND - 46 || p.z < 46 || p.z > ISLAND - 46) continue;
+      if (!coast.inLand(p.x, p.z, 25)) continue;
       if (river.distTo(p.x, p.z) < 18) continue;
       if (crossings.some(c => arcGap(c.d, d, rail.total) < 24 || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
       cand.push(d);

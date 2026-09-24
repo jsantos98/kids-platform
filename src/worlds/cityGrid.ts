@@ -58,10 +58,12 @@ export function cityAt(x: number, z: number): CityRef {
   return { bx, by, ox: bx * CITY_PITCH, oz: by * CITY_PITCH, key: `${bx},${by}` };
 }
 
-/** exit roads live on these interior lattice lines */
+/** exit roads live on these central lattice lines: the shore's headland
+ * reaches out toward each causeway portal (coast.ts), and on a central line
+ * the corridor and the headland stay aligned, so the causeway stays short */
 function exitCandidates(): number[] {
   const out: number[] = [];
-  for (let l = 2; l <= WORLD_CHUNKS - 3; l++) out.push(l);
+  for (let l = 4; l <= WORLD_CHUNKS - 4; l++) out.push(l);
   return out;
 }
 

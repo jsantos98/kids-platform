@@ -1,5 +1,6 @@
-// The bridge: a low causeway leaving the island's south shore (x≈184) to a
-// little picnic island in the sea. The physics is flat 2D, so the deck sits
+// The bridge: a low causeway leaving the island's south shore (at x =
+// BRIDGE_X, from wherever the coast is there) to a little picnic island in
+// the sea. The physics is flat 2D, so the deck sits
 // flush with the island slabs — the parapets, fender piles and corner lamps
 // do the looking, and the parapets are deliberately collision-free (driving
 // off into the shallows is half the fun).
@@ -7,7 +8,8 @@ import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { bakedModel, type BakedTemplate } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
-import { ISLAND, BRIDGE_X } from '../../worlds/world.js';
+import { ISLAND, BRIDGE_X, CENTER } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 const ASPHALT = 0x5f6771;
@@ -18,20 +20,40 @@ const WOOD = 0x8a6a4a;
 const GRASS = 0xa9c88b;
 const BEACH = 0xf0e2c0;
 
-/** X centre of the bridge, deck width, and shore/island extents */
 const X = BRIDGE_X;
 const HALF_W = 5.5;
-const Z0 = ISLAND - 3;   // overlaps the beach ring
-const Z1 = ISLAND + 37;  // lands on the picnic island
-const ISLE = { x1: X - 20, z1: Z1, x2: X + 20, z2: Z1 + 40 };
 
-/** shared with the sea's boat loop and the minimap (city-local coordinates) */
-export const BRIDGE = { X, HALF_W, Z0, Z1, ISLE };
+export interface BridgeLayout {
+  X: number;
+  HALF_W: number;
+  /** deck from the south shore (z0 overlaps the beach) to the picnic island */
+  Z0: number;
+  Z1: number;
+  ISLE: { x1: number; z1: number; x2: number; z2: number };
+}
+
+/** city (bx, by)'s picnic bridge + island (city-local): the deck leaves the
+ * south shore where the coast meets x = BRIDGE_X and runs 40 m out */
+const layouts = new Map<string, BridgeLayout>();
+export function bridgeLayout(bx: number, by: number): BridgeLayout {
+  const key = `${bx},${by}`;
+  const hit = layouts.get(key);
+  if (hit) return hit;
+  if (layouts.size > 32) layouts.clear();
+  const coast = coastFor(bx, by);
+  let shore = CENTER;
+  while (shore < ISLAND && coast.inLand(X, shore + 1, 1)) shore++;
+  const Z0 = shore - 3, Z1 = shore + 37;
+  const out = { X, HALF_W, Z0, Z1, ISLE: { x1: X - 20, z1: Z1, x2: X + 20, z2: Z1 + 40 } };
+  layouts.set(key, out);
+  return out;
+}
 
 export interface BuiltBridge { group: THREE.Group; boxes: CollisionBox[] }
 
 /** Build this city's picnic-island causeway, offset into world space. */
-export function buildBridge(ox: number, oz: number): BuiltBridge {
+export function buildBridge(bx: number, by: number, ox: number, oz: number): BuiltBridge {
+  const { Z0, Z1, ISLE } = bridgeLayout(bx, by);
   const B = new Baked();
   const boxes: CollisionBox[] = [];
   const r = rng(chunkSeed(77, 1, 4));

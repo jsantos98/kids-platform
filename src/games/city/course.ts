@@ -196,7 +196,7 @@ export class Course {
   /** buoy gates along the offshore sailing lane, ~110 m apart, heading the
    * way the boat is pointing */
   private seaSpots(city: CityRef, x: number, z: number, heading: number): Array<{ x: number; z: number; y: number; yaw: number }> {
-    const loop = boatLoop();
+    const loop = boatLoop(city.bx, city.by);
     const n = loop.length;
     const lx = x - city.ox, lz = z - city.oz;
     let k0 = 0, best = Infinity;

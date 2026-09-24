@@ -21,7 +21,8 @@ import { IslandManager } from './island/manager.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
-import { CENTER, ISLAND } from '../../worlds/world.js';
+import { CENTER } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, type CityRef } from '../../worlds/cityGrid.js';
 import { railRouteFor } from '../../worlds/railRoute.js';
 import { Missions } from './missions.js';
@@ -84,13 +85,14 @@ function pickSpawn(bx: number, by: number): { x: number; z: number; heading: num
   return spots.length ? spots[(sr() * spots.length) | 0] : { x: CENTER, z: CENTER, heading: 0 };
 }
 
-/** the boat starts on the offshore sailing lane off the pier (south-east),
- * pointing along the lane */
-function seaSpawn(): { x: number; z: number; heading: number } {
-  const loop = boatLoop();
+/** the boat starts on the offshore sailing lane off the pier (south-east
+ * shore), pointing along the lane */
+function seaSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
+  const loop = boatLoop(bx, by);
+  const pier = coastFor(bx, by).shoreToward(CENTER + 1, CENTER + 1, 26);
   let k0 = 0, best = Infinity;
   loop.forEach((p, k) => {
-    const d = (p.x - (ISLAND - 50)) ** 2 + (p.z - (ISLAND + 26)) ** 2;
+    const d = (p.x - pier.x) ** 2 + (p.z - pier.z) ** 2;
     if (d < best) { best = d; k0 = k; }
   });
   const a = loop[k0], b = loop[(k0 + 1) % loop.length];
@@ -99,7 +101,7 @@ function seaSpawn(): { x: number; z: number; heading: number } {
 
 /** where a mode starts in city (bx, by) — city-local */
 function modeSpawn(bx: number, by: number): { x: number; z: number; heading: number } {
-  if (MODE.spawn === 'sea') return seaSpawn();
+  if (MODE.spawn === 'sea') return seaSpawn(bx, by);
   if (MODE.spawn === 'rail') {
     const r = railRouteFor(bx, by);
     const p = r.sample(r.total / 6); // where Trains.addPlayer puts the kid's train

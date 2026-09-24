@@ -11,6 +11,7 @@
 // asks the grid instead. The vector generators stay the source of shape
 // truth; the grid is the shared authority on what occupies where.
 import { cityPlanFor, ROUNDABOUT_REACH } from './cityPlan.js';
+import { coastFor } from './coast.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
@@ -21,14 +22,17 @@ export const RAIL = 2;
 export const RIVER = 4;
 export const LOT = 8;
 export const PLAZA = 16;
-export const DECK = 128; // causeway decks (offshore — reserved)
+/** off the island's shore (coast.ts) */
+export const SEA = 32;
+/** a causeway corridor out over the water (the only road allowed on SEA) */
+export const DECK = 128;
 
 /** props may never claim cells carrying any of these */
-export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA;
+export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA | SEA;
 /** built ground a prop cannot stand on even inside its own lot (trees) */
-export const STRUCTURED = ROAD | RAIL | RIVER | PLAZA;
+export const STRUCTURED = ROAD | RAIL | RIVER | PLAZA | SEA;
 /** wild scatter (trees, junk) may own LOT-free, built-free ground only */
-export const WILD_FORBIDDEN = ROAD | RAIL | RIVER | LOT | PLAZA;
+export const WILD_FORBIDDEN = ROAD | RAIL | RIVER | LOT | PLAZA | SEA;
 
 const MARGIN = 32;                       // river + causeway mouths overhang
 const SIZE = ISLAND + MARGIN * 2;
@@ -175,6 +179,20 @@ function paint(bx: number, by: number): CityGrid {
         const hx = (flip ? lot.d : lot.w) / 2, hz = (flip ? lot.w : lot.d) / 2;
         g.fill(lot.x - hx, lot.z - hz, lot.x + hx, lot.z + hz, LOT);
       }
+    }
+  }
+  // the sea: every cell off the shore; causeway corridors out over it are
+  // DECK (the one road the sea may carry)
+  const coast = coastFor(bx, by);
+  const exitV = [plan.exits.n, plan.exits.s], exitH = [plan.exits.w, plan.exits.e];
+  for (let iz = 0; iz < SIZE; iz++) {
+    const z = iz - MARGIN + 0.5, row = iz * SIZE;
+    for (let ix = 0; ix < SIZE; ix++) {
+      const x = ix - MARGIN + 0.5;
+      if (coast.inLand(x, z)) continue;
+      let bits = g.raw[row + ix] | SEA;
+      if (exitV.some(l => Math.abs(x - l * 64) <= 8) || exitH.some(l => Math.abs(z - l * 64) <= 8)) bits |= DECK;
+      g.raw[row + ix] = bits;
     }
   }
   return g;

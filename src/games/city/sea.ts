@@ -9,6 +9,7 @@ import { bakedModel, prepBakedModels, type BakeDef } from '../../engine/assets.j
 import { templateToMesh } from '../../engine/baked.js';
 import { makeSailboat, makeTugboat, makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
+import { coastFor } from '../../worlds/coast.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
 export function waveAt(x: number, z: number, t: number): number {
@@ -17,32 +18,27 @@ export function waveAt(x: number, z: number, t: number): number {
        + 0.018 * Math.sin(0.05 * (x + z) + t * 0.5);
 }
 
-// offshore lane: rounded rectangle 52 m beyond the island edge, ~3 m spacing
-const LO = -26, HI = ISLAND + 26, CUT = 26;
-const CORNERS: Array<{ x: number; z: number }> = [
-  { x: LO + CUT, z: LO }, { x: HI - CUT, z: LO },
-  { x: HI, z: LO + CUT }, { x: HI, z: HI - CUT },
-  { x: HI - CUT, z: HI }, { x: LO + CUT, z: HI },
-  { x: LO, z: HI - CUT }, { x: LO, z: LO + CUT },
-];
-function buildLoop(): Array<{ x: number; z: number }> {
-  const pts: Array<{ x: number; z: number }> = [];
-  for (let i = 0; i < CORNERS.length; i++) {
-    const a = CORNERS[i], b = CORNERS[(i + 1) % CORNERS.length];
-    const len = Math.hypot(b.x - a.x, b.z - a.z);
-    const steps = Math.max(1, Math.round(len / 3));
-    for (let k = 0; k < steps; k++) {
-      const f = k / steps;
-      pts.push({ x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f });
-    }
-  }
-  return pts;
-}
-const LOOP = buildLoop();
+// offshore lane: the island's shore pushed 26 m out to sea, resampled every
+// ~3 m (city-local)
+const loops = new Map<string, Array<{ x: number; z: number }>>();
 
-/** the current city's offshore sailing lane (city-local coordinates) */
-export function boatLoop(): Array<{ x: number; z: number }> {
-  return LOOP;
+/** city (bx, by)'s offshore sailing lane (city-local coordinates) */
+export function boatLoop(bx: number, by: number): Array<{ x: number; z: number }> {
+  const key = `${bx},${by}`;
+  let loop = loops.get(key);
+  if (!loop) {
+    const coast = coastFor(bx, by);
+    const ring = coast.pts.map(p => coast.shoreToward(p.x, p.z, 26));
+    loop = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const steps = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.z - a.z) / 3));
+      for (let k = 0; k < steps; k++) loop.push({ x: a.x + (b.x - a.x) * (k / steps), z: a.z + (b.z - a.z) * (k / steps) });
+    }
+    loops.set(key, loop);
+    if (loops.size > 16) loops.delete(loops.keys().next().value as string);
+  }
+  return loop;
 }
 
 const mod = (a: number, n: number) => ((a % n) + n) % n;
@@ -128,8 +124,11 @@ const FLEET: Array<{ tpl: string; len: number; speed: number; dir: 1 | -1; fb: (
 /** one island's boats, sailing its offshore lane for good */
 export class Fleet {
   private boats: Boat[] = [];
+  private loop: Array<{ x: number; z: number }>;
 
-  constructor(private scene: THREE.Scene, private ox: number, private oz: number, seed: number) {
+  constructor(private scene: THREE.Scene, private ox: number, private oz: number, seed: number, bx: number, by: number) {
+    this.loop = boatLoop(bx, by);
+    const LOOP = this.loop;
     FLEET.forEach((d, i) => {
       const g = new THREE.Group();
       g.add(hullObject(d.tpl, d.len, d.fb));
@@ -154,6 +153,7 @@ export class Fleet {
   dispose(): void { for (const b of this.boats) this.scene.remove(b.mesh); }
 
   update(elapsed: number): void {
+    const LOOP = this.loop;
     const total = LOOP.length;
     for (const b of this.boats) {
       b.mesh.visible = true;

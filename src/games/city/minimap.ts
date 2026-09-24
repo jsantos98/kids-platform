@@ -9,8 +9,9 @@ import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
-import { STRAIT } from '../../worlds/cityGrid.js';
-import { BRIDGE } from './bridge.js';
+import { CITY_PITCH } from '../../worlds/cityGrid.js';
+import { bridgeLayout } from './bridge.js';
+import { coastFor, causewaySpan } from '../../worlds/coast.js';
 import type { Missions } from './missions.js';
 
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -49,15 +50,25 @@ export class Minimap {
     const tx = (x: number) => (x - (CENTER - VIEW / 2)) * scale;
     const ty = (z: number) => (z - (CENTER - VIEW / 2)) * scale;
 
-    // the island, district-tinted per chunk, on the sea
+    // the island — its real shore, a sand rim, district tints clipped to it —
+    // on the sea
     ctx.fillStyle = '#72c3de';
     ctx.fillRect(0, 0, s, s);
+    const coast = coastFor(this.bx, this.by);
+    ctx.beginPath();
+    coast.pts.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
+    ctx.closePath();
+    ctx.fillStyle = '#f0e2c0';
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
     for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
       for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
         ctx.fillStyle = hex(chunkGroundColor(this.bx, this.by, cx, cz));
-        ctx.fillRect(tx(cx * CH), ty(cz * CH), CH * scale, CH * scale);
+        ctx.fillRect(tx(cx * CH) + 1.5, ty(cz * CH) + 1.5, CH * scale, CH * scale);
       }
     }
+    ctx.restore();
 
     // streets: every edge of the street graph
     const graph = graphFor(this.bx, this.by);
@@ -103,6 +114,7 @@ export class Minimap {
 
     // the bridge + picnic island off the south shore
     ctx.fillStyle = '#c8b98e';
+    const BRIDGE = bridgeLayout(this.bx, this.by);
     ctx.fillRect(tx(BRIDGE.ISLE.x1), ty(BRIDGE.ISLE.z1), 40 * scale, 40 * scale);
     ctx.fillStyle = '#a9c88b';
     ctx.fillRect(tx(BRIDGE.ISLE.x1 + 2), ty(BRIDGE.ISLE.z1 + 2), 36 * scale, 36 * scale);
@@ -110,12 +122,15 @@ export class Minimap {
     ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * scale, 42 * scale);
 
     // causeways heading out to the four neighbouring cities
+    // (each deck runs from our last dry land out over the strait)
     ctx.fillStyle = '#a9b0ba';
-    const stub = 60;
-    ctx.fillRect(tx(plan.exits.s * CH - 5.5), ty(ISLAND), 11 * scale, stub * scale);
-    ctx.fillRect(tx(plan.exits.n * CH - 5.5), ty(-stub), 11 * scale, stub * scale);
-    ctx.fillRect(tx(ISLAND), ty(plan.exits.e * CH - 5.5), stub * scale, 11 * scale);
-    ctx.fillRect(tx(-stub), ty(plan.exits.w * CH - 5.5), stub * scale, 11 * scale);
+    const S = causewaySpan(this.bx, this.by, 's'), E = causewaySpan(this.bx, this.by, 'e');
+    const N = causewaySpan(this.bx, this.by - 1, 's'), W = causewaySpan(this.bx - 1, this.by, 'e');
+    const far = VIEW; // off the map is fine — the canvas clips it
+    ctx.fillRect(tx(S.at - 5.5), ty(S.from), 11 * scale, far * scale);
+    ctx.fillRect(tx(E.from), ty(E.at - 5.5), far * scale, 11 * scale);
+    ctx.fillRect(tx(N.at - 5.5), ty(N.to - CITY_PITCH - far), 11 * scale, far * scale);
+    ctx.fillRect(tx(W.to - CITY_PITCH - far), ty(W.at - 5.5), far * scale, 11 * scale);
 
     // traffic lights: one dot per real intersection (plazas get an amber
     // one); level crossings get a white ×

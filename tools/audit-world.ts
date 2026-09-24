@@ -5,7 +5,8 @@
 import { setCityBase, citySeed, streetLinesFor } from '../src/worlds/cityGrid.js';
 import { cityPlanFor, clearCityPlanCache } from '../src/worlds/cityPlan.js';
 import { railRouteFor, clearRailCache } from '../src/worlds/railRoute.js';
-import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA } from '../src/worlds/grid.js';
+import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK } from '../src/worlds/grid.js';
+import { clearCoastCache } from '../src/worlds/coast.js';
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
 import { cityRoadPieces, pieceRect, segmentPieces, nodeReach } from '../src/worlds/roadLayout.js';
 import { graphFor, clearGraphCache } from '../src/worlds/streetGraph.js';
@@ -18,6 +19,7 @@ const clearAllWorldCaches = (): void => {
   clearRiverCache();
   clearGraphCache();
   clearStreetLineCache();
+  clearCoastCache();
 };
 
 const W = 14;
@@ -49,6 +51,8 @@ let railOnRoadSegs = 0;
 let worstRide = 0;
 let railRiverRoadTotal = 0;
 let lotClashTotal = 0;
+let seaBuiltTotal = 0;
+let seaRoadTotal = 0;
 let foldTotal = 0;
 let strayNodes = 0;
 let bareCrossings = 0;
@@ -318,6 +322,9 @@ for (const [bx, by] of cells) {
     const b = raw[i];
     if ((b & ROAD) && (b & RAIL) && (b & RIVER)) railRiverRoadTotal++;
     if ((b & LOT) && (b & (ROAD | RAIL | RIVER | PLAZA))) lotClashTotal++;
+    // R29: the sea carries nothing built but the causeway decks
+    if ((b & SEA) && (b & (LOT | RAIL | PLAZA))) seaBuiltTotal++;
+    if ((b & SEA) && (b & ROAD) && !(b & DECK)) seaRoadTotal++;
   }
 }
 
@@ -365,6 +372,8 @@ if (worstDevDeg > 25) fail('R7', `crossing deviates ${worstDevDeg.toFixed(1)} de
 if (railOnRoadSegs > 0) fail('R8', `rail rides the road on ${railOnRoadSegs} segments (longest ${worstRide} m)`);
 if (worstLot < 15.5) fail('R9', `lot centre only ${worstLot.toFixed(1)} m from the rail`);
 if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road cells — a trestle shares the water with a road bridge`);
+if (seaBuiltTotal > 0) fail('R29', `${seaBuiltTotal} lot/rail/plaza cells stand in the sea`);
+if (seaRoadTotal > 0) fail('R29', `${seaRoadTotal} street cells run out over the sea off the causeway decks`);
 if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
 if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
 if (strayNodes > 0) fail('R1', `${strayNodes} nodes on disconnected "private" roads — the island web must be one piece`);

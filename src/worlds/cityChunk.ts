@@ -11,7 +11,8 @@ import { cityPlanFor, type District, type Lot } from './cityPlan.js';
 import { railRouteFor } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { citySeed } from './cityGrid.js';
-import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT } from './grid.js';
+import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT, SEA } from './grid.js';
+import { coastFor, clipToRect, insetShore, causewaySpan } from './coast.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
 import { STRAIT } from './cityGrid.js';
 import { chunkRoadPieces, nodeArms, nodeReach, TRAFFIC_POLES, ROUNDABOUT_REACH } from './roadLayout.js';
@@ -126,12 +127,31 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const occ = occupancyFor(bx, by);
   const district = plan.district(cx, cz);
 
-  // base slab — district ground, sand beach ring at the border
-  B.box(CH, 0.1, CH, slabColor(district), X0 + CH / 2, 0.05, Z0 + CH / 2);
-  if (cx === 0) B.box(6, 0.1, CH, BEACH, X0 + 3, 0.05, Z0 + CH / 2);
-  if (cx === WORLD_CHUNKS - 1) B.box(6, 0.1, CH, BEACH, X0 + CH - 3, 0.05, Z0 + CH / 2);
-  if (cz === 0) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + 3);
-  if (cz === WORLD_CHUNKS - 1) B.box(CH, 0.1, 6, BEACH, X0 + CH / 2, 0.05, Z0 + CH - 3);
+  // base slab — district ground cut to the island's shore, with a sand beach
+  // band along it (R29). A chunk well inside the shore is one plain box.
+  const coast = coastFor(bx, by);
+  let inland = true;
+  for (let t = 0; t <= CH && inland; t += 8) {
+    for (const [px, pz] of [[X0 + t, Z0], [X0 + t, Z0 + CH], [X0, Z0 + t], [X0 + CH, Z0 + t]]) {
+      if (!coast.inLand(px, pz, 9)) { inland = false; break; }
+    }
+  }
+  if (inland) {
+    B.box(CH, 0.1, CH, slabColor(district), X0 + CH / 2, 0.05, Z0 + CH / 2);
+  } else {
+    slab(clipToRect(coast.pts, X0, Z0, X0 + CH, Z0 + CH), BEACH, 0.09);
+    slab(clipToRect(insetShore(coast, 7), X0, Z0, X0 + CH, Z0 + CH), slabColor(district), 0.1);
+  }
+  /** a flat slab of ground over polygon `poly`, top at `top`, reaching down
+   * below the waterline so its edge never shows a gap */
+  function slab(poly: Array<{ x: number; z: number }>, color: number, top: number): void {
+    if (poly.length < 3) return;
+    const shape = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x, -p.z)));
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, top - 0.5, 0);
+    B.add(geo, color);
+  }
 
   // ---- the river: water ribbon, sandy banks and a footpath, interrupted
   // where a street bridges it ----
@@ -144,6 +164,7 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
       const a = rp[k], b = rp[k + 1];
       const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
       if (mx < X0 - 10 || mx > X0 + CH + 10 || mz < Z0 - 10 || mz > Z0 + CH + 10) continue;
+      if (!coast.inLand(mx, mz, -1)) continue; // the river has met the sea
       const len = Math.hypot(b.x - a.x, b.z - a.z) + 1.4;
       const ry = Math.atan2(b.x - a.x, b.z - a.z);
       if (nearBridge(mx, mz)) continue; // the street bridge owns this stretch
@@ -199,15 +220,23 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   }
 
   // ---- causeways to the neighbouring cities: each city draws its own south
-  // and east decks; the neighbours' decks land on our north/west shores ----
-  if (cz === WORLD_CHUNKS - 1 && cx === plan.exits.s) bakeCauseway(plan.exits.s * CH, 'v');
-  if (cx === WORLD_CHUNKS - 1 && cz === plan.exits.e) bakeCauseway(plan.exits.e * CH, 'h');
+  // and east decks, from the last dry land on its exit corridor across the
+  // strait to the first dry land on the neighbour's; the neighbours' decks
+  // land on our north/west shores. The chunk holding the corridor's shore
+  // crossing lays it. ----
+  for (const side of ['s', 'e'] as const) {
+    const span = causewaySpan(bx, by, side);
+    const [px, pz] = side === 's' ? [span.at, span.from] : [span.from, span.at];
+    if (px >= X0 && px < X0 + CH && pz >= Z0 && pz < Z0 + CH) {
+      bakeCauseway(span.at, side === 's' ? 'v' : 'h', span.from - 2, span.to + 2);
+    }
+  }
 
   /** flush deck across the strait — flat physics can't arch, so parapets,
    * fender piles and dashes do the looking (collision-free like the picnic
    * causeway: splashing into the shallows is half the fun) */
-  function bakeCauseway(at: number, dir: 'h' | 'v'): void {
-    const start = ISLAND - 2, len = STRAIT + 8, mid = start + len / 2;
+  function bakeCauseway(at: number, dir: 'h' | 'v', start: number, end: number): void {
+    const len = end - start, mid = start + len / 2;
     if (dir === 'v') {
       B.box(11, 0.7, len, CAUSEWAY_ASPHALT, at, -0.25, mid);
       for (let z = start + 3; z < start + len - 2; z += 4) B.box(0.25, 0.02, 1.8, CAUSEWAY_DASH, at, 0.11, z);
@@ -252,6 +281,8 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
   const armN = a0.filter(Boolean).length;
   if (hasRoadKit) {
     for (const p of chunkRoadPieces(plan, cx, cz)) {
+      // past the shore a causeway corridor is a deck, not road tiles
+      if (occ.bits(p.x, p.z) & SEA) continue;
       const tpl = p.kind === 'cross' ? (p.crosswalks ? R.crossPath ?? R.cross : R.cross)
         : p.kind === 'tee' ? (p.crosswalks ? R.teePath ?? R.tee : R.tee)
           : R[p.kind];
@@ -292,7 +323,19 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
           a = Math.max(a, c1);
         }
         if (s1 > a) runs.push([a, s1]);
+        // and nothing past the shore (a causeway corridor goes out to sea)
+        const landRuns: Array<[number, number]> = [];
         for (const [r0, r1] of runs) {
+          let a0: number | null = null;
+          for (let t = r0; t <= r1; t += 2) {
+            const [wx, wz] = horiz ? [t, line * CH] : [line * CH, t];
+            const dry = coast.inLand(wx, wz, 10);
+            if (dry && a0 === null) a0 = t;
+            if (!dry && a0 !== null) { landRuns.push([a0, t]); a0 = null; }
+          }
+          if (a0 !== null) landRuns.push([a0, r1]);
+        }
+        for (const [r0, r1] of landRuns) {
           if (r1 - r0 < 1) continue;
           const mid = (r0 + r1) / 2, len = r1 - r0;
           for (const side of [-1, 1]) {
@@ -401,8 +444,8 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     for (let d = 11; d < CH; d += 18) {
       const offH = d < padH0 + 1.5 || d > CH - padH1 - 1.5;
       const offV = d < padH0 + 1.5 || d > CH - padV1 - 1.5;
-      const clearH = roadS && !offH && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT);
-      const clearV = roadW && !offV && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT);
+      const clearH = roadS && !offH && !rail.near(X0 + d, Z0 + 7.8, 9) && !occ.claims(X0 + d, Z0 + 7.8, 0.9, LOT | SEA);
+      const clearV = roadW && !offV && !rail.near(X0 + 7.8, Z0 + d, 9) && !occ.claims(X0 + 7.8, Z0 + d, 0.9, LOT | SEA);
       if (clearH && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + d, 0.1, Z0 + 7.8, 0, 5.5);
       if (clearV && TPL.lightCurved) bakeModel(B, TPL.lightCurved, X0 + 7.8, 0.1, Z0 + d, Math.PI / 2, 5.5);
       if (clearH) boxes.push({ x1: X0 + d - 0.3, x2: X0 + d + 0.3, z1: Z0 + 7.5, z2: Z0 + 8.1, small: 1 });

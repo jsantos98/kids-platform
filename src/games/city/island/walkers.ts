@@ -9,7 +9,8 @@ import { rng, chunkSeed, type Rng } from '../../../engine/rng.js';
 import { makeVillager } from '../../../kit/index.js';
 import { bakeObjectToMesh, templateToMesh } from '../../../engine/baked.js';
 import { citySeed } from '../../../worlds/cityGrid.js';
-import { occupancyFor, LOT, PLAZA } from '../../../worlds/grid.js';
+import { occupancyFor, LOT, PLAZA, SEA } from '../../../worlds/grid.js';
+import { coastFor, type Coast } from '../../../worlds/coast.js';
 import { ROUNDABOUT_REACH } from '../../../worlds/cityPlan.js';
 import { graphFor, leaving, type StreetGraph } from '../../../worlds/streetGraph.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
@@ -38,11 +39,13 @@ interface Walker {
 export class IslandWalkers {
   readonly walkers: Walker[] = [];
   private graph: StreetGraph;
+  private coast: Coast;
 
   constructor(private scene: THREE.Scene, readonly bx: number, readonly by: number,
               private ox: number, private oz: number,
               petTpls: BakedTemplate[], peopleTpls: BakedTemplate[]) {
     this.graph = graphFor(bx, by);
+    this.coast = coastFor(bx, by);
     const g = this.graph;
     const occ = occupancyFor(bx, by);
     // bodies: Kenney mini-characters / cube pets, procedural villagers as fallback
@@ -63,7 +66,7 @@ export class IslandWalkers {
         const side = (r() < 0.5 ? -1 : 1) * (8.2 + r() * 1.4);
         const s = 12 + r() * (e.len - 24);
         const p = g.sample(e, s, side);
-        if (occ.claims(p.x, p.z, 0.5, LOT) || occ.claims(p.x, p.z, 1.5, PLAZA)) continue;
+        if (occ.claims(p.x, p.z, 0.5, LOT) || occ.claims(p.x, p.z, 1.5, PLAZA | SEA)) continue;
         const src = pet ? pets[(k - nPeople) % pets.length] : people[k % people.length];
         const mesh = new THREE.Mesh(src.geometry, src.material);
         if (pet) mesh.scale.setScalar(0.9 + r() * 0.3);
@@ -112,6 +115,12 @@ export class IslandWalkers {
         } else {
           w.dir = -w.dir as 1 | -1;
         }
+      }
+      // the sidewalk ends at the shore: a causeway corridor runs on out to
+      // sea, its walkers turn back at the beach
+      {
+        const ahead = g.sample(e, w.s + w.dir * 1.5, w.side);
+        if (!this.coast.inLand(ahead.x, ahead.z, 2)) w.dir = -w.dir as 1 | -1;
       }
       w.s += w.dir * w.speed * dt;
       const p = g.sample(e, w.s, w.side);

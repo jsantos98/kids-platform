@@ -52,7 +52,9 @@ export class Missions {
    * coordinates, then shifted back out to the world) */
   private ox = 0;
   private oz = 0;
-  private graph: StreetGraph = graphFor(0, 0);
+  // (set by setCity before any call spawns — a default here built island
+  // (0,0) at boot for nothing)
+  private graph!: StreetGraph;
 
   /** `calls` is the rotation of emergency kinds this mode answers (the
    * fire truck: fire, fire, cat; the ambulance: patients...) */

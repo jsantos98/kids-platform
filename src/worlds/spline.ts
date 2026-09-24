@@ -52,89 +52,83 @@ export function makePath(raw: Array<{ x: number; z: number }>, closed: boolean):
   };
 }
 
-// ---- exact nearest-neighbour search on a uniform grid: cells hold the
-// items (vertices or segments) whose bounds touch them; rings are searched
-// outward until nothing unexplored could be closer than the best so far ----
-interface Grid {
-  cell: number; x0: number; z0: number; nx: number; nz: number; cells: number[][];
-  /** per cell: rings (Chebyshev, in cells) to the nearest non-empty cell */
-  ring: Int32Array;
-  /** visit stamps (no Set per query) */
-  stamp: Int32Array; tick: number;
+// ---- exact nearest-neighbour search: a bounding-volume tree over the items
+// (vertices or segments), split at the median of its longer side. A query
+// descends nearer child first and skips any box farther than the best so
+// far — strictly farther, so every item tied with the best is still seen
+// and the visitor's lowest-index rule decides, as a plain scan would ----
+interface Tree {
+  /** item ids, grouped so each node owns the range [lo, hi) */
+  ids: Int32Array;
+  /** per node: box (x0, z0, x1, z1), range lo / hi, children (-1: a leaf) */
+  box: Float64Array; lo: Int32Array; hi: Int32Array; left: Int32Array; right: Int32Array;
 }
-const GRID_CELL = 16;
-/** queries a path answers by plain scan before it builds its grid */
+const LEAF = 8;
+/** queries a path answers by plain scan before it builds its tree */
 const LAZY_GRID = 40;
-function buildGrid(n: number, bounds: (i: number) => [number, number, number, number]): Grid {
-  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  const bs: Array<[number, number, number, number]> = [];
-  for (let i = 0; i < n; i++) {
-    const b = bounds(i);
-    bs.push(b);
-    x0 = Math.min(x0, b[0]); z0 = Math.min(z0, b[1]); x1 = Math.max(x1, b[2]); z1 = Math.max(z1, b[3]);
-  }
-  const nx = Math.max(1, Math.ceil((x1 - x0) / GRID_CELL) + 1), nz = Math.max(1, Math.ceil((z1 - z0) / GRID_CELL) + 1);
-  const cells: number[][] = Array.from({ length: nx * nz }, () => []);
-  bs.forEach(([a, b, c, d], i) => {
-    const gx0 = Math.floor((a - x0) / GRID_CELL), gx1 = Math.floor((c - x0) / GRID_CELL);
-    const gz0 = Math.floor((b - z0) / GRID_CELL), gz1 = Math.floor((d - z0) / GRID_CELL);
-    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) cells[gz * nx + gx].push(i);
-  });
-  // multi-source BFS over the 8-neighbourhood: exact Chebyshev ring counts
-  const ring = new Int32Array(nx * nz).fill(-1);
-  let q: number[] = [];
-  cells.forEach((c, k) => { if (c.length) { ring[k] = 0; q.push(k); } });
-  for (let d = 1; q.length; d++) {
-    const next: number[] = [];
-    for (const k of q) {
-      const gx = k % nx, gz = (k / nx) | 0;
-      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-        const ax = gx + dx, az = gz + dz;
-        if (ax < 0 || az < 0 || ax >= nx || az >= nz) continue;
-        const m = az * nx + ax;
-        if (ring[m] >= 0) continue;
-        ring[m] = d;
-        next.push(m);
-      }
+function buildTree(n: number, bounds: (i: number) => [number, number, number, number]): Tree {
+  const bs = new Float64Array(n * 4);
+  for (let i = 0; i < n; i++) { const b = bounds(i); bs[i * 4] = b[0]; bs[i * 4 + 1] = b[1]; bs[i * 4 + 2] = b[2]; bs[i * 4 + 3] = b[3]; }
+  const ids = new Int32Array(n);
+  for (let i = 0; i < n; i++) ids[i] = i;
+  const maxNodes = Math.max(1, 2 * Math.ceil(n / LEAF) * 2);
+  const box = new Float64Array(maxNodes * 4), lo = new Int32Array(maxNodes), hi = new Int32Array(maxNodes);
+  const left = new Int32Array(maxNodes).fill(-1), right = new Int32Array(maxNodes).fill(-1);
+  let count = 0;
+  const make = (a: number, b: number): number => {
+    const k = count++;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let j = a; j < b; j++) {
+      const i = ids[j] * 4;
+      if (bs[i] < x0) x0 = bs[i];
+      if (bs[i + 1] < z0) z0 = bs[i + 1];
+      if (bs[i + 2] > x1) x1 = bs[i + 2];
+      if (bs[i + 3] > z1) z1 = bs[i + 3];
     }
-    q = next;
-  }
-  return { cell: GRID_CELL, x0, z0, nx, nz, cells, ring, stamp: new Int32Array(n), tick: 0 };
-}
-function searchGrid(g: Grid, x: number, z: number, visit: (i: number) => void, best: () => number, n: number, maxD = Infinity): void {
-  if (!n) return;
-  const fx = (x - g.x0) / g.cell, fz = (z - g.z0) / g.cell;
-  const cx = Math.floor(fx), cz = Math.floor(fz);
-  // rings before the first non-empty one hold nothing (triangle inequality
-  // from the nearest in-grid cell when the query lies outside the grid)
-  const kx = Math.max(0, Math.min(g.nx - 1, cx)), kz = Math.max(0, Math.min(g.nz - 1, cz));
-  const r0 = Math.max(0, g.ring[kz * g.nx + kx] - Math.max(Math.abs(cx - kx), Math.abs(cz - kz)));
-  const maxR = Math.max(Math.abs(cx), Math.abs(cz), Math.abs(cx - g.nx), Math.abs(cz - g.nz)) + 1;
-  const tick = ++g.tick;
-  const cellAt = (gx: number, gz: number): void => {
-    if (gx < 0 || gz < 0 || gx >= g.nx || gz >= g.nz) return;
-    for (const i of g.cells[gz * g.nx + gx]) {
-      if (g.stamp[i] === tick) continue;
-      g.stamp[i] = tick;
-      visit(i);
+    box[k * 4] = x0; box[k * 4 + 1] = z0; box[k * 4 + 2] = x1; box[k * 4 + 3] = z1;
+    lo[k] = a; hi[k] = b;
+    if (b - a > LEAF) {
+      // split at the median centre along the longer side
+      const ax = x1 - x0 >= z1 - z0 ? 0 : 1;
+      const sub = Array.from(ids.subarray(a, b)).sort((p, q) =>
+        (bs[p * 4 + ax] + bs[p * 4 + ax + 2]) - (bs[q * 4 + ax] + bs[q * 4 + ax + 2]) || p - q);
+      ids.set(sub, a);
+      const m = (a + b) >> 1;
+      left[k] = make(a, m);
+      right[k] = make(m, b);
     }
+    return k;
   };
-  for (let r = r0; r <= maxR; r++) {
-    if (r === 0) cellAt(cx, cz);
-    else {
-      for (let gx = cx - r; gx <= cx + r; gx++) { cellAt(gx, cz - r); cellAt(gx, cz + r); }
-      for (let gz = cz - r + 1; gz <= cz + r - 1; gz++) { cellAt(cx - r, gz); cellAt(cx + r, gz); }
+  if (n) make(0, n);
+  return { ids, box, lo, hi, left, right };
+}
+/** squared distance from (x, z) to node k's box */
+function boxD2(t: Tree, k: number, x: number, z: number): number {
+  const dx = Math.max(t.box[k * 4] - x, 0, x - t.box[k * 4 + 2]);
+  const dz = Math.max(t.box[k * 4 + 1] - z, 0, z - t.box[k * 4 + 3]);
+  return dx * dx + dz * dz;
+}
+/** visit every item that could beat `best()` (squared): boxes strictly
+ * farther than it are skipped, the nearer child is searched first */
+function searchTree(t: Tree, x: number, z: number, visit: (i: number) => void, best: () => number, n: number): void {
+  if (!n) return;
+  const stack: number[] = [0];
+  while (stack.length) {
+    const k = stack.pop()!;
+    if (boxD2(t, k, x, z) > best()) continue;
+    const l = t.left[k];
+    if (l < 0) {
+      for (let j = t.lo[k]; j < t.hi[k]; j++) visit(t.ids[j]);
+      continue;
     }
-    // everything unexplored lies outside the square of rings 0..r
-    const edge = Math.min(fx - (cx - r), cx + r + 1 - fx, fz - (cz - r), cz + r + 1 - fz) * g.cell;
-    const b = best();
-    if (b < Infinity && b <= edge * edge) return;
-    if (edge >= maxD) return; // nothing unexplored lies within maxD
+    const r = t.right[k];
+    // (pushed far first: the near child pops next)
+    if (boxD2(t, l, x, z) <= boxD2(t, r, x, z)) { stack.push(r, l); } else { stack.push(l, r); }
   }
 }
 function vertexNearest(pts: PathPt[]): Pick<WorldPath, 'nearest' | 'within'> {
-  let g: Grid | null = null;
-  const grid = (): Grid => (g ??= buildGrid(pts.length, i => [pts[i].x, pts[i].z, pts[i].x, pts[i].z]));
+  let g: Tree | null = null;
+  const grid = (): Tree => (g ??= buildTree(pts.length, i => [pts[i].x, pts[i].z, pts[i].x, pts[i].z]));
   // a path asked only a few times isn't worth a grid: scan those
   let asked = 0;
   const all = (visit: (i: number) => void): void => { for (let i = 0; i < pts.length; i++) visit(i); };
@@ -147,7 +141,7 @@ function vertexNearest(pts: PathPt[]): Pick<WorldPath, 'nearest' | 'within'> {
         if (d2 < bd || (d2 === bd && i < bi)) { bd = d2; bi = i; }
       };
       if (++asked < LAZY_GRID) all(visit);
-      else searchGrid(grid(), x, z, visit, () => bd, pts.length);
+      else searchTree(grid(), x, z, visit, () => bd, pts.length);
       return { d2: bd, p: pts[bi], i: bi };
     },
     within(x, z, r) {
@@ -160,10 +154,11 @@ function vertexNearest(pts: PathPt[]): Pick<WorldPath, 'nearest' | 'within'> {
         }
         return hit;
       }
-      searchGrid(grid(), x, z, i => {
+      // (a box at r or beyond can't hold a point nearer than r; a hit ends it)
+      searchTree(grid(), x, z, i => {
         const dx = pts[i].x - x, dz = pts[i].z - z;
         if (dx * dx + dz * dz < r2) hit = true;
-      }, () => (hit ? 0 : Infinity), pts.length, r);
+      }, () => (hit ? -1 : r2), pts.length);
       return hit;
     },
   };
@@ -199,8 +194,8 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
     cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
   }
   const total = cum[S];
-  let segGrid: Grid | null = null, asked = 0;
-  const segGridOf = (): Grid => (segGrid ??= buildGrid(S, i => {
+  let segGrid: Tree | null = null, asked = 0;
+  const segGridOf = (): Tree => (segGrid ??= buildTree(S, i => {
     const a = pts[i], b = pts[(i + 1) % N];
     return [Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z)];
   }));
@@ -238,7 +233,7 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
         if (d2 < bd || (d2 === bd && i < bi)) { bd = d2; bi = i; bt = t; }
       };
       if (++asked < LAZY_GRID) for (let i = 0; i < S; i++) seg(i);
-      else searchGrid(segGridOf(), x, z, seg, () => bd, S);
+      else searchTree(segGridOf(), x, z, seg, () => bd, S);
       const a = pts[bi], b = pts[(bi + 1) % N];
       let dh = b.h - a.h;
       while (dh > Math.PI) dh -= Math.PI * 2;
@@ -262,7 +257,7 @@ export function polyPath(raw: Array<{ x: number; z: number }>, closed = false): 
         if (dx * dx + dz * dz < r2) hit = true;
       };
       if (++asked < LAZY_GRID) { for (let i = 0; i < S && !hit; i++) seg(i); return hit; }
-      searchGrid(segGridOf(), x, z, seg, () => (hit ? 0 : Infinity), S, r);
+      searchTree(segGridOf(), x, z, seg, () => (hit ? -1 : r2), S);
       return hit;
     },
   };

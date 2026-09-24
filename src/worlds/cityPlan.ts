@@ -615,9 +615,20 @@ function buildPlan(bx: number, by: number): CityPlan {
     }
     return out;
   };
-  /** separating-axis overlap of two lots, p grown by margin m */
-  const overlap = (p: Lot, q: Lot, m: number): boolean => {
-    const cp = outline({ ...p, w: p.w + 2 * m, d: p.d + 2 * m }), cq = outline(q);
+  /** each built lot's outline (asked again and again by its neighbours) */
+  const outlines = new WeakMap<Lot, Array<{ x: number; z: number }>>();
+  const outlineOf = (l: Lot): Array<{ x: number; z: number }> => {
+    let o = outlines.get(l);
+    if (!o) { o = outline(l); outlines.set(l, o); }
+    return o;
+  };
+  /** separating-axis overlap of two lots, p grown by margin m (`cp`: p's
+   * grown outline, when the caller has it) */
+  const overlap = (p: Lot, q: Lot, m: number, cp0?: Array<{ x: number; z: number }>): boolean => {
+    // (lots whose bounding circles are apart can't overlap)
+    const rp = Math.hypot(p.w / 2 + m, p.d / 2 + m), rq = Math.hypot(q.w / 2, q.d / 2);
+    if ((p.x - q.x) ** 2 + (p.z - q.z) ** 2 > (rp + rq + 0.01) ** 2) return false;
+    const cp = cp0 ?? outline({ ...p, w: p.w + 2 * m, d: p.d + 2 * m }), cq = outlineOf(q);
     for (const a of [p.ry, p.ry + Math.PI / 2, q.ry, q.ry + Math.PI / 2]) {
       const ax = Math.cos(a), az = -Math.sin(a);
       let p0 = Infinity, p1 = -Infinity, q0 = Infinity, q1 = -Infinity;
@@ -650,8 +661,14 @@ function buildPlan(bx: number, by: number): CityPlan {
     if (!builtD(districtAt(lot.x, lot.z))) return false; // nature/park stay clear
     const gx = Math.floor(lot.x / 32), gz = Math.floor(lot.z / 32);
     // the other lots first: the cheapest test that fails most
+    let grown: Array<{ x: number; z: number }> | undefined;
     for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
-      for (const o of lotBucket.get(key(gx + dx, gz + dz)) ?? []) if (overlap(lot, o, LOT_GAP)) return false;
+      for (const o of lotBucket.get(key(gx + dx, gz + dz)) ?? []) {
+        const rp = Math.hypot(lot.w / 2 + LOT_GAP, lot.d / 2 + LOT_GAP), rq = Math.hypot(o.w / 2, o.d / 2);
+        if ((lot.x - o.x) ** 2 + (lot.z - o.z) ** 2 > (rp + rq + 0.01) ** 2) continue;
+        grown ??= outline({ ...lot, w: lot.w + 2 * LOT_GAP, d: lot.d + 2 * LOT_GAP });
+        if (overlap(lot, o, LOT_GAP, grown)) return false;
+      }
     }
     const nearC = (raster.at(lot.x, lot.z) & R_NEAR_C) !== 0;
     if (nearC && rail.near(lot.x, lot.z, 16)) return false;

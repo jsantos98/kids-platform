@@ -247,8 +247,65 @@ export function makeBuilder(
   const edges: GEdge[] = seed ? seed.edges.map(e => ({ ...e })) : [];
   const riverCrossings: StreetNet['riverCrossings'] = [];
 
+  // ---- a cell index of the edges and nodes (IDX m cells), so the rules'
+  // "every street within r of here" questions scan the neighbourhood, not
+  // the island. An edge is filed under the cell of every point every 8 m
+  // along it; a query walks the same 8 m samples along its own segment and
+  // looks one cell round — any point within r <= 20 m of the segment is
+  // then found (8 + 20 < 32). Candidates come back in id order and every
+  // answer is re-tested exactly, so the index changes no result; stale
+  // entries (rolled back ids, dead edges) are just skipped or re-tested. ----
+  const IDX = 32;
+  const edgeCells = new Map<number, number[]>();
+  const nodeCells = new Map<number, number[]>();
+  const cellKey = (gx: number, gz: number): number => (gx + 2048) * 8192 + (gz + 2048);
+  const file = (cells: Map<number, number[]>, id: number, a: P, b: P): void => {
+    const n = Math.max(1, Math.ceil(dist(a, b) / 8));
+    let last = NaN;
+    for (let k = 0; k <= n; k++) {
+      const key = cellKey(Math.floor((a.x + ((b.x - a.x) * k) / n) / IDX), Math.floor((a.z + ((b.z - a.z) * k) / n) / IDX));
+      if (key === last) continue;
+      last = key;
+      const c = cells.get(key);
+      if (!c) cells.set(key, [id]);
+      else if (c[c.length - 1] !== id) c.push(id);
+    }
+  };
+  let qStamp = 0;
+  const edgeSeen: number[] = [], nodeSeen: number[] = [];
+  /** ids (ascending) of every alive edge / node within 20 m of segment ab
+   * (plus some farther: callers test exactly) */
+  const near = (cells: Map<number, number[]>, seen: number[], count: number, a: P, b: P): number[] => {
+    const stamp = ++qStamp;
+    const out: number[] = [];
+    const n = Math.max(1, Math.ceil(dist(a, b) / 8));
+    let last = NaN;
+    for (let k = 0; k <= n; k++) {
+      const gx = Math.floor((a.x + ((b.x - a.x) * k) / n) / IDX), gz = Math.floor((a.z + ((b.z - a.z) * k) / n) / IDX);
+      const key0 = cellKey(gx, gz);
+      if (key0 === last) continue;
+      last = key0;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+        const c = cells.get(cellKey(gx + i, gz + j));
+        if (!c) continue;
+        for (const id of c) {
+          if (id >= count || seen[id] === stamp) continue;
+          seen[id] = stamp;
+          out.push(id);
+        }
+      }
+    }
+    return out.sort((p, q) => p - q);
+  };
+  const nearEdges = (a: P, b: P): GEdge[] =>
+    near(edgeCells, edgeSeen, edges.length, a, b).map(id => edges[id]).filter(e => e.alive);
+  const nearNodes = (a: P, b: P): GNode[] => near(nodeCells, nodeSeen, nodes.length, a, b).map(id => nodes[id]);
+  for (const nd of nodes) file(nodeCells, nd.id, nd, nd);
+  for (const e of edges) file(edgeCells, e.id, nodes[e.a], nodes[e.b]);
+
   const newNode = (p: P, mouth = false): number => {
     nodes.push({ id: nodes.length, x: p.x, z: p.z, mouth, edges: [] });
+    file(nodeCells, nodes.length - 1, p, p);
     return nodes.length - 1;
   };
   let curTag = -1;
@@ -259,6 +316,7 @@ export function makeBuilder(
     edges.push(e);
     nodes[a].edges.push(e.id);
     nodes[b].edges.push(e.id);
+    file(edgeCells, e.id, nodes[a], nodes[b]);
   };
   const detach = (e: GEdge): void => {
     e.alive = false;
@@ -299,9 +357,10 @@ export function makeBuilder(
     const L = dist(pp, qq);
     const touch = new Set<number>([...nodes[pId].edges, ...(qId !== null ? nodes[qId].edges : [])]);
     if (splitEdge !== null) touch.add(splitEdge);
+    const cand = nearEdges(pp, qq);
     for (let s = 12; s <= L - 12; s += 3) {
       const x = { x: pp.x + ((qq.x - pp.x) * s) / L, z: pp.z + ((qq.z - pp.z) * s) / L };
-      for (const e of edges) {
+      for (const e of cand) {
         if (!e.alive || touch.has(e.id)) continue;
         if (segDist(x, nodes[e.a], nodes[e.b]) < CLEARANCE) return false;
       }
@@ -310,12 +369,12 @@ export function makeBuilder(
     // junction keeps PAD_CLEAR from streets it doesn't meet, both ways
     const near = new Set<number>([pId, ...(qId !== null ? [qId] : [])]);
     for (const id of touch) { const e = edges[id]; near.add(e.a); near.add(e.b); }
-    for (const nd of nodes) {
+    for (const nd of nearNodes(pp, qq)) {
       if (near.has(nd.id) || !nd.edges.length || nd.mouth) continue;
       if (segDist(nd, pp, qq) < PAD_CLEAR) return false;
     }
     for (const end of [pp, qq]) {
-      for (const e of edges) {
+      for (const e of cand) {
         if (!e.alive || touch.has(e.id)) continue;
         if (segDist(end, nodes[e.a], nodes[e.b]) < PAD_CLEAR) return false;
       }
@@ -333,7 +392,8 @@ export function makeBuilder(
     let endNode: number | null = null;
     // ---- where it meets the network ----
     const evs: Ev[] = [];
-    for (const e of edges) {
+    const cand = nearEdges(a, b);
+    for (const e of cand) {
       if (!e.alive) continue;
       const p = nodes[e.a], q = nodes[e.b];
       const d2x = q.x - p.x, d2z = q.z - p.z;
@@ -398,7 +458,7 @@ export function makeBuilder(
     for (let k = 0; k <= n; k++) {
       const sk = (k / n) * L;
       const x = { x: a.x + u.x * sk, z: a.z + u.z * sk };
-      for (const e of edges) {
+      for (const e of cand) {
         if (!e.alive) continue;
         if (segDist(x, nodes[e.a], nodes[e.b]) >= CLEARANCE) continue;
         if ((allow.get(e.id) ?? []).some(([w0, w1]) => sk >= w0 && sk <= w1)) continue;

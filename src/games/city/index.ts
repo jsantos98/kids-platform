@@ -29,7 +29,7 @@ import { Race, LAPS } from './race.js';
 import { Boarding } from './boarding.js';
 import { IslandPrefetch } from './prefetch.js';
 import { exportBakedTemplates } from '../../engine/assets.js';
-import { buildIslandData, islandReady, type IslandData } from '../../worlds/islandData.js';
+import { buildIslandData, islandReady, installIslandData, type IslandData } from '../../worlds/islandData.js';
 import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
 import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
@@ -155,6 +155,24 @@ const airborne = V.kind === 'heli' || V.kind === 'plane';
 // the race starts on race island (0,0); every other mode on island (1,0)
 const START = MODE.spawn === 'race' ? { bx: 0, by: 0 } : { bx: 1, by: 0 };
 const START_OX = START.bx * CITY_PITCH, START_OZ = START.by * CITY_PITCH;
+// boot: the start island (seconds of generation) is built in a world worker
+// while the Kenney kits load and bake here; both are awaited before the
+// first thing that needs either (?noprefetch=1: built here, as before)
+const kitsReady = import('./kitdefs.js').then(m => prepBakedModels(m.KITDEFS)).catch(() => {});
+const startIsland = new Promise<void>(done => {
+  if (q.get('noprefetch') === '1') { done(); return; }
+  try {
+    const w = new Worker(new URL('../../worlds/worldWorker.ts', import.meta.url), { type: 'module' });
+    const finish = (): void => { w.terminate(); done(); };
+    w.onmessage = (e: MessageEvent<{ ok: boolean; data?: IslandData }>) => {
+      if (e.data.ok && e.data.data) installIslandData(e.data.data);
+      finish();
+    };
+    w.onerror = finish;
+    w.postMessage({ base: cityBase(), bx: START.bx, by: START.by });
+  } catch { done(); }
+});
+await Promise.all([kitsReady, startIsland]);
 let spawn = (() => {
   const s = modeSpawn(START.bx, START.by);
   return { x: s.x + START_OX, z: s.z + START_OZ, heading: s.heading };
@@ -206,7 +224,7 @@ sirenBtn.addEventListener('click', () => setSiren(!sirenOn));
 
 // ---- CC0 Kenney city kit preload ----
 const KITDEFS = await import('./kitdefs.js').then(m => m.KITDEFS);
-await prepBakedModels(KITDEFS).catch(() => {});
+await kitsReady;
 // dev probe: ?debugbake=1 exposes which templates registered
 if (q.get('debugbake') === '1') {
   (window as unknown as { __bake: Record<string, boolean> }).__bake =

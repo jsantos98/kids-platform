@@ -466,7 +466,7 @@ function deform(
   // the river pin gets the LAST word: street swings and pins upstream can
   // drag a trestle off the perpendicular, and nothing downstream may undo it
   const ironed = ironSpikes(clearancePush(roundCorners(riverPerp(pushed, river)), H, V));
-  const cleaned = deSpikes(ironed);
+  const cleaned = deOverlap(deSpikes(ironed));
   if (cleaned.length === ironed.length) return cleaned;
   // a fold was spliced out: its chord can cut a street approach askew or
   // ride the asphalt the fold used to skirt, so re-run the crossing tail
@@ -476,7 +476,7 @@ function deform(
   // grip the chord's middle and bend it square. (Rare — fold-free cities
   // skip this pass.)
   const repinned = perpendicularCrossings(polyPath(subdivide(cleaned)), H, V);
-  return deSpikes(ironSpikes(clearancePush(roundCorners(clearancePush(repinned, H, V)), H, V)));
+  return deOverlap(deSpikes(ironSpikes(clearancePush(roundCorners(clearancePush(repinned, H, V)), H, V))));
 }
 
 /** round off sharp turns into real curves: any corner turning more than
@@ -578,6 +578,64 @@ function deSpikes(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: n
     }
     if (!any) break;
     cur = cur.filter((_, k) => !drop[k]);
+  }
+  return cur;
+}
+
+/** remove needle folds: places where the loop doubled back so hard that
+ * two NON-adjacent stretches of track lie on top of each other (legs of a
+ * ~180-degree turn can land within centimetres of each other). The pinch
+ * pair is spliced — everything on the short arc between them goes, the
+ * loop closes across the <=4 m gap, and roundCorners smooths the join.
+ * Longer excursions than 300 m are never lobes; that would be the ring. */
+function deOverlap(pts: Array<{ x: number; z: number }>): Array<{ x: number; z: number }> {
+  let cur = pts.map(p => ({ x: p.x, z: p.z }));
+  const CELL = 8;
+  for (let pass = 0; pass < 4; pass++) {
+    const N = cur.length;
+    const cum: number[] = [0];
+    for (let k = 1; k <= N; k++) {
+      const a = cur[k - 1], b = cur[k % N];
+      cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+    }
+    const total = cum[N];
+    const grid = new Map<string, number[]>();
+    for (let k = 0; k < N; k++) {
+      const kk = `${Math.floor(cur[k].x / CELL)},${Math.floor(cur[k].z / CELL)}`;
+      if (!grid.has(kk)) grid.set(kk, []);
+      grid.get(kk)!.push(k);
+    }
+    // find one pinch: non-adjacent samples within the bed width
+    let cutA = -1, cutB = -1;
+    for (let k = 0; k < N && cutA < 0; k++) {
+      const p = cur[k];
+      const gx = Math.floor(p.x / CELL), gz = Math.floor(p.z / CELL);
+      for (let ox = -1; ox <= 1 && cutA < 0; ox++) {
+        for (let oz = -1; oz <= 1; oz++) {
+          const arr = grid.get(`${gx + ox},${gz + oz}`);
+          if (!arr) continue;
+          for (const m of arr) {
+            const darc = Math.abs(cum[k] - cum[m]);
+            const sep = Math.min(darc, total - darc);
+            if (sep < 14 || sep > 300) continue; // neighbours are fine; the long way round is the ring
+            const q = cur[m];
+            if (Math.hypot(q.x - p.x, q.z - p.z) < 4) { cutA = k; cutB = m; break; }
+          }
+          if (cutA >= 0) break;
+        }
+      }
+    }
+    if (cutA < 0) return cur;
+    // drop everything on the shorter arc between the pair (the lobe)
+    let lo, hi; // indices so that walking cutA+1 .. cutB-1 is the shorter arc
+    const fwd = ((cutB - cutA) % N + N) % N;
+    if (fwd <= N - fwd) { lo = cutA; hi = cutB; } else { lo = cutB; hi = cutA; }
+    const out: Array<{ x: number; z: number }> = [];
+    for (let k = 0; k < N; k++) {
+      const onLobe = (k > lo && k < hi) || (lo > hi && (k > lo || k < hi));
+      if (!onLobe) out.push(cur[k]);
+    }
+    cur = out;
   }
   return cur;
 }

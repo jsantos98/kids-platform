@@ -141,6 +141,7 @@ export class Trains {
   update(dt: number): void {
     const total = this.route.total;
     for (const c of this.consists) {
+      let vTarget = SPEED;
       if (this.stations.length) {
         const gap = ((this.stations[c.next] - c.s) % total + total) % total;
         if (gap < 1.6) {
@@ -151,12 +152,21 @@ export class Trains {
             c.hold = 0;
             c.next = (c.next + 1) % this.stations.length;
           }
-        } else {
-          const target = gap < 34 ? Math.max(0.35, gap * 0.42) : SPEED;
-          const dv = target - c.v;
-          c.v += Math.max(-BRAKE * dt, Math.min(ACCEL * dt, dv));
+          continue;
+        }
+        if (gap < 34) vTarget = Math.max(0.35, gap * 0.42);
+      }
+      // never run into the consist ahead: the nearest wagon of another
+      // train blocks like a red light, holding ~6 m before its tail
+      for (const o of this.consists) {
+        if (o === c) continue;
+        for (const u of o.units) {
+          const g = ((o.s - u.back - c.s) % total + total) % total;
+          if (g < 40) vTarget = Math.min(vTarget, Math.max(0, (g - 6) * 0.35));
         }
       }
+      const dv = vTarget - c.v;
+      c.v += Math.max(-BRAKE * dt, Math.min(ACCEL * dt, dv));
       c.s += c.v * dt;
       for (const u of c.units) {
         if (!u.obj) continue;

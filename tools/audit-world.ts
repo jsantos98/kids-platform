@@ -45,6 +45,7 @@ let lotClashTotal = 0;
 let foldTotal = 0;
 let strayNodes = 0;
 let bareCrossings = 0;
+let selfOverlap = 0;
 let riverFails = 0;
 let worstTrestleSkew = 0;
 
@@ -156,6 +157,7 @@ for (const [bx, by] of cells) {
     if (Math.abs(dh) > (120 * Math.PI) / 180) foldTotal++;
   }
 
+
   // R1b: ONE connected street web — the R22/R22b vetoes used to strand
   // little "private" roads away from the network
   {
@@ -259,6 +261,42 @@ for (const [bx, by] of cells) {
   }
 }
 
+// R28: different parts of the loop never overlap — two non-adjacent
+// stretches of track closer than the bed width read as one mangled double
+// track (needle folds the de-overlapper exists to splice out). Cheap
+// (rail routes only), so it runs over a much wider city ring than the
+// rest of the audit.
+for (let wx = -4; wx <= 4; wx++) for (let wy = -4; wy <= 4; wy++) {
+  const route = railRouteFor(wx, wy);
+  const rpts = route.pts, RN = rpts.length;
+  const cell = 8;
+  const cum: number[] = [0];
+  for (let k = 1; k <= RN; k++) {
+    const a = rpts[k - 1], b = rpts[k % RN];
+    cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  const total = cum[RN];
+  const grid = new Map<string, number[]>();
+  for (let k = 0; k < RN; k++) {
+    const kk = `${Math.floor(rpts[k].x / cell)},${Math.floor(rpts[k].z / cell)}`;
+    if (!grid.has(kk)) grid.set(kk, []);
+    grid.get(kk)!.push(k);
+  }
+  for (let k = 0; k < RN; k++) {
+    const gx = Math.floor(rpts[k].x / cell), gz = Math.floor(rpts[k].z / cell);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const arr = grid.get(`${gx + ox},${gz + oz}`);
+      if (!arr) continue;
+      for (const m of arr) {
+        const darc = Math.abs(cum[k] - cum[m]);
+        const sep = Math.min(darc, total - darc);
+        if (sep < 14) continue; // neighbours along the loop
+        const d = Math.hypot(rpts[m].x - rpts[k].x, rpts[m].z - rpts[k].z);
+        if (d < 3.6) selfOverlap++; // beds are 3.4 m wide: closer means they intersect
+      }
+    }
+  }
+}
 if (deadEnds > 0) fail('R1', `${deadEnds} street tips end in open space`);
 if (exitGaps > 0) fail('R19', `${exitGaps} causeway corridors do not reach the rim`);
 if (corridorsUnattached > 0) fail('R19', `${corridorsUnattached} causeway corridors never meet the street web`);
@@ -271,6 +309,7 @@ if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/tr
 if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
 if (strayNodes > 0) fail('R1', `${strayNodes} nodes on disconnected "private" roads — the island web must be one piece`);
 if (bareCrossings > 0) fail('R10', `${bareCrossings} rail x road crossings have no barriers recorded`);
+if (selfOverlap > 0) fail('R28', `${selfOverlap} rail samples overlap a different part of the loop (beds on beds)`);
 if (riverFails > 0) fail('R26', `${riverFails} cities violate the river rules (shore-to-shore, inside one lane, perpendicular street crossings)`);
 if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestleSkew.toFixed(1)} deg off perpendicular`);
 

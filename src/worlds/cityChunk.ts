@@ -4,7 +4,7 @@
 // abouts and plazas, lamps, building lots, park ponds, the river with its
 // banks, fords and street bridges, and nature scatter.
 import * as THREE from 'three';
-import { Baked } from '../engine/baked.js';
+import { Baked, type BakedData } from '../engine/baked.js';
 import { rng, chunkSeed, type Rng } from '../engine/rng.js';
 import { bakedModel, type BakedTemplate } from '../engine/assets.js';
 import { cityPlanFor, builtD, ROAD_HALF, ROUNDABOUT_REACH, type District, type Lot, type PNode, type PEdge } from './cityPlan.js';
@@ -164,6 +164,17 @@ export function chunkGroundColor(bx: number, by: number, cx: number, cz: number)
 }
 
 export function generateCityChunk(bx: number, by: number, cx: number, cz: number): CityChunkResult {
+  const { B, boxes } = bakeCityChunk(bx, by, cx, cz);
+  return { mesh: B.build(), boxes };
+}
+
+/** the same chunk as plain data (the chunk worker's reply) */
+export function generateCityChunkData(bx: number, by: number, cx: number, cz: number): { geo: BakedData; boxes: CollisionBox[] } {
+  const { B, boxes } = bakeCityChunk(bx, by, cx, cz);
+  return { geo: B.buildData(), boxes };
+}
+
+function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Baked; boxes: CollisionBox[] } {
   const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, cx, cz));
   const CH = 64, X0 = cx * CH, Z0 = cz * CH;
@@ -855,5 +866,5 @@ export function generateCityChunk(bx: number, by: number, cx: number, cz: number
     }
   }
 
-  return { mesh: B.build(), boxes };
+  return { B, boxes };
 }

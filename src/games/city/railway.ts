@@ -24,6 +24,12 @@ import { railNetFor, RAIL_TOP, type RailRoute, type LineKind } from '../../world
 import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
 import { CITY_PITCH, citySeed } from '../../worlds/cityGrid.js';
 import { deckAt } from '../../worlds/causeway.js';
+/** may the railway reach into island (bx, by) this frame? The game gates
+ * it on the world worker having delivered the island (islandReady), so a
+ * train never builds an island mid-frame; left open, everything builds on
+ * demand (the audit, node tools) */
+let gate: (bx: number, by: number) => boolean = () => true;
+export function setIslandGate(fn: (bx: number, by: number) => boolean): void { gate = fn; }
 
 /** seconds between trains on every line, at every portal */
 export const HEADWAY = 60;
@@ -331,12 +337,16 @@ function linePose(kind: LineKind, bx: number, by: number, s: number): { x: numbe
   for (let guard = 0; guard < 4; guard++) {
     if (s < 0) {
       const [pbx, pby] = stepIsland(kind, seg.bx, seg.by, -1);
+      // (a neighbour the world worker hasn't delivered yet: hold the train's
+      // tail at the portal for now rather than build it mid-frame)
+      if (!gate(pbx, pby)) { s = 0; break; }
       const prev = segment(pbx, pby, kind);
       s += prev.route.total;
       seg = prev;
     } else if (s > seg.route.total) {
-      s -= seg.route.total;
       const [nbx, nby] = stepIsland(kind, seg.bx, seg.by, 1);
+      if (!gate(nbx, nby)) { s = seg.route.total; break; }
+      s -= seg.route.total;
       seg = segment(nbx, nby, kind);
     } else break;
   }
@@ -492,6 +502,7 @@ export class Railway {
     if (!reserved) {
       for (const k of near) {
         const [ibx, iby] = stepIsland(kind, bx, by, k);
+        if (k !== 0 && !gate(ibx, iby)) continue; // not here yet
         const sg = k === 0 ? seg : segment(ibx, iby, kind);
         // offset of that segment's sigma into ours
         const off = k === 0 ? 0 : k < 0 ? -sg.route.total : seg.route.total;
@@ -659,6 +670,9 @@ export class Railway {
       const x0 = bx * CITY_PITCH, z0 = by * CITY_PITCH;
       const ddx = Math.max(x0 - px, 0, px - (x0 + CITY_PITCH)), ddz = Math.max(z0 - pz, 0, pz - (z0 + CITY_PITCH));
       if (Math.hypot(ddx, ddz) > DRAW_R) continue;
+      // a neighbour still being built by the world worker: its trains are
+      // drawn once it's here (building it now would stall the frame)
+      if ((dx || dy) && !gate(bx, by)) continue;
       for (const kind of ['ns', 'ew'] as const) {
         const id: LineId = { kind, idx: kind === 'ns' ? bx : by };
         if (this.kid && lineKey(this.kid.line) === lineKey(id)) continue;

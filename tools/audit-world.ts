@@ -13,6 +13,8 @@ import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/rai
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK, RACE } from '../src/worlds/grid.js';
 import { isRaceIsland, raceTrackFor, clearRaceCache, UNIT } from '../src/worlds/raceIsland.js';
 import { buildIslandData, installIslandData } from '../src/worlds/islandData.js';
+import { generateCityChunk, generateCityChunkData } from '../src/worlds/cityChunk.js';
+import { meshFromBakedData } from '../src/engine/baked.js';
 import { createHash } from 'node:crypto';
 import { clearCoastCache } from '../src/worlds/coast.js'; // (coastFor imported above)
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
@@ -664,9 +666,24 @@ if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on 
     installIslandData(data);
     if (fingerprint(bx, by) !== direct) { workerFaults++; console.log(`  R38 detail: island ${bx},${by} built by the worker differs from a local build`); }
   }
+  // ... and a chunk the chunk worker bakes (its arrays, structured-cloned,
+  // back into a mesh) is the chunk the main thread would have baked
+  clearAllWorldCaches();
+  for (const [cx, cz] of [[5, 5], [3, 8], [10, 6]]) {
+    const a = generateCityChunk(1, 0, cx, cz);
+    const d = structuredClone(generateCityChunkData(1, 0, cx, cz));
+    const ga = a.mesh.geometry, gb = meshFromBakedData(d.geo).geometry;
+    const same = Object.keys(ga.attributes).length === Object.keys(gb.attributes).length
+      && Object.keys(ga.attributes).every(k => {
+        const x = ga.attributes[k].array, y = gb.attributes[k]?.array;
+        return !!y && x.length === y.length && x.every((v, i) => v === y[i]);
+      })
+      && JSON.stringify(a.boxes) === JSON.stringify(d.boxes);
+    if (!same) { workerFaults++; console.log(`  R38 detail: chunk 1,0,${cx},${cz} baked by the worker differs`); }
+  }
   clearAllWorldCaches();
 }
-if (workerFaults > 0) fail('R38', `${workerFaults} islands differ when built by the world worker`);
+if (workerFaults > 0) fail('R38', `${workerFaults} islands / chunks differ when built by the workers`);
 
 // R25: neighbouring base seeds must produce significantly DIFFERENT cities.
 // The hash tail used to leave adjacent integers partially correlated, and

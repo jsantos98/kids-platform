@@ -84,19 +84,48 @@ export class Baked {
     return this.add(new THREE.TorusGeometry(r, t, 8, 20), color, x, y, z, rx, ry, rz);
   }
 
-  build({ cast = true, receive = true }: BakedOptions = {}): THREE.Mesh {
+  private merged(): THREE.BufferGeometry {
     // mergeGeometries requires uniform indexed-ness; normalize to non-indexed
     const parts = this.geos.map((g) => (g.index ? g.toNonIndexed() : g));
     const merged = mergeGeometries(parts);
     this.geos.length = 0;
-    const m = new THREE.Mesh(
-      merged,
-      new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-    );
-    m.castShadow = cast;
-    m.receiveShadow = receive;
-    return m;
+    return merged;
   }
+
+  build(opts: BakedOptions = {}): THREE.Mesh {
+    return meshOf(this.merged(), opts);
+  }
+
+  /** the merged geometry's attributes as typed arrays (a worker sends
+   * these; meshFromBakedData rebuilds the mesh on the main thread) */
+  buildData(): BakedData {
+    if (!this.geos.length) return {};
+    const g = this.merged();
+    const out: BakedData = {};
+    for (const [k, a] of Object.entries(g.attributes)) {
+      const ba = a as THREE.BufferAttribute;
+      out[k] = { array: ba.array as Float32Array, itemSize: ba.itemSize };
+    }
+    return out;
+  }
+}
+
+/** a merged geometry as plain attribute arrays */
+export type BakedData = Record<string, { array: Float32Array; itemSize: number }>;
+
+function meshOf(geo: THREE.BufferGeometry, { cast = true, receive = true }: BakedOptions): THREE.Mesh {
+  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+  m.castShadow = cast;
+  m.receiveShadow = receive;
+  return m;
+}
+
+/** the mesh Baked.build() would have made, from Baked.buildData() */
+export function meshFromBakedData(d: BakedData, opts: BakedOptions = {}): THREE.Mesh {
+  const g = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(d)) g.setAttribute(k, new THREE.BufferAttribute(a.array, a.itemSize));
+  g.computeBoundingSphere();
+  return meshOf(g, opts);
 }
 
 /** Merge an object tree into a single vertex-colored mesh (one draw call). */

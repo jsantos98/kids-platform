@@ -23,16 +23,18 @@ import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
 import { CENTER, ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
-import { setCityBase, citySeed, cityAt, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
+import { setCityBase, citySeed, cityAt, cityBase, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
 import { raceTrackFor } from '../../worlds/raceIsland.js';
 import { Race, LAPS } from './race.js';
 import { Boarding } from './boarding.js';
 import { IslandPrefetch } from './prefetch.js';
+import { exportBakedTemplates } from '../../engine/assets.js';
+import { buildIslandData, islandReady, type IslandData } from '../../worlds/islandData.js';
 import { Robber, CATCH_R, CATCH_T } from './robber.js';
 import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
-import { Railway, lineDir } from './railway.js';
+import { Railway, lineDir, setIslandGate } from './railway.js';
 import { Missions } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
 import { Director } from './activity/director.js';
@@ -218,6 +220,26 @@ if (q.get('debugbake') === '1') {
 const chunks = new ChunkManager(scene, 64, 4);
 let river = riverFor(START.bx, START.by);
 chunks.ensure(999, spawn.x, spawn.z);
+// from here on chunks bake in the chunk worker (the boot ring above baked
+// here, synchronously): it gets the baked kit templates once, then every
+// island the game has built, so it never rebuilds a plan
+const chunkWorker = (() => {
+  if (q.get('noworker') === '1') return null;
+  try {
+    const w = new Worker(new URL('../../worlds/chunkWorker.ts', import.meta.url), { type: 'module' });
+    w.postMessage({ type: 'templates', pack: exportBakedTemplates() });
+    chunks.attachWorker(w, cityBase);
+    return w;
+  } catch { return null; }
+})();
+const islandsSent = new Set<string>();
+/** give the chunk worker island (bx, by) if the game has it built */
+function shareIsland(d: IslandData): void {
+  const k = `${d.bx},${d.by}`;
+  if (!chunkWorker || islandsSent.has(k)) return;
+  islandsSent.add(k);
+  chunkWorker.postMessage({ type: 'island', data: d });
+}
 if (q.get('buildall') === '1') {
   for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
     for (let cz = 0; cz < WORLD_CHUNKS; cz++) chunks.addChunk(0, 0, cx, cz);
@@ -299,6 +321,8 @@ if (q.get('debugsea') === '1') {
     transit: () => transit.list(),
     river: () => river,
     route: () => railNetFor(curCity.bx, curCity.by),
+    /** chunk bakes waiting at the chunk worker */
+    chunkBaking: () => chunks.baking,
     /** islands the world worker has built so far */
     prefetched: () => prefetch.done,
     /** police modes: the getaway car */
@@ -351,8 +375,13 @@ let raceCheer = 0, raceMsg = '', raceMsgT = 0;
 const ordinal = (n: number): string => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 /** the world worker builds the neighbouring islands ahead of the kid */
 const prefetch = new IslandPrefetch();
+// the trains never build an island mid-frame: they wait for the worker's
+// (the island the kid is on is always built)
+if (q.get('noprefetch') !== '1') setIslandGate((bx, by) => (bx === curCity.bx && by === curCity.by) || islandReady(bx, by));
+prefetch.onIsland = shareIsland;
 function applyCity(c: CityRef): void {
   curCity = c;
+  shareIsland(buildIslandData(c.bx, c.by));
   // (?noprefetch=1: build on demand, as before — to measure the difference)
   if (q.get('noprefetch') !== '1') {
     prefetch.want(IslandPrefetch.around(c.bx, c.by));
@@ -542,7 +571,7 @@ const tick = (): void => {
       [here.bx + 1, here.by, CITY_PITCH - lx], [here.bx - 1, here.by, lx + (CITY_PITCH - ISLAND)],
       [here.bx, here.by + 1, CITY_PITCH - lz], [here.bx, here.by - 1, lz + (CITY_PITCH - ISLAND)],
     ] as Array<[number, number, number]>) {
-      if (gap < 300) transit.prepare(nbx, nby, nbx * CITY_PITCH, nby * CITY_PITCH);
+      if (gap < 300 && islandReady(nbx, nby)) transit.prepare(nbx, nby, nbx * CITY_PITCH, nby * CITY_PITCH);
     }
   }
   transit.pump(3);

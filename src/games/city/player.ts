@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { makeCar, makeFireTruck, makeHelicopter, makePlane } from '../../kit/index.js';
 import { spawnVehicle, wheelNodes } from '../../engine/assets.js';
-import { cityAt } from '../../worlds/cityGrid.js';
+import { cityAt, southExit, eastExit } from '../../worlds/cityGrid.js';
 import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
@@ -311,7 +311,9 @@ export function onGround(x: number, z: number): boolean {
   const c = cityAt(x, z);
   const lx = x - c.ox, lz = z - c.oz;
   if (coastFor(c.bx, c.by).inLand(lx, lz, -1)) return true;
-  const ex = cityPlanFor(c.bx, c.by).exits;
+  // (the exit lines straight from the grid: asking the plan could build a
+  // neighbour island in the middle of a frame)
+  const ex = { n: southExit(c.bx, c.by - 1), s: southExit(c.bx, c.by), w: eastExit(c.bx - 1, c.by), e: eastExit(c.bx, c.by) };
   const ON = 7.5;
   if (Math.abs(lx - ex.n * 64) < ON && lz < CENTER) return true;
   if (Math.abs(lx - ex.s * 64) < ON && lz > CENTER) return true;

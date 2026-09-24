@@ -18,6 +18,9 @@ export class IslandPrefetch {
   private inFlight: string | null = null;
   /** islands installed from the worker (debug) */
   readonly done: string[] = [];
+  /** called with every island the worker delivers (the chunk worker gets a
+   * copy, so it needn't build the plans again) */
+  onIsland: ((d: IslandData) => void) | null = null;
 
   constructor() {
     try {
@@ -26,6 +29,7 @@ export class IslandPrefetch {
         const r = e.data;
         if (r.ok) {
           installIslandData(r.data);
+          this.onIsland?.(r.data);
           this.done.push(`${r.data.bx},${r.data.by}`);
         } else console.warn('world worker failed on', r.bx, r.by, r.error);
         this.inFlight = null;

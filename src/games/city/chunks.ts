@@ -5,15 +5,19 @@
 // signalized intersections.
 import * as THREE from 'three';
 import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js';
+import { meshFromBakedData, type BakedData } from '../../engine/baked.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { coastFor, clipToRect } from '../../worlds/coast.js';
-import { trafficPoles } from '../../worlds/roadLayout.js';
+import { chunkLights, type ChunkLight } from '../../worlds/roadLayout.js';
 import { lightState } from './lights.js';
 import { makeTrafficLights, setHead, type TrafficLightProps } from './lampProps.js';
 
 const CHUNKS_PER_CITY = CITY_PITCH / 64; // world-chunk stride between city cells
+/** chunk bakes queued at the worker at once (nearest first; only a few, so
+ * a change of direction re-prioritizes quickly) */
+const MAX_IN_FLIGHT = 4;
 
 export interface Chunk {
   mesh: THREE.Mesh;
@@ -52,10 +56,53 @@ export class ChunkManager {
     return { bx: city.bx, by: city.by, cx, cz };
   }
 
+  // ---- the chunk worker (chunkWorker.ts): bakes chunks off the main
+  // thread; without it (or if it fails) chunks bake here, as before ----
+  private worker: Worker | null = null;
+  private inFlight = new Map<string, [number, number, number, number]>();
+  private here = { wx: 0, wz: 0 };
+  private base: () => number = () => 0;
+
+  /** hand chunk baking to a worker (already sent the templates) */
+  attachWorker(w: Worker, base: () => number): void {
+    this.worker = w;
+    this.base = base;
+    w.onmessage = (e: MessageEvent<{ ok: boolean; key: string; geo?: BakedData; boxes?: CollisionBox[]; lights?: ChunkLight[]; error?: string }>) => {
+      const r = e.data;
+      const at = this.inFlight.get(r.key);
+      this.inFlight.delete(r.key);
+      this.pending.delete(r.key);
+      if (!at || this.chunks.has(r.key)) return;
+      const [bx, by, cx, cz] = at;
+      const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
+      if (Math.max(Math.abs(wx - this.here.wx), Math.abs(wz - this.here.wz)) > this.VIEW_R + 1) return; // gone out of range
+      if (!r.ok || !r.geo) { console.warn('chunk worker failed on', r.key, r.error); this.addChunk(bx, by, cx, cz); return; }
+      this.finish(bx, by, cx, cz, meshFromBakedData(r.geo), r.boxes!, r.lights);
+    };
+    w.onerror = e => {
+      console.warn('chunk worker error', e.message);
+      this.worker = null;
+      for (const k of this.inFlight.keys()) this.pending.delete(k);
+      this.inFlight.clear();
+    };
+  }
+
+  /** chunk bakes waiting at the worker (debug) */
+  get baking(): number { return this.inFlight.size; }
+
   addChunk(bx: number, by: number, cx: number, cz: number): void {
     const key = `${bx},${by},${cx},${cz}`;
     if (this.chunks.has(key)) return;
     const { mesh, boxes } = generateCityChunk(bx, by, cx, cz);
+    this.finish(bx, by, cx, cz, mesh, boxes);
+  }
+
+  /** a baked chunk joins the world (world-offset mesh, boxes, lights) */
+  private finish(bx: number, by: number, cx: number, cz: number, mesh: THREE.Mesh, boxes: CollisionBox[],
+                 /** the worker's lights (else read from the plan here) */
+                 lightData: ChunkLight[] = chunkLights(bx, by, cx, cz)): void {
+    const key = `${bx},${by},${cx},${cz}`;
+    if (this.chunks.has(key)) return;
     const ox = bx * CITY_PITCH, oz = by * CITY_PITCH;
     mesh.position.set(ox, 0, oz); // chunk geometry is city-local
     this.scene.add(mesh);
@@ -66,12 +113,9 @@ export class ChunkManager {
     }));
     // working kit traffic lights at real intersections: one pole per
     // approach arm, on the driver's near-side right corner
-    const plan = cityPlanFor(bx, by);
-    const X0 = cx * this.CH, Z0 = cz * this.CH;
     const lights: Chunk['lights'] = [];
-    for (const n of plan.nodes) {
-      if (!n.signalized || n.x < X0 || n.x >= X0 + this.CH || n.z < Z0 || n.z >= Z0 + this.CH) continue;
-      const props = makeTrafficLights(trafficPoles(plan, n).map(p => ({ ...p, x: p.x + ox, z: p.z + oz })));
+    for (const n of lightData) {
+      const props = makeTrafficLights(n.poles.map(p => ({ ...p, x: p.x + ox, z: p.z + oz })));
       this.scene.add(props.group);
       lights.push({ x: n.x, z: n.z, props });
     }
@@ -105,13 +149,24 @@ export class ChunkManager {
       const bcx = b[0] * CHUNKS_PER_CITY + b[2], bcz = b[1] * CHUNKS_PER_CITY + b[3];
       return (Math.abs(acx - wcx) + Math.abs(acz - wcz)) - (Math.abs(bcx - wcx) + Math.abs(bcz - wcz));
     });
+    this.here = { wx: wcx, wz: wcz };
     let made = 0;
-    while (this.queue.length && made < budget) {
-      const [bx, by, cx, cz, key] = this.queue.shift()!;
-      this.pending.delete(key);
-      if (this.chunks.has(key)) continue;
-      this.addChunk(bx, by, cx, cz);
-      made++;
+    if (this.worker) {
+      // keep a few bakes in flight, nearest first
+      while (this.queue.length && this.inFlight.size < MAX_IN_FLIGHT) {
+        const [bx, by, cx, cz, key] = this.queue.shift()!;
+        if (this.chunks.has(key)) { this.pending.delete(key); continue; }
+        this.inFlight.set(key, [bx, by, cx, cz]);
+        this.worker.postMessage({ type: 'chunk', base: this.base(), bx, by, cx, cz, key });
+      }
+    } else {
+      while (this.queue.length && made < budget) {
+        const [bx, by, cx, cz, key] = this.queue.shift()!;
+        this.pending.delete(key);
+        if (this.chunks.has(key)) continue;
+        this.addChunk(bx, by, cx, cz);
+        made++;
+      }
     }
     for (const [key, ch] of this.chunks) {
       if (Math.max(Math.abs(ch.wx - wcx), Math.abs(ch.wz - wcz)) > VIEW_R + 1) {

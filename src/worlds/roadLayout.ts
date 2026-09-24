@@ -20,7 +20,7 @@
 // local X; the T is closed on its north (-z) side; the bend joins west and
 // south; the end cap opens east. A kit piece rotated by ry turns every
 // heading by +ry (heading = atan2(x, z)).
-import { ROUNDABOUT_REACH, ROAD_HALF, polePoints, type CityPlan, type PNode, type PEdge } from './cityPlan.js';
+import { ROUNDABOUT_REACH, ROAD_HALF, polePoints, cityPlanFor, type CityPlan, type PNode, type PEdge } from './cityPlan.js';
 
 export { ROUNDABOUT_REACH };
 export const ROAD_TILE = 14;
@@ -166,4 +166,15 @@ export function pieceOutline(p: RoadPiece): V[] {
  */
 export function trafficPoles(plan: CityPlan, n: PNode): Array<{ x: number; z: number; ry: number; axis: 'ew' | 'ns' }> {
   return polePoints(plan.edges, n);
+}
+
+/** a chunk's signalized junctions and their poles (city-local) — the chunk
+ * worker sends these with its chunk, so the game needn't ask the plan */
+export interface ChunkLight { x: number; z: number; poles: Array<{ x: number; z: number; ry: number; axis: 'ew' | 'ns' }> }
+export function chunkLights(bx: number, by: number, cx: number, cz: number): ChunkLight[] {
+  const plan = cityPlanFor(bx, by);
+  const X0 = cx * 64, Z0 = cz * 64;
+  return plan.nodes
+    .filter(n => n.signalized && n.x >= X0 && n.x < X0 + 64 && n.z >= Z0 && n.z < Z0 + 64)
+    .map(n => ({ x: n.x, z: n.z, poles: trafficPoles(plan, n) }));
 }

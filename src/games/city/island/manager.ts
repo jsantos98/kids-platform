@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { cityAt, CITY_PITCH } from '../../../worlds/cityGrid.js';
 import { ISLAND } from '../../../worlds/world.js';
 import { IslandSim, type SimOptions } from './sim.js';
+import { islandReady } from '../../../worlds/islandData.js';
 
 const NEAR = 200;   // m from a neighbour island's edge that wakes it
 const KEEP = 4;     // simulations kept in memory (active + dormant)
@@ -44,7 +45,9 @@ export class IslandManager {
       [here.bx, here.by - 1, lz + (CITY_PITCH - ISLAND)],
     ];
     let best: [number, number, number] | null = null;
-    for (const t of toward) if (t[2] < NEAR && (!best || t[2] < best[2])) best = t;
+    // (a neighbour still being built by the world worker wakes once it's
+    // here — building it now would stall the frame)
+    for (const t of toward) if (t[2] < NEAR && islandReady(t[0], t[1]) && (!best || t[2] < best[2])) best = t;
     if (best) out.push([best[0], best[1]]);
     return out;
   }

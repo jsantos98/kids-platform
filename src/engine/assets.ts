@@ -188,3 +188,44 @@ export function prepBakedModels(defs: Record<string, BakeDef>): Promise<unknown>
 export function bakedModel(name: string): BakedTemplate | null {
   return baked.get(name) ?? null;
 }
+
+/** the baked templates as plain typed arrays, for a worker that bakes
+ * chunks (chunkWorker.ts): name -> geometries' attributes + bounds */
+export interface TemplatePack {
+  [name: string]: {
+    geos: Array<Record<string, { array: Float32Array; itemSize: number }>>;
+    size: BakedTemplate['size'];
+    center: BakedTemplate['center'];
+  };
+}
+
+export function exportBakedTemplates(): TemplatePack {
+  const out: TemplatePack = {};
+  for (const [name, t] of baked) {
+    out[name] = {
+      geos: t.geos.map(g => {
+        const attrs: Record<string, { array: Float32Array; itemSize: number }> = {};
+        for (const [k, a] of Object.entries(g.attributes)) {
+          const ba = a as THREE.BufferAttribute;
+          attrs[k] = { array: ba.array as Float32Array, itemSize: ba.itemSize };
+        }
+        return attrs;
+      }),
+      size: t.size,
+      center: t.center,
+    };
+  }
+  return out;
+}
+
+/** register templates exported by the main thread (in a worker) */
+export function importBakedTemplates(pack: TemplatePack): void {
+  for (const [name, t] of Object.entries(pack)) {
+    const geos = t.geos.map(attrs => {
+      const g = new THREE.BufferGeometry();
+      for (const [k, a] of Object.entries(attrs)) g.setAttribute(k, new THREE.BufferAttribute(a.array, a.itemSize));
+      return g;
+    });
+    baked.set(name, { geos, size: t.size, center: t.center });
+  }
+}

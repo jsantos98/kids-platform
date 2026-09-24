@@ -66,6 +66,13 @@ add it here AND add an enforcement point (code guard or audit check).
 | R20 | New games roll a fresh seed and write it into the URL; `?seed` replays a world exactly. Default player vehicle is the helicopter (`?vehicle=` switches). The old `?race=1` circuit mode is REMOVED together with the map's race track — racing will be rebuilt differently later; don't resurrect `racetrack.ts`. | `index.ts` |
 | R21 | Per-city systems stream and LRU (transit keep-4, scenery keep-3, chunks by view radius). Everything must survive crossing a strait and coming back. | `chunks.ts`, `transit.ts`, `scenery.ts` |
 
+## Gameplay feel
+
+| # | Rule | Enforced in |
+|---|------|-------------|
+| G1 | **A bump or a stuck truck never strands the kid.** A crash flashes the vehicle and resumes it at a breadcrumb: a spot recorded while driving (every 0.4 s) on street asphalt, snapped to the right-hand lane and the street's direction, mid-block, clear of track/water/roundabouts and solid boxes, ≥6 m behind the crash. With no crumb, the nearest open lane; never "round to the lattice line" (that landed on dropped streets, rivers and lots). Gas held 3 s with <1 m of progress triggers the same resume. | `breadcrumb.ts`, `player.ts startCrash`, `index.ts` |
+| G2 | **Guidance points where the kid should steer, relative to the screen.** The HUD badge arrow rotates by `cameraYaw − bearing`; road vehicles aim at the next junction of the shortest open-street route (`RoadGrid.route`), straight at the call within 45 m or when flying. A floating 3D arrow over the vehicle points the same way, and every call has a tall fog-free beacon pillar. Calls stand 11 m out on a junction diagonal (past the 8.6 m signal poles, short of the 12 m corner lots), never two on one corner. | `index.ts guideWaypoint`, `guide3d.ts`, `missions.ts` |
+
 ## Verification workflow
 
 - **Audit (numbers beat vibes):** `npx tsx tools/audit-world.ts <seed>` checks
@@ -88,7 +95,11 @@ add it here AND add an enforcement point (code guard or audit check).
 - **Gates:** `npx tsc --noEmit && npx vite build`.
 - **Visual:** dev server runs on port 8321 (reuse the running one). Load
   `play/city.html?seed=N&debugsea=1` — `window.__dbg` exposes
-  scene/camera/renderer/player/trains/traffic/transit/chunks/route(). Take
+  scene/camera/renderer/player/trains/traffic/transit/chunks/missions/route().
+  Automation tabs are usually hidden, which pauses requestAnimationFrame and
+  throttles timers to 1 s: step the game with `__dbg.tick()` in a loop that
+  busy-waits ~16 ms per frame (so `dt` is real), and drive input with
+  `dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))`. Take
   screenshots via canvas readback
   (`renderer.render(...); renderer.domElement.toDataURL('image/png')`) — the
   IAB `tab.screenshot()` works only once per tab. Teleport by assigning

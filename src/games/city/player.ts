@@ -110,6 +110,14 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
   return p;
 }
 
+/** begin the flash-and-resume sequence (bump or stuck). The caller sets
+ * `p.crash` to the resume spot; the vehicle jumps there when the flashing ends. */
+export function startCrash(p: Player): void {
+  p.crashT = CRASH_FLASH;
+  p.state.v = 0;
+  p.crash.x = p.state.x; p.crash.z = p.state.z; p.crash.heading = p.state.heading;
+}
+
 export interface PhysicsStep {
   /** true when a crash was just registered (caller shows OOPS + thud) */
   crashed: boolean;
@@ -171,26 +179,9 @@ export function physicsStep(
       if (st.x > b.x1 - 0.8 && st.x < b.x2 + 0.8 && nz > b.z1 - V.radius && nz < b.z2 + V.radius) hitZ = true;
     }
     if ((hitX || hitZ || (poleHit && Math.abs(st.v) > 1.0)) && Math.abs(st.v) > 1.4) {
-      // crash! resume on the nearest road lane, aligned with the road,
-      // in the direction the truck was heading, a few meters back
-      const c = Math.cos(st.heading), s2 = Math.sin(st.heading);
-      let rx: number, rz: number, rh: number;
-      if (Math.abs(c) >= Math.abs(s2)) {
-        // travel mostly along Z -> use the N-S road through the crash point
-        const vx = Math.round(st.x / 64) * 64;
-        rx = vx + (c >= 0 ? -3.5 : 3.5);
-        rz = st.z - c * 6;
-        rh = c >= 0 ? 0 : Math.PI;
-      } else {
-        // travel mostly along X -> use the E-W road through the crash point
-        const hz = Math.round(st.z / 64) * 64;
-        rz = hz + (s2 >= 0 ? 3.5 : -3.5);
-        rx = st.x - s2 * 6;
-        rh = s2 >= 0 ? Math.PI / 2 : -Math.PI / 2;
-      }
-      p.crash.x = rx; p.crash.z = rz; p.crash.heading = rh;
-      p.crashT = CRASH_FLASH;
-      st.v = 0;
+      // crash! flash in place; the caller picks the resume spot (a
+      // breadcrumb on the road behind — see breadcrumb.ts)
+      startCrash(p);
       crashed = true;
     } else {
       if (!hitX) st.x = nx;

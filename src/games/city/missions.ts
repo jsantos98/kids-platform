@@ -5,6 +5,7 @@ import { C } from '../../engine/palette.js';
 import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { RoadGrid } from '../../worlds/roadGrid.js';
+import { makeBeacon } from './guide3d.js';
 
 export type ObjectiveType = 'fire' | 'cat' | 'patient';
 
@@ -16,9 +17,12 @@ export interface Objective {
   pos: THREE.Vector3;
   progress: number;
   need: number;
+  /** the junction the call stands at (world coordinates) */
   gx: number;
   gz: number;
   marker: THREE.Group;
+  /** tall light pillar standing on the mission (guide3d.ts) */
+  beacon: THREE.Mesh;
   index: number;
   /** distance to the player, refreshed each frame */
   d: number;
@@ -63,16 +67,23 @@ export class Missions {
     // pick the corner of a REAL intersection (golden-angle resampling),
     // in the current city's local coordinates
     const lx = player.x - this.ox, lz = player.z - this.oz;
+    // the call stands on a junction corner, 11 m out on the diagonal: past
+    // the traffic-light poles (8.6 m) yet short of every corner lot, whose
+    // buildings start 12 m up the street. Never on a corner another call
+    // already occupies.
+    const corner = (r() * 2) | 0;
+    const ox2 = corner ? -11 : 11, oz2 = corner ? 11 : -11;
+    const taken = (x: number, z: number): boolean =>
+      this.objectives.some(o => Math.hypot(o.pos.x - x, o.pos.z - z) < 20);
     let gx = 0, gz = 0;
     for (let attempt = 0; attempt < 24; attempt++) {
       const aa = a + attempt * 2.39996;
       const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
       gx = Math.round(px / this.CH) * this.CH;
       gz = Math.round(pz / this.CH) * this.CH;
-      if (this.grid.cross(Math.round(gx / this.CH), Math.round(gz / this.CH))) break;
+      if (this.grid.cross(Math.round(gx / this.CH), Math.round(gz / this.CH))
+        && !taken(gx + ox2 + this.ox, gz + oz2 + this.oz)) break;
     }
-    const corner = (r() * 2) | 0; // corners without traffic lights
-    const ox2 = corner ? -8.9 : 8.9, oz2 = corner ? 8.9 : -8.9;
     const pos = new THREE.Vector3(gx + ox2 + this.ox, 0.15, gz + oz2 + this.oz);
     forceChunkAt(pos.x, pos.z);
     const need = type === 'patient' ? Math.min(2.5 + diff * 0.15, 4)
@@ -101,7 +112,10 @@ export class Missions {
     const marker = makeMarker(markerColor);
     marker.position.set(pos.x, 6.4, pos.z);
     this.scene.add(marker);
-    this.objectives.push({ type, group, flames, smoke, pos, progress: 0, need, gx, gz, marker, index: this.index, d: 1e9 });
+    const beacon = makeBeacon(type === 'fire' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
+    beacon.position.set(pos.x, 0, pos.z);
+    this.scene.add(beacon);
+    this.objectives.push({ type, group, flames, smoke, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
     this.index++;
   }
 
@@ -110,6 +124,7 @@ export class Missions {
     if (i >= 0) this.objectives.splice(i, 1);
     this.scene.remove(o.group);
     if (o.marker) this.scene.remove(o.marker);
+    this.scene.remove(o.beacon);
   }
 
   nearest(x: number, z: number): { o: Objective | null; d: number } {

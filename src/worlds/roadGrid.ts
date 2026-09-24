@@ -29,6 +29,33 @@ export class RoadGrid {
   cross(i: number, j: number): boolean {
     return this.plan.signalized(i, j);
   }
+  /** shortest node path over open segments from lattice node a to node b
+   * (inclusive), or null when b can't be reached. Every edge is one 64 m
+   * block, so a breadth-first search is exact. */
+  route(ai: number, aj: number, bi: number, bj: number): Array<[number, number]> | null {
+    const key = (i: number, j: number) => i * 1000 + j;
+    const prev = new Map<number, number>([[key(ai, aj), -1]]);
+    const queue: Array<[number, number]> = [[ai, aj]];
+    const goal = key(bi, bj);
+    while (queue.length) {
+      const [i, j] = queue.shift()!;
+      if (key(i, j) === goal) {
+        const out: Array<[number, number]> = [];
+        for (let k = goal; k !== -1; k = prev.get(k)!) out.unshift([Math.floor(k / 1000), k % 1000]);
+        return out;
+      }
+      const step = (ni: number, nj: number, open: boolean): void => {
+        const nk = key(ni, nj);
+        if (open && !prev.has(nk)) { prev.set(nk, key(i, j)); queue.push([ni, nj]); }
+      };
+      step(i + 1, j, this.segH(j, i));
+      step(i - 1, j, this.segH(j, i - 1));
+      step(i, j + 1, this.segV(i, j));
+      step(i, j - 1, this.segV(i, j - 1));
+    }
+    return null;
+  }
+
   /** open street segment: horizontal line j across chunk-column i */
   segH(j: number, i: number): boolean {
     return this.plan.segH(j, i);

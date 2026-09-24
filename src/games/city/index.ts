@@ -6,7 +6,9 @@ import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
-import { VEHICLES, createPlayer, physicsStep } from './player.js';
+import { VEHICLES, createPlayer, physicsStep, startCrash } from './player.js';
+import { Breadcrumbs } from './breadcrumb.js';
+import { GuideArrow, pulseBeacon } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { Traffic } from './traffic.js';
 import { Trains } from './train.js';
@@ -106,6 +108,11 @@ const V = VEHICLES[P.vehicle] ?? VEHICLES.truck;
 let spawn = pickSpawn(0, 0); // city (0,0) is the origin, so local == world at boot
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
+// known-good road spots for crash / stuck resumes, and the floating guide arrow
+const crumbs = new Breadcrumbs(V.radius);
+const guideArrow3d = new GuideArrow(scene);
+const camDir = new THREE.Vector3();
+const stuck = { t: 0, x: spawn.x, z: spawn.z, gas: true };
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
 camera.lookAt(spawn.x, 1.4, spawn.z);
 
@@ -114,7 +121,10 @@ initInput(code => {
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
   if (code === 'KeyE') setSiren(!sirenOn);
-  if (code === 'KeyR') Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: 0 });
+  if (code === 'KeyR') {
+    Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: 0 });
+    crumbs.clear();
+  }
 });
 addEventListener('pointerdown', () => audio.unlock());
 
@@ -321,6 +331,41 @@ if (tp) {
   if (Number.isFinite(txs) && Number.isFinite(tzs)) { player.state.x = txs; player.state.z = tzs; }
 }
 
+/** the point the guide arrows aim at for the call at world (tx, tz): the
+ * call itself when flying or within 45 m, else the next junction on the
+ * shortest open-street route from whichever end of the player's street
+ * gets there first */
+function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: number } {
+  if (V.fly || dist < 45) return { x: tx, z: tz };
+  const ox = curCity.ox, oz = curCity.oz;
+  const lx = player.state.x - ox, lz = player.state.z - oz;
+  const ti = Math.round((tx - ox) / 64), tj = Math.round((tz - oz) / 64);
+  if (ti < 0 || tj < 0 || ti > WORLD_CHUNKS || tj > WORLD_CHUNKS) return { x: tx, z: tz };
+  const ends: Array<[number, number]> = [];
+  const jz = Math.round(lz / 64), ix = Math.round(lx / 64);
+  if (Math.abs(lz - jz * 64) < 9) {
+    const i0 = Math.floor(lx / 64);
+    if (roadGrid.segH(jz, i0)) ends.push([i0, jz], [i0 + 1, jz]);
+  }
+  if (Math.abs(lx - ix * 64) < 9) {
+    const j0 = Math.floor(lz / 64);
+    if (roadGrid.segV(ix, j0)) ends.push([ix, j0], [ix, j0 + 1]);
+  }
+  let best: Array<[number, number]> | null = null, bestCost = Infinity;
+  for (const [ei, ej] of ends) {
+    const path = roadGrid.route(ei, ej, ti, tj);
+    if (!path) continue;
+    const cost = Math.hypot(ei * 64 - lx, ej * 64 - lz) + (path.length - 1) * 64;
+    if (cost < bestCost) { bestCost = cost; best = path; }
+  }
+  if (!best) return { x: tx, z: tz };
+  // the first junction, or the next one once the player is on top of it
+  let k = 0;
+  while (k < best.length - 1 && Math.hypot(best[k][0] * 64 - lx, best[k][1] * 64 - lz) < 14) k++;
+  if (k === best.length - 1 && Math.hypot(best[k][0] * 64 - lx, best[k][1] * 64 - lz) < 14) return { x: tx, z: tz };
+  return { x: best[k][0] * 64 + ox, z: best[k][1] * 64 + oz };
+}
+
 // ---- main loop ----
 const tick = (): void => {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -335,13 +380,29 @@ const tick = (): void => {
   // until the fire is out / the cat is down)
   if (mode === 'drive' || player.crashT > 0) {
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
+    const wasCrashing = player.crashT > 0;
     const step = physicsStep(player, input, dt, boxes);
     if (step.crashed) {
       audio.thud();
       toast = '';
+      Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+    } else if (!wasCrashing && !V.fly && mode === 'drive') {
+      crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
+      // stuck detector: gas held the whole window yet the truck went nowhere
+      // (wedged against something the crash test forgives) -> same resume
+      stuck.t += dt;
+      stuck.gas &&= input.gas > 0.1;
+      if (stuck.t >= 3) {
+        if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
+          startCrash(player);
+          Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+        }
+        Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
+      }
     }
   } else {
     st.v = 0;
+    Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
   }
 
   player.car.position.set(st.x, V.fly ? 16 + Math.sin(elapsed * 1.3) * 0.7 : 0, st.z);
@@ -445,12 +506,20 @@ const tick = (): void => {
   const { o: near, d: nd } = missions.nearest(st.x, st.z);
   for (const o of missions.objectives) {
     if (!o.marker) continue;
-    // hover marker: grows with distance so fires are findable from anywhere
-    o.marker.visible = (mode !== 'spray' || spraySession?.obj !== o);
-    o.marker.scale.setScalar(Math.max(1.4, Math.min(5, o.d / 28)));
+    // hover marker over the call; the tall beacon pillar does the
+    // long-range finding (it shows over the rooftops, fog or not)
+    const busy = mode !== 'drive' && (spraySession?.obj === o || ladderSession?.obj === o);
+    o.marker.visible = !busy;
+    o.marker.scale.setScalar(1.6);
     o.marker.position.y = 5.4 + Math.sin(elapsed * 2 + o.index) * 0.5;
     o.marker.rotation.y += dt * 1.2;
+    pulseBeacon(o.beacon, elapsed, o.index, busy ? 0 : o.d);
   }
+  // where the guidance points: straight at the call when flying or close,
+  // otherwise at the next junction of the shortest street route
+  const way = near && mode === 'drive' ? guideWaypoint(near.pos.x, near.pos.z, nd) : null;
+  const bearing = way ? Math.atan2(way.x - st.x, way.z - st.z) : null;
+  guideArrow3d.update(dt, elapsed, player.car.position, V.fly ? 5.2 : 4.6, bearing);
 
   if (mode === 'spray' && spraySession) {
     guideEl.style.opacity = '0';
@@ -490,12 +559,14 @@ const tick = (): void => {
     // ---- driving/flying guidance to the nearest call ----
     guideEl.style.opacity = '1';
     guideIcon.textContent = near.type === 'fire' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱';
-    const rel = Math.atan2(near.pos.z - st.z, near.pos.x - st.x);
-    const deg = (-rel * 180 / Math.PI).toFixed(0);
-    guideArrow.style.transform = `rotate(${deg}deg)`;
+    // the badge arrow turns with the CAMERA: up = straight ahead on screen
+    camera.getWorldDirection(camDir);
+    const camYaw = Math.atan2(camDir.x, camDir.z);
+    guideArrow.style.transform = `rotate(${(camYaw - (bearing ?? camYaw)).toFixed(3)}rad)`;
     guideArrow.style.display = '';
     const dots = Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240))));
-    guideDist.textContent = '\u25CF'.repeat(dots) + '\u25CB'.repeat(5 - dots);
+    guideDist.innerHTML = '\u25CF'.repeat(dots) + '\u25CB'.repeat(5 - dots)
+      + `<span class="m">${Math.round(nd)} m</span>`;
     guideWait.textContent = '';
     promptEl.style.display = 'block';
     if (near.type === 'fire') {
@@ -522,9 +593,9 @@ const tick = (): void => {
         toast = '🆘 PERSON RESCUED!';
       }
     } else {
-      promptText.textContent = nd < 11 ? 'STOP HERE!' : 'DRIVE TO THE CAT';
+      promptText.textContent = nd < 12 ? 'STOP HERE!' : 'DRIVE TO THE CAT';
       promptFill.style.width = '0%';
-      if (nd < 11 && Math.abs(st.v) < 1.0 && player.crashT <= 0) {
+      if (nd < 12 && Math.abs(st.v) < 1.0 && player.crashT <= 0) {
         ladderSession = ladderMod.beginLadder(scene, near, player.car);
         mode = 'ladder';
         promptText.textContent = 'MOVE THE LADDER TO THE CAT!';
@@ -567,6 +638,11 @@ const tick = (): void => {
   }
 };
 renderer.setAnimationLoop(tick);
+// dev probe: step frames by hand (background tabs pause requestAnimationFrame)
+if (q.get('debugsea') === '1') {
+  (window as unknown as { __dbg: Record<string, unknown> }).__dbg.tick = tick;
+  (window as unknown as { __dbg: Record<string, unknown> }).__dbg.missions = missions;
+}
 if (q.get('still') === '1') {
   // background tabs suspend rAF — drive frames off a timer so ?still captures
   // show the settled state even when the pane isn't visible

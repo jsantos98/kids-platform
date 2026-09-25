@@ -118,6 +118,10 @@ export const VEHICLES: Record<string, VehicleConfig> = {
 /** cruise altitudes: the helicopter hovers low over the rooftops, the plane
  * flies higher (it climbs/dives to each ring on its own) */
 export const HELI_ALT = 16;
+/** the helicopter over the roofs: it clears the tallest ahead by HELI_CLEAR,
+ * climbing up to HELI_CLIMB m/s and sinking back at HELI_SINK; its body
+ * (radius HELI_BODY) hangs HELI_SKIDS below its origin */
+const HELI_CLEAR = 4.5, HELI_CLIMB = 9, HELI_SINK = 3, HELI_BODY = 1.6, HELI_SKIDS = 1.5;
 export const PLANE_ALT = 30;
 const PLANE_MIN_V = 11;
 
@@ -257,11 +261,13 @@ export function physicsStep(
   const { state: st, V } = p;
 
   if (V.kind === 'heli') {
-    // simplified helicopter: hover-drive at a fixed altitude, over all but
-    // the tallest buildings — flying into one is a bump like the truck's:
-    // it flashes, then carries on from just back along its path, clear of
-    // the building, still facing the same way (G1)
-    st.alt = HELI_ALT;
+    // simplified helicopter: hover-drive at HELI_ALT, and forgiving — it
+    // climbs over any roof in its way by itself (looking ahead along its
+    // path, slowing down if a tower needs a longer climb) and sinks back
+    // once past; brushing a wall only slides it along; just flying head-on
+    // into a wall it hasn't cleared is a bump like the truck's: it flashes,
+    // then carries on from just back along its path, still facing the same
+    // way (G1)
     if (p.crashT > 0) {
       p.crashT -= dt;
       p.car.visible = (Math.floor(performance.now() / 1000 * 9) % 2) === 0;
@@ -276,28 +282,46 @@ export function physicsStep(
     if (input.brake) st.v = Math.max(-V.maxF * 0.5, st.v - V.brake * dt);
     st.v -= st.v * 0.5 * dt;
     st.heading += input.steer * 1.0 * dt * (0.35 + Math.abs(st.v) / V.maxF);
+    // the roofs ahead: climb to clear the tallest by HELI_CLEAR
+    const dir = st.v < 0 ? -1 : 1;
+    const fx = Math.sin(st.heading) * dir, fz = Math.cos(st.heading) * dir;
+    const reach = 10 + Math.abs(st.v) * 2.5;
+    let roof = 0, roofD = Infinity;
+    for (const b of boxes) {
+      const top = b.top ?? 0;
+      if (top + HELI_CLEAR <= HELI_ALT || top <= roof) continue;
+      for (let d = 0; d <= reach; d += 2) {
+        if (inBox(b, st.x + fx * d, st.z + fz * d, HELI_BODY + 1.5)) { roof = top; roofD = d; break; }
+      }
+    }
+    const want = Math.max(HELI_ALT, roof + HELI_CLEAR);
+    st.alt += Math.max(-HELI_SINK * dt, Math.min(HELI_CLIMB * dt, want - st.alt));
+    // (a tower that needs a longer climb than the way to it allows: ease off)
+    if (want > st.alt + 0.5 && roofD < Infinity) {
+      const vMax = Math.max(2, (roofD - HELI_BODY) / ((want - st.alt) / HELI_CLIMB));
+      if (Math.abs(st.v) > vMax) st.v = Math.sign(st.v) * vMax;
+    }
+    // only the body counts (the rotor tips over a roof edge are forgiven),
+    // against what still reaches up to the skids
+    const hits = (x: number, z: number): boolean =>
+      boxes.some(b => (b.top ?? 0) > st.alt - HELI_SKIDS && inBox(b, x, z, HELI_BODY));
     const nx = st.x + Math.sin(st.heading) * st.v * dt;
     const nz = st.z + Math.cos(st.heading) * st.v * dt;
-    // (the rotor disc reaches ~2.5 m below the hover height)
-    const tall = boxes.filter(b => (b.top ?? 0) > HELI_ALT - 2.5);
-    const hits = (x: number, z: number): boolean => tall.some(b => b.obb
-      ? inBox(b, x, z, V.radius)
-      : x > b.x1 - V.radius && x < b.x2 + V.radius && z > b.z1 - V.radius && z < b.z2 + V.radius);
-    if (tall.length && hits(nx, nz)) {
-      if (Math.abs(st.v) > 1.5) {
-        startCrash(p);
-        // resume just back along the path, at the first clear spot
-        const bx = -Math.sin(p.crash.heading), bz = -Math.cos(p.crash.heading);
-        for (let d = 6; d <= 60; d += 1) {
-          const x = p.crash.x + bx * d, z = p.crash.z + bz * d;
-          if (!hits(x, z)) { p.crash.x = x; p.crash.z = z; break; }
-        }
-        return { crashed: true };
+    if (!hits(nx, nz)) { st.x = nx; st.z = nz; return { crashed: false }; }
+    // a glancing touch: slide along the wall
+    if (!hits(nx, st.z)) { st.x = nx; st.v *= 1 - Math.min(0.5, dt * 2); return { crashed: false }; }
+    if (!hits(st.x, nz)) { st.z = nz; st.v *= 1 - Math.min(0.5, dt * 2); return { crashed: false }; }
+    if (Math.abs(st.v) > 5) {
+      startCrash(p);
+      // resume just back along the path, at the first clear spot
+      const bx = -Math.sin(p.crash.heading), bz = -Math.cos(p.crash.heading);
+      for (let d = 6; d <= 60; d += 1) {
+        const x = p.crash.x + bx * d, z = p.crash.z + bz * d;
+        if (!hits(x, z)) { p.crash.x = x; p.crash.z = z; break; }
       }
-      st.v = 0; // nudging it at a crawl just stops
-      return { crashed: false };
+      return { crashed: true };
     }
-    st.x = nx; st.z = nz;
+    st.v = 0; // nudging it slowly just stops
     return { crashed: false };
   }
 

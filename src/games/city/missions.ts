@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { C } from '../../engine/palette.js';
 import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
-import { graphFor, type StreetGraph } from '../../worlds/streetGraph.js';
+import { graphFor, type StreetGraph, type SNode } from '../../worlds/streetGraph.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { makeBeacon } from './guide3d.js';
 
@@ -42,6 +42,9 @@ export interface PlayerXZ {
   heading: number;
 }
 
+/** no call closer than this to where the game started, or to the kid when it appears (G2) */
+export const MIN_CALL_DIST = 100;
+
 export class Missions {
   objectives: Objective[] = [];
   cooldown = 0;
@@ -62,6 +65,9 @@ export class Missions {
 
   private bx = 0;
   private by = 0;
+  /** where the game started: no call ever stands within MIN_CALL_DIST of
+   * it (a call at the drop point opened its scene before the kid had moved) */
+  private home: { x: number; z: number } | null = null;
 
   setCity(bx: number, by: number, ox: number, oz: number): void {
     this.bx = bx;
@@ -79,7 +85,8 @@ export class Missions {
     else if ((qType === 'fire' || qType === 'cat' || qType === 'patient' || qType === 'rescue') && this.calls.includes(qType)) type = qType;
     else type = this.calls[this.index % this.calls.length];
     const diff = Math.min(this.sFires + this.sCats, 10);
-    const dist = this.index === 0 ? 26 + r() * 10 : Math.min(90 + diff * 10, 240) + r() * 60;
+    this.home ??= { x: player.x, z: player.z };
+    const dist = this.index === 0 ? MIN_CALL_DIST + 15 + r() * 20 : Math.min(MIN_CALL_DIST + 10 + diff * 10, 240) + r() * 60;
     const a = this.index === 0 ? player.heading + 0.5 : r() * Math.PI * 2;
     // pick the corner of a REAL intersection (golden-angle resampling),
     // in the current city's local coordinates
@@ -128,16 +135,28 @@ export class Missions {
       }
       return out;
     };
+    const home = this.home;
     const taken = (x: number, z: number): boolean =>
-      this.objectives.some(o => Math.hypot(o.pos.x - x, o.pos.z - z) < 20);
+      this.objectives.some(o => Math.hypot(o.pos.x - x, o.pos.z - z) < 20)
+      // (never at the drop point, nor right where the kid is now)
+      || Math.hypot(x - home.x, z - home.z) < MIN_CALL_DIST
+      || Math.hypot(x - player.x, z - player.z) < MIN_CALL_DIST;
     let gx = 0, gz = 0, ox2 = 11, oz2 = 11;
     // best corner so far: a clear one ends the search, else the corner with
     // the fewest tree rows around it is kept as the fallback
     let bestTrees = Infinity;
-    for (let attempt = 0; attempt < 24 && bestTrees > 0; attempt++) {
+    // (the golden-angle probes first; then, if none found a free corner far
+    // enough out, every signalized junction, nearest the wanted distance first)
+    const probes: Array<SNode | null> = [];
+    for (let attempt = 0; attempt < 24; attempt++) {
       const aa = a + attempt * 2.39996;
-      const px = lx + Math.sin(aa) * dist, pz = lz + Math.cos(aa) * dist;
-      const n = this.graph.nearestNode(px, pz);
+      probes.push(this.graph.nearestNode(lx + Math.sin(aa) * dist, lz + Math.cos(aa) * dist));
+    }
+    const rest = this.graph.nodes.filter(n => n.signalized)
+      .sort((p, q) => Math.abs(Math.hypot(p.x - lx, p.z - lz) - dist) - Math.abs(Math.hypot(q.x - lx, q.z - lz) - dist));
+    for (let attempt = 0; attempt < probes.length + rest.length && bestTrees > 0; attempt++) {
+      if (attempt >= probes.length && bestTrees < Infinity) break;
+      const n = attempt < probes.length ? probes[attempt] : rest[attempt - probes.length];
       if (!n || !n.signalized) continue;
       for (const [cx, cz] of cornersOf(n)) {
         if (taken(n.x + cx + this.ox, n.z + cz + this.oz)) continue;

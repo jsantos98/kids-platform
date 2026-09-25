@@ -839,7 +839,7 @@ const tick = (): void => {
 
   // camera (flying vehicles keep the camera near their altitude)
   // (road vehicles and the train ride the causeway decks, so they follow st.alt too)
-  const flyY = V.kind === 'heli' ? HELI_ALT : V.kind === 'boat' ? 0 : st.alt;
+  const flyY = V.kind === 'boat' ? 0 : st.alt;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
   if (camMode === 'cab') {
     camera.position.set(st.x + fwd.x * V.cabF, flyY + V.cabY, st.z + fwd.z * V.cabF);

@@ -8,7 +8,7 @@
   canvas { display: block; }
   :root { --ink: #4a5058; --ink-soft: #5a6472; --cream: rgba(255, 252, 244, .92); --teal: #63b0a8; }
   #hint {
-    position: fixed; top: 12px; left: 12px; z-index: 9;
+    position: fixed; top: 12px; left: 84px; z-index: 9;
     padding: 10px 18px; border-radius: 999px;
     background: var(--cream); color: var(--ink-soft);
     font: 600 13px/1.5 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; pointer-events: none;
@@ -108,6 +108,57 @@
     0%   { box-shadow: 0 4px 0 rgba(163, 42, 42, .45), 0 0 0 0 rgba(226, 92, 92, .55); }
     100% { box-shadow: 0 4px 0 rgba(163, 42, 42, .45), 0 0 0 16px rgba(226, 92, 92, 0); }
   }
+  /* back to the garage: click it, press Esc, or hold the wheel's
+     start / select button (the ring fills while it's held) */
+  #homeBtn {
+    position: fixed; top: 10px; left: 12px; z-index: 12;
+    width: 60px; height: 60px; border-radius: 50%; cursor: pointer;
+    display: grid; place-items: center; font-size: 30px; line-height: 1;
+    background: conic-gradient(var(--teal) calc(var(--hold, 0) * 1turn), var(--cream) 0);
+    border: 3px solid #fffdf8; box-shadow: 0 4px 0 rgba(74, 80, 88, .18);
+    touch-action: manipulation;
+  }
+  #homeBtn span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: var(--cream); }
+  body.in-scene #homeBtn { display: none; }
+  /* the loading card: what's happening, a bar with the vehicle driving
+     along it, and about how long is left */
+  #loading {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 26px;
+    background: radial-gradient(ellipse at 50% 38%, #fffaf0 0%, #fdf4e3 40%, #bfe3f0 100%);
+    font-family: 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; color: var(--ink);
+    transition: opacity .6s ease;
+  }
+  #loading.gone { opacity: 0; pointer-events: none; }
+  #loading .isle { font-size: clamp(64px, 14vh, 130px); line-height: 1; animation: isleBob 2.2s ease-in-out infinite; }
+  @keyframes isleBob { 50% { transform: translateY(-10px) rotate(-3deg); } }
+  #loading .label { font-size: clamp(22px, 4.2vh, 40px); font-weight: 800; letter-spacing: .5px; }
+  #loading .track {
+    position: relative; width: min(760px, 82vw); height: clamp(22px, 4vh, 36px);
+    border-radius: 999px; background: rgba(74, 80, 88, .12); box-shadow: inset 0 3px 0 rgba(74, 80, 88, .1);
+  }
+  #loading .fill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 999px;
+    background: repeating-linear-gradient(-45deg, #63b0a8 0 18px, #74c2b9 18px 36px);
+    background-size: 51px 100%; animation: stripes 1s linear infinite;
+    transition: width .25s ease;
+  }
+  @keyframes stripes { to { background-position: 51px 0; } }
+  #loading .car {
+    position: absolute; top: 50%; left: 0; transform: translate(-50%, -78%) scaleX(-1);
+    font-size: clamp(38px, 7vh, 64px); line-height: 1; transition: left .25s ease;
+    filter: drop-shadow(0 3px 0 rgba(74, 80, 88, .18));
+  }
+  #loading .eta { font-size: clamp(16px, 2.6vh, 24px); font-weight: 700; color: var(--ink-soft); min-height: 1.2em; }
+  /* a neighbour still being built as the kid drives up to it */
+  #islandPill {
+    position: fixed; left: 50%; bottom: 3.2vh; transform: translateX(-50%); z-index: 9; display: none;
+    padding: 8px 18px; border-radius: 999px; background: var(--cream); color: var(--ink);
+    font: 800 clamp(13px, 2.2vh, 20px) 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif;
+    box-shadow: 0 3px 0 rgba(74, 80, 88, .14); pointer-events: none; white-space: nowrap;
+  }
+  #islandPill .mini { display: inline-block; vertical-align: middle; width: 90px; height: 9px; margin-left: 10px; border-radius: 9px; background: rgba(74, 80, 88, .14); overflow: hidden; }
+  #islandPill .mini > div { height: 100%; width: 0; background: var(--teal); transition: width .3s; }
 </style>
 </head>
 <body>
@@ -129,6 +180,14 @@
 <div id="fade"></div>
 <button id="sirenBtn" type="button"><span class="ic">🚨</span>SIREN</button>
 <canvas id="minimap" width="256" height="256"></canvas>
+<button id="homeBtn" type="button" title="back to the garage (Esc)"><span>🏠</span></button>
+<div id="islandPill"><span class="t"></span><span class="mini"><div></div></span></div>
+<div id="loading">
+  <div class="isle">🏝️</div>
+  <div class="label">Getting ready…</div>
+  <div class="track"><div class="fill"></div><div class="car"></div></div>
+  <div class="eta"></div>
+</div>
 <script type="module" src="../src/games/city/index.ts"></script>
 </body>
 </html>

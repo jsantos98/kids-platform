@@ -129,6 +129,22 @@ export class ChunkManager {
   }
 
   /** Build pending chunks nearest the player first (budget per frame). */
+  /** the chunks in view of world (px, pz) not built yet, nearest first
+   * (the boot bakes these a few a frame, under its progress bar) */
+  wanted(px: number, pz: number): Array<[number, number, number, number]> {
+    const CH = this.CH, VIEW_R = this.VIEW_R;
+    const wcx = Math.floor(px / CH), wcz = Math.floor(pz / CH);
+    const out: Array<[number, number, number, number, number]> = [];
+    for (let dx = -VIEW_R; dx <= VIEW_R; dx++) {
+      for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
+        const r = this.resolve(wcx + dx, wcz + dz);
+        if (!r || this.chunks.has(`${r.bx},${r.by},${r.cx},${r.cz}`)) continue;
+        out.push([r.bx, r.by, r.cx, r.cz, Math.abs(dx) + Math.abs(dz)]);
+      }
+    }
+    return out.sort((a, b) => a[4] - b[4]).map(([bx, by, cx, cz]) => [bx, by, cx, cz]);
+  }
+
   ensure(budget: number, px: number, pz: number): void {
     const CH = this.CH, VIEW_R = this.VIEW_R;
     const wcx = Math.floor(px / CH), wcz = Math.floor(pz / CH);

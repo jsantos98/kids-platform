@@ -173,14 +173,19 @@ export type BakeDef = [url: string, cmapUrl: string | null, opts?: BakeOptions];
 const baked = new Map<string, BakedTemplate>();
 
 /** Bake every def once; individual failures are logged and leave the name unset. */
-export function prepBakedModels(defs: Record<string, BakeDef>): Promise<unknown> {
-  return Promise.all(Object.entries(defs).map(async ([name, def]) => {
-    if (baked.has(name)) return;
-    const [url, cmap, opts] = def;
+/** bake every kit model of `defs` (`onProgress(done, total)` as they land) */
+export function prepBakedModels(defs: Record<string, BakeDef>, onProgress?: (done: number, total: number) => void): Promise<unknown> {
+  const all = Object.entries(defs);
+  let done = 0;
+  return Promise.all(all.map(async ([name, def]) => {
     try {
+      if (baked.has(name)) return;
+      const [url, cmap, opts] = def;
       baked.set(name, await bakeTemplate(url, cmap, opts));
     } catch (e) {
       console.warn('asset bake failed:', name, e);
+    } finally {
+      onProgress?.(++done, all.length);
     }
   }));
 }

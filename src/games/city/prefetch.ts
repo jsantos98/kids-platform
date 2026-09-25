@@ -10,7 +10,8 @@
 import { cityBase, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { installIslandData, islandReady, type IslandData } from '../../worlds/islandData.js';
 
-type Reply = { ok: true; data: IslandData } | { ok: false; bx: number; by: number; error: string };
+type Reply = { ok: true; data: IslandData } | { ok: false; bx: number; by: number; error: string }
+  | { progress: true; bx: number; by: number; f: number };
 
 export class IslandPrefetch {
   private worker: Worker | null = null;
@@ -21,12 +22,19 @@ export class IslandPrefetch {
   /** called with every island the worker delivers (the chunk worker gets a
    * copy, so it needn't build the plans again) */
   onIsland: ((d: IslandData) => void) | null = null;
+  /** the island being built: when it started and how far along it is */
+  private started = 0;
+  private frac = 0;
+  /** how long an island takes the worker (a running average, s) */
+  private avg = 6;
 
   constructor() {
     try {
       this.worker = new Worker(new URL('../../worlds/worldWorker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (e: MessageEvent<Reply>) => {
         const r = e.data;
+        if ('progress' in r) { this.frac = r.f; return; }
+        this.avg += ((performance.now() - this.started) / 1000 - this.avg) * 0.3;
         if (r.ok) {
           installIslandData(r.data);
           this.onIsland?.(r.data);
@@ -63,9 +71,27 @@ export class IslandPrefetch {
       const [bx, by] = this.queue.shift()!;
       if (islandReady(bx, by)) continue;
       this.inFlight = `${bx},${by}`;
+      this.started = performance.now();
+      this.frac = 0;
       this.worker.postMessage({ base: cityBase(), bx, by });
       return;
     }
+  }
+
+  /** how far along island (bx, by) is, and about how many seconds it still
+   * needs (queued behind others: theirs too), or null if it isn't coming */
+  status(bx: number, by: number): { f: number; eta: number } | null {
+    const k = `${bx},${by}`;
+    const left = this.inFlight ? Math.max(0.5, this.avg * (1 - this.frac) - 0) : 0;
+    if (this.inFlight === k) {
+      const el = (performance.now() - this.started) / 1000;
+      // (the measured pace once a stage is in, else the average)
+      const eta = this.frac > 0.1 ? el * (1 - this.frac) / this.frac : Math.max(0.5, this.avg - el);
+      return { f: this.frac, eta };
+    }
+    const i = this.queue.findIndex(([qx, qy]) => qx === bx && qy === by);
+    if (i < 0) return null;
+    return { f: 0, eta: left + (i + 1) * this.avg };
   }
 
   /** the islands round (bx, by): its eight neighbours, and the four two

@@ -12,7 +12,7 @@ npm install
 npm run dev          # → http://localhost:8321
 ```
 
-The garage at the root is the launcher — big buttons, no reading required.
+The garage at the root is the launcher: one vehicle per play mode on a turntable, chosen with the wheel (turn it to spin the carousel, press the pedal or any button to go; arrow keys + Enter and the mouse work too) — no reading required, the name is spoken. In the game, the 🏠 button, Esc, or holding the wheel's start / select button for a second goes back to the garage. While an island loads, a progress card shows what is happening and about how long is left.
 `npm run build` produces a minified `dist/`; `npm run preview` serves it.
 
 **Endless City** is an endless archipelago of seeded island cities joined by

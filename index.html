@@ -2,33 +2,105 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My Little Garage</title>
 <style>
-  body {
-    margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    background: linear-gradient(180deg, #a6d8ef 0%, #fdf4e3 55%); color: #4a5058;
+  :root {
+    --ink: #4a5058; --ink-soft: #6a7380; --cream: rgba(255, 252, 244, .94); --accent: #e25c5c;
     font-family: 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif;
   }
-  h1 { font-size: clamp(34px, 6vw, 60px); margin: 8vh 0 4px; color: #4a5058; }
-  p.sub { margin: 0 0 42px; font-size: 20px; color: #7a828e; }
-  .games { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(260px, 320px)); width: min(92vw, 1100px); }
-  a.game {
-    display: flex; flex-direction: column; align-items: center; gap: 10px; text-decoration: none;
-    background: #fffdf8; border-radius: 30px; padding: 34px 22px 28px;
-    box-shadow: 0 6px 0 rgba(74, 80, 88, .18); transition: transform .15s ease;
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cbe7f2; color: var(--ink); user-select: none; }
+  canvas { display: block; }
+
+  /* ---- title ---- */
+  #title {
+    position: fixed; top: 3.2vh; left: 50%; transform: translateX(-50%); z-index: 5;
+    display: flex; align-items: center; gap: 14px; pointer-events: none;
+    padding: 10px 30px; border-radius: 999px; background: var(--cream);
+    box-shadow: 0 5px 0 rgba(74, 80, 88, .14);
+    font-weight: 900; font-size: clamp(22px, 4.2vh, 40px); letter-spacing: .5px; white-space: nowrap;
   }
-  a.game:hover { transform: translateY(-6px) rotate(-.5deg); }
-  a.game .icon { font-size: 84px; line-height: 1; }
-  a.game .t { font-size: 24px; font-weight: 800; color: #4a5058; text-align: center; }
-  a.game .b { font-size: 15px; color: #7a828e; text-align: center; line-height: 1.45; }
-  footer { margin-top: auto; padding: 26px; font-size: 13px; color: #9aa2ad; }
+  #title .garage { font-size: 1.25em; }
+  #stars {
+    position: fixed; top: 3.2vh; right: 2.2vw; z-index: 5; pointer-events: none;
+    padding: 10px 20px; border-radius: 999px; background: var(--cream); box-shadow: 0 4px 0 rgba(74, 80, 88, .14);
+    font-weight: 800; font-size: clamp(15px, 2.4vh, 22px); color: var(--ink-soft); white-space: nowrap;
+  }
+
+  /* ---- the chosen vehicle's name ---- */
+  #name {
+    position: fixed; left: 50%; bottom: calc(24vh + 18px); transform: translateX(-50%); z-index: 5;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+  }
+  #name .t {
+    padding: 8px 34px; border-radius: 999px; background: var(--cream); white-space: nowrap;
+    font-weight: 900; font-size: clamp(30px, 6.4vh, 64px); letter-spacing: 1px; color: var(--ink);
+    box-shadow: 0 6px 0 var(--sel, #e25c5c);
+    animation: pop .35s cubic-bezier(.3, 1.6, .5, 1);
+  }
+  #name .b { font-weight: 700; font-size: clamp(15px, 2.5vh, 24px); color: var(--ink-soft); text-shadow: 0 1px 0 #fffdf8; }
+  @keyframes pop { from { transform: scale(.7); opacity: .2; } to { transform: scale(1); opacity: 1; } }
+
+  /* ---- the carousel: every vehicle, the chosen one big in the middle ---- */
+  #carousel { position: fixed; left: 0; right: 0; bottom: 5vh; height: 19vh; z-index: 5; }
+  .tile {
+    position: absolute; left: 50%; top: 50%; width: 15vh; height: 15vh; margin: -7.5vh 0 0 -7.5vh;
+    border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    background: var(--cream); font-size: 8vh; line-height: 1;
+    box-shadow: 0 5px 0 rgba(74, 80, 88, .16);
+    transition: transform .38s cubic-bezier(.3, 1.35, .5, 1), opacity .3s, box-shadow .3s;
+  }
+  .tile.sel {
+    box-shadow: 0 0 0 7px var(--c), 0 0 38px 10px color-mix(in srgb, var(--c) 55%, transparent), 0 8px 0 rgba(74, 80, 88, .2);
+    animation: breathe 1.6s ease-in-out infinite;
+  }
+  @keyframes breathe { 50% { filter: brightness(1.06); } }
+  .tile.jump { transition: none; }
+
+  /* ---- how to drive the menu ---- */
+  #help {
+    position: fixed; left: 2.2vw; top: 3.2vh; z-index: 6; display: flex; align-items: center; gap: 12px;
+    padding: 8px 18px 8px 10px; border-radius: 999px; background: var(--cream);
+    box-shadow: 0 4px 0 rgba(74, 80, 88, .14); font-weight: 800; font-size: clamp(13px, 2vh, 18px); color: var(--ink-soft);
+    pointer-events: none;
+  }
+  #wheel { width: clamp(38px, 6vh, 58px); height: clamp(38px, 6vh, 58px); transition: transform .08s linear; }
+  #go {
+    position: fixed; right: 3vw; top: 42vh; z-index: 6; cursor: pointer;
+    display: flex; align-items: center; gap: 12px; border: 4px solid #fffdf8; border-radius: 999px;
+    padding: clamp(10px, 1.8vh, 18px) clamp(26px, 3.4vw, 46px);
+    background: var(--sel, #e25c5c); color: #fffdf8; font-weight: 900; font-size: clamp(24px, 4.6vh, 44px); font-family: inherit;
+    box-shadow: 0 6px 0 rgba(74, 80, 88, .25);
+    animation: goPulse 1.3s ease-in-out infinite;
+  }
+  #go .pedal { font-size: .8em; }
+  @keyframes goPulse { 50% { transform: scale(1.06); } }
+
+  /* ---- the wipe into the game ---- */
+  #wipe {
+    position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% 45%, #fffaf0, #fdf4e3 60%, #bfe3f0);
+    display: grid; place-items: center; font-size: 16vh; transition: opacity .5s ease;
+  }
+  #wipe.on { opacity: 1; }
 </style>
 </head>
 <body>
-<h1>My Little Garage</h1>
-<p class="sub">Pick a game! 🚗💨</p>
-<div class="games" id="games"></div>
-<footer>plug in the steering wheel and go · built with three.js</footer>
+<div id="title"><span class="garage">🏠</span> My Little Garage</div>
+<div id="stars"></div>
+<div id="name"><div class="t"></div><div class="b"></div></div>
+<div id="carousel"></div>
+<div id="help">
+  <svg id="wheel" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="42" fill="none" stroke="#4a5058" stroke-width="10"/>
+    <circle cx="50" cy="50" r="10" fill="#4a5058"/>
+    <path d="M50 50 L14 58 M50 50 L86 58 M50 50 L50 90" stroke="#4a5058" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="50" cy="8" r="6" fill="#e25c5c"/>
+  </svg>
+  turn the wheel to choose · press the pedal to go
+</div>
+<button id="go" type="button"><span>GO!</span><span class="pedal">🦶</span></button>
+<div id="wipe"></div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -27,13 +27,19 @@ export interface IslandData {
   grid: Uint8Array;
 }
 
-/** build island (bx, by) (in the worker, or anywhere) */
-export function buildIslandData(bx: number, by: number): IslandData {
+/** build island (bx, by) (in the worker, or anywhere); `onProgress(f)`
+ * after each stage, f the share of the work done (weighted by measured
+ * stage times: the rail ~15%, the streets ~35%, the plan ~40%, the grid) */
+export function buildIslandData(bx: number, by: number, onProgress?: (f: number) => void): IslandData {
   const rail = railNetFor(bx, by);
+  onProgress?.(0.15);
   const race = raceTrackFor(bx, by);
   const streets = streetNetFor(bx, by);
+  onProgress?.(0.5);
   const plan = cityPlanFor(bx, by);
+  onProgress?.(0.9);
   const grid = occupancyFor(bx, by);
+  onProgress?.(1);
   return { base: cityBase(), bx, by, rail: rail.data, race: race?.data ?? null, streets, plan: plan.data, grid: grid.raw.slice() };
 }
 

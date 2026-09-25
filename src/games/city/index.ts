@@ -50,6 +50,7 @@ import { Transit } from './transit.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
+import { LoadingScreen, nextFrame } from './loading.js';
 
 // ---- params ----
 const q = new URLSearchParams(location.search);
@@ -158,14 +159,27 @@ const START_OX = START.bx * CITY_PITCH, START_OZ = START.by * CITY_PITCH;
 // boot: the start island (seconds of generation) is built in a world worker
 // while the Kenney kits load and bake here; both are awaited before the
 // first thing that needs either (?noprefetch=1: built here, as before)
-const kitsReady = import('./kitdefs.js').then(m => prepBakedModels(m.KITDEFS)).catch(() => {});
+// (all under the loading card: the kits ~15% of the wait, the island ~55%,
+// the streets in view the rest)
+const loading = new LoadingScreen(MODE.icon);
+let kitF = 0, islandF = q.get('noprefetch') === '1' ? 1 : 0;
+const bootProgress = (): void => {
+  loading.set(0.15 * kitF + 0.55 * islandF,
+    islandF < 1 ? 'Growing your island…' : kitF < 1 ? 'Unpacking the toys…' : 'Laying the streets…');
+};
+bootProgress();
+const kitsReady = import('./kitdefs.js')
+  .then(m => prepBakedModels(m.KITDEFS, (d, t) => { kitF = d / t; bootProgress(); }))
+  .catch(() => {});
 const startIsland = new Promise<void>(done => {
   if (q.get('noprefetch') === '1') { done(); return; }
   try {
     const w = new Worker(new URL('../../worlds/worldWorker.ts', import.meta.url), { type: 'module' });
     const finish = (): void => { w.terminate(); done(); };
-    w.onmessage = (e: MessageEvent<{ ok: boolean; data?: IslandData }>) => {
+    w.onmessage = (e: MessageEvent<{ ok?: boolean; data?: IslandData; progress?: boolean; f?: number }>) => {
+      if (e.data.progress) { islandF = e.data.f ?? islandF; bootProgress(); return; }
       if (e.data.ok && e.data.data) installIslandData(e.data.data);
+      islandF = 1; bootProgress();
       finish();
     };
     w.onerror = finish;
@@ -188,7 +202,11 @@ camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
 camera.lookAt(spawn.x, 1.4, spawn.z);
 
 const audio = new GameAudio();
+/** back to the garage (the launcher) */
+function goHome(): void { location.href = new URL('../index.html', location.href).href; }
+document.getElementById('homeBtn')!.addEventListener('click', goHome);
 initInput(code => {
+  if (code === 'Escape') { goHome(); return; }
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
   if (code === 'KeyE') setSiren(!sirenOn);
@@ -237,7 +255,20 @@ if (q.get('debugbake') === '1') {
 // still lays down the whole starting city for aerial screenshots
 const chunks = new ChunkManager(scene, 64, 4);
 let river = riverFor(START.bx, START.by);
-chunks.ensure(999, spawn.x, spawn.z);
+// the streets in view, a few a frame so the loading bar keeps moving
+{
+  const boot = chunks.wanted(spawn.x, spawn.z);
+  let t = performance.now();
+  for (let i = 0; i < boot.length; i++) {
+    chunks.addChunk(...boot[i]);
+    if (performance.now() - t > 40) {
+      loading.set(0.7 + (0.28 * (i + 1)) / boot.length, 'Laying the streets…');
+      await nextFrame();
+      t = performance.now();
+    }
+  }
+  chunks.ensure(999, spawn.x, spawn.z);
+}
 // from here on chunks bake in the chunk worker (the boot ring above baked
 // here, synchronously): it gets the baked kit templates once, then every
 // island the game has built, so it never rebuilds a plan
@@ -446,6 +477,7 @@ function applyCity(c: CityRef): void {
   }
 }
 applyCity(curCity);
+loading.done();
 const hud = makeHUD();
 let runStars = 0;
 function updateMissionPanel(): void {
@@ -475,6 +507,14 @@ function cycleCamera(): void {
   clearTimeout(camLabelTimer);
   camLabelTimer = window.setTimeout(() => { camLabel.style.opacity = '0'; }, 1200);
 }
+
+// ---- back to the garage, and the next-island pill ----
+const homeBtn = document.getElementById('homeBtn') as HTMLButtonElement;
+const HOME_HOLD = 1.1;
+let homeHold = 0;
+const islandPill = document.getElementById('islandPill')!;
+const islandPillText = islandPill.querySelector('.t') as HTMLElement;
+const islandPillFill = islandPill.querySelector('.mini > div') as HTMLElement;
 
 // ---- game state ----
 let mode: 'drive' | 'activity' = 'drive';
@@ -612,6 +652,35 @@ const tick = (): void => {
     }
   }
   transit.pump(3);
+
+  // the wheel's start / select button held for a second goes back to the
+  // garage (the home button's ring fills while it's held)
+  {
+    const gpd = navigator.getGamepads?.()[0];
+    const held = !!gpd && [8, 9, 16].some(b => gpd.buttons[b]?.pressed);
+    homeHold = held ? homeHold + dt : 0;
+    homeBtn.style.setProperty('--hold', String(Math.min(1, homeHold / HOME_HOLD)));
+    if (homeHold >= HOME_HOLD) goHome();
+  }
+  // a neighbour still being built as the kid drives up to it: a small
+  // pill says it's on its way, with about how long it needs
+  if (Math.floor(elapsed * 4) !== Math.floor((elapsed - dt) * 4)) {
+    const lx = st.x - here.ox, lz = st.z - here.oz;
+    let show: { f: number; eta: number } | null = null;
+    for (const [nbx, nby, gap] of [
+      [here.bx + 1, here.by, CITY_PITCH - lx], [here.bx - 1, here.by, lx + (CITY_PITCH - ISLAND)],
+      [here.bx, here.by + 1, CITY_PITCH - lz], [here.bx, here.by - 1, lz + (CITY_PITCH - ISLAND)],
+    ] as Array<[number, number, number]>) {
+      if (gap > 420 || islandReady(nbx, nby)) continue;
+      const stt = prefetch.status(nbx, nby);
+      if (stt && (!show || stt.eta < show.eta)) show = stt;
+    }
+    islandPill.style.display = show ? 'block' : 'none';
+    if (show) {
+      islandPillText.textContent = `🏝️ The next island is on its way… ${show.eta < 1.5 ? 'almost there!' : `about ${Math.ceil(show.eta)} s`}`;
+      islandPillFill.style.width = `${(show.f * 100).toFixed(0)}%`;
+    }
+  }
 
   // physics + collision (frozen during the mini-scenes: the truck stays put
   // until the fire is out / the cat is down)

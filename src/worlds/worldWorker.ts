@@ -1,6 +1,7 @@
 // The world worker: builds islands off the main thread (islandData.ts) so
 // waking a neighbouring island never stalls a frame. One request at a time:
-// { base, bx, by } in, the island's IslandData out (its grid transferred).
+// { base, bx, by } in, progress messages ({ progress, bx, by, f }) while it
+// builds, then the island's IslandData out (its grid transferred).
 import { buildIslandData, useBase } from './islandData.js';
 
 interface Request { base: number; bx: number; by: number }
@@ -12,7 +13,7 @@ self.onmessage = (e: MessageEvent<Request>): void => {
   const { base, bx, by } = e.data;
   try {
     useBase(base);
-    const d = buildIslandData(bx, by);
+    const d = buildIslandData(bx, by, f => post({ progress: true, bx, by, f }, []));
     post({ ok: true, data: d }, [d.grid.buffer]);
   } catch (err) {
     post({ ok: false, bx, by, error: String(err) }, []);

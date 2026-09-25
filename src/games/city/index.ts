@@ -792,7 +792,11 @@ const tick = (): void => {
       const lit = V.kind === 'heli'
         ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * 7), rb.z - (st.z + Math.cos(st.heading) * 7)) < 8
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
-      if (lit && mode === 'drive' && player.crashT <= 0) rb.caught += dt;
+      // (no catching while it dashes: that's it shaking the police off)
+      if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0) rb.caught += dt;
+      // (caught in the searchlight, the getaway car bolts — as a bump by the
+      // police car sets it off, G7)
+      if (V.kind === 'heli') rb.spotted(lit && mode === 'drive', dt);
       if (rb.caught >= CATCH_T && mode === 'drive') {
         rb.hide();
         mode = 'activity';
@@ -1009,9 +1013,9 @@ const tick = (): void => {
     showGuide('🦹', rd, Math.round((5 * robber.caught) / CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
     const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
-    promptText.textContent = V.kind === 'heli'
+    promptText.textContent = robber.dashT > 0 ? 'IT RUNS AWAY — AFTER IT!'
+      : V.kind === 'heli'
       ? (close ? 'KEEP THE CAR IN YOUR LIGHT!' : 'FLY AFTER THE GETAWAY CAR!')
-      : robber.dashT > 0 ? 'IT RUNS AWAY — AFTER IT!'
       : (close ? 'STAY RIGHT BEHIND IT!' : 'CATCH THE GETAWAY CAR!');
   } else if (race) {
     // ---- the race: lap, place, countdown ----

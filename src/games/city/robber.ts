@@ -8,9 +8,10 @@
 // in all; the helicopter keeps it inside its searchlight for as long.
 // Several are on the run at once (ROBBERS); each keeps its own progress.
 // It is solid: the police car bumping into it knocks the police car back,
-// and the getaway car DASHES off (faster than the police car for DASH_T s,
+// and the getaway car DASHES off (faster than the police for DASH_T s,
 // away from them), then tires for DASH_REST s before it can dash again — a
-// bump is part of the chase, not its end.
+// bump is part of the chase, not its end. The police helicopter's
+// searchlight startles it the same way once it has been lit SPOT_T s.
 import * as THREE from 'three';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
@@ -26,6 +27,8 @@ const V_FLEE = 9.5, V_CRUISE = 5.5; // m/s (the police car tops out at 12.5)
 const LANE = 3.5;
 /** the dash after a bump: its speed, how long it lasts, and the rest after it */
 export const DASH_V = 15, DASH_T = 2.2, DASH_REST = 2.5;
+/** seconds in the helicopter's searchlight before the getaway car bolts */
+const SPOT_T = 0.5;
 /** the getaway car's footprint (the Car Kit sedan) */
 const HALF_L = 2.2, HALF_W = 1.0;
 
@@ -45,6 +48,7 @@ export class Robber {
   /** seconds left of the dash after a bump, and of the rest after it */
   dashT = 0;
   private restT = 0;
+  private litT = 0;
   private marker: THREE.Mesh;
 
   constructor(private scene: THREE.Scene) {
@@ -89,6 +93,7 @@ export class Robber {
     this.caught = 0;
     this.dashT = 0;
     this.restT = 0;
+    this.litT = 0;
     this.active = true;
     this.group.visible = true;
     this.place(0, 0);
@@ -170,14 +175,27 @@ export class Robber {
     const a = dx * fx + dz * fz, l = dx * fz - dz * fx;
     const pa = HALF_L + r - Math.abs(a), pl = HALF_W + r - Math.abs(l);
     if (pa <= 0 || pl <= 0) return null;
-    const dashed = this.dashT <= 0 && this.restT <= 0;
-    if (dashed) this.dashT = DASH_T;
+    const dashed = this.startle();
     if (pl < pa) {
       const k = (l >= 0 ? 1 : -1) * pl;
       return { dx: fz * k, dz: -fx * k, dashed };
     }
     const k = (a >= 0 ? 1 : -1) * pa;
     return { dx: fx * k, dz: fz * k, dashed };
+  }
+
+  /** the police got to it: dash off, unless dashing or resting already */
+  startle(): boolean {
+    if (this.dashT > 0 || this.restT > 0) return false;
+    this.dashT = DASH_T;
+    return true;
+  }
+
+  /** the police helicopter's searchlight on it (or not) this frame: lit for
+   * SPOT_T s in a row, it bolts */
+  spotted(lit: boolean, dt: number): boolean {
+    this.litT = lit ? this.litT + dt : 0;
+    return this.litT >= SPOT_T && this.startle();
   }
 
   hide(): void { this.active = false; this.group.visible = false; }

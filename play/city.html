@@ -27,9 +27,11 @@
     display: flex; flex-direction: column; align-items: center; gap: 8px;
     pointer-events: none;
   }
+  /* the badge says WHAT the call is (its icon) and how near (the dots);
+     the way there is the 3D arrow over the vehicle — one arrow, not two */
   #guideBadge {
     position: relative;
-    width: clamp(96px, 15vh, 168px); height: clamp(96px, 15vh, 168px);
+    width: clamp(56px, 8.5vh, 84px); height: clamp(56px, 8.5vh, 84px);
     border-radius: 50%;
     background: var(--cream);
     border: 3px solid #fffdf8;
@@ -37,23 +39,10 @@
     display: grid; place-items: center;
     animation: badgeBob 1.6s ease-in-out infinite;
   }
-  #guideBadge::before {
-    content: ''; position: absolute; inset: 10%;
-    border-radius: 50%; border: 3px dashed rgba(74, 80, 88, .22);
-  }
+  #guideBadge::before { content: none; }
   @keyframes badgeBob { 50% { transform: translateY(-4px); } }
-  #guideIcon {
-    position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
-    font-size: clamp(30px, 5vh, 52px); line-height: 1;
-    padding: 6px 16px; border-radius: 999px;
-    background: var(--cream); border: 3px solid #fffdf8;
-    box-shadow: 0 3px 0 rgba(74, 80, 88, .14);
-  }
-  #guideArrow {
-    width: 80%; height: 80%; display: block;
-    transform-origin: 50% 50%;
-    filter: drop-shadow(0 2px 0 rgba(74, 80, 88, .16));
-  }
+  #guideIcon { font-size: clamp(28px, 4.6vh, 46px); line-height: 1; }
+  #guideArrow { display: none; }
   #guideDist {
     padding: 7px 22px; border-radius: 999px; background: var(--cream);
     font: 800 clamp(18px, 3.4vh, 30px)/1 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif;

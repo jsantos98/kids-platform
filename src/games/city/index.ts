@@ -874,7 +874,9 @@ const tick = (): void => {
   // otherwise at the next junction of the shortest street route
   const way = goal && mode === 'drive' ? guideWaypoint(goal.x, goal.z, goalD) : null;
   const bearing = way ? Math.atan2(way.x - st.x, way.z - st.z) : null;
-  guideArrow3d.update(dt, elapsed, player.car.position, airborne ? 5.2 : V.kind === 'rail' ? 7 : 4.6, bearing);
+  // (just over the vehicle's roof — the kit models' heights differ)
+  const roof = (player.car.userData.top as number | undefined) ?? 2;
+  guideArrow3d.update(dt, elapsed, player.car.position, airborne ? 4.4 : V.kind === 'rail' ? 6 : roof + 1.2, bearing);
   camera.getWorldDirection(camDir);
   const camYaw = Math.atan2(camDir.x, camDir.z);
   const showGuide = (icon: string, dist: number, dots: number): void => {

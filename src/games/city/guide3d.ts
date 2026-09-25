@@ -1,11 +1,14 @@
-// In-world guidance, Crazy-Taxi style: a big arrow floating above the vehicle
-// that swings to point the way (along the streets for road vehicles), and a
+// In-world guidance, Crazy-Taxi style: a small arrow floating just above the
+// vehicle (kept small and flat so it never covers the road ahead — the HUD
+// badge points the way too) that swings to point the way (along the streets for road vehicles), and a
 // tall glowing beacon pillar standing on every mission so it can be spotted
 // over the rooftops from anywhere on the island.
 import * as THREE from 'three';
 
 const ARROW_RED = 0xe25c5c;
 const ARROW_RIM = 0xfffdf8;
+/** the arrow's size (its shape is ~2.8 m nose to tail at 1) */
+const ARROW_SCALE = 0.55;
 
 function arrowGeometry(scale: number, depth: number): THREE.ExtrudeGeometry {
   // chevron-headed arrow pointing along +y in shape space (+z after laying flat)
@@ -24,9 +27,9 @@ export class GuideArrow {
   private yaw = 0;
 
   constructor(scene: THREE.Scene) {
-    const body = new THREE.Mesh(arrowGeometry(1, 0.34), new THREE.MeshLambertMaterial({ color: ARROW_RED }));
-    const rim = new THREE.Mesh(arrowGeometry(1.18, 0.2), new THREE.MeshBasicMaterial({ color: ARROW_RIM }));
-    rim.position.y = -0.1;
+    const body = new THREE.Mesh(arrowGeometry(ARROW_SCALE, 0.22), new THREE.MeshLambertMaterial({ color: ARROW_RED }));
+    const rim = new THREE.Mesh(arrowGeometry(ARROW_SCALE * 1.18, 0.12), new THREE.MeshBasicMaterial({ color: ARROW_RIM }));
+    rim.position.y = -0.07;
     // lay the arrow flat (rotating +90 deg about x maps shape +y onto world
     // +z, the heading-0 direction), then lift its nose so its face turns
     // toward the chase camera behind and above the vehicle
@@ -35,7 +38,8 @@ export class GuideArrow {
       m.castShadow = false;
       this.tilt.add(m);
     }
-    this.tilt.rotation.x = -0.55;
+    // (only a little: tilted further it stands up across the view)
+    this.tilt.rotation.x = -0.25;
     this.group.add(this.tilt);
     this.group.visible = false;
     scene.add(this.group);
@@ -54,7 +58,7 @@ export class GuideArrow {
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
     this.yaw += d * Math.min(1, dt * 6);
-    this.group.position.set(at.x, at.y + lift + Math.sin(elapsed * 3) * 0.25, at.z);
+    this.group.position.set(at.x, at.y + lift + Math.sin(elapsed * 3) * 0.12, at.z);
     this.group.rotation.y = this.yaw;
   }
 }

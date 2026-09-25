@@ -14,9 +14,10 @@ import { makeVillager } from '../../../kit/index.js';
 import { bakeObjectToMesh, templateToMesh } from '../../../engine/baked.js';
 import { citySeed } from '../../../worlds/cityGrid.js';
 import { SCALE } from '../../../worlds/world.js';
-import { occupancyFor, LOT, PLAZA, SEA, RIVER, RAIL, type Occupancy } from '../../../worlds/grid.js';
+import { occupancyFor, LOT, PLAZA, SEA, RIVER, RAIL, ROAD, type Occupancy } from '../../../worlds/grid.js';
 import { coastFor, type Coast } from '../../../worlds/coast.js';
 import { ROUNDABOUT_REACH } from '../../../worlds/cityPlan.js';
+import { lightState } from '../lights.js';
 import { graphFor, leaving, type StreetGraph } from '../../../worlds/streetGraph.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
 import type { Railway } from '../railway.js';
@@ -54,18 +55,25 @@ interface Walker {
   /** how far the walker has scurried off the path (world metres), eases back */
   fx: number;
   fz: number;
+  /** how long it has been waiting at a corner (s) */
+  waitT: number;
   /** where the walker is this frame (world) */
   x: number;
   z: number;
   r: Rng;
-  mesh: THREE.Mesh;
+  /** which body (an index into the island's instanced meshes) and its size */
+  body: number;
+  size: number;
 }
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
 
 export class IslandWalkers {
   readonly walkers: Walker[] = [];
   private graph: StreetGraph;
   private coast: Coast;
   private occ: Occupancy;
+  /** one instanced mesh per body (person or pet model): a few draw calls for the whole crowd */
+  private meshes: THREE.InstancedMesh[] = [];
 
   constructor(private scene: THREE.Scene, readonly bx: number, readonly by: number,
               private ox: number, private oz: number,
@@ -79,7 +87,9 @@ export class IslandWalkers {
       ? peopleTpls.map(t => { const m = templateToMesh(t); m.geometry.scale(PED_SCALE, PED_SCALE, PED_SCALE); return m; })
       : [0, 1, 2, 3].map(() => bakeObjectToMesh(makeVillager()));
     const pets = petTpls.map(t => templateToMesh(t));
-    const nPeople = Math.max(10, Math.min(Math.round(30 * SCALE * SCALE), Math.round(g.totalLen / 280)));
+    const bodies = [...people, ...pets];
+    // (about a person every 55 m of street, and half as many pets)
+    const nPeople = Math.max(12, Math.min(Math.round(260 * SCALE * SCALE), Math.round(g.totalLen / 55)));
     const nPets = pets.length ? Math.round(nPeople / 2) : 0;
     const base = chunkSeed(citySeed(bx, by), 0xbeef, 1);
     for (let k = 0; k < nPeople + nPets; k++) {
@@ -93,24 +103,37 @@ export class IslandWalkers {
         const s = 12 + r() * (e.len - 24);
         const p = g.sample(e, s, side);
         if (occ.claims(p.x, p.z, 0.5, LOT) || occ.claims(p.x, p.z, 1.5, PLAZA | SEA)) continue;
-        const src = pet ? pets[(k - nPeople) % pets.length] : people[k % people.length];
-        const mesh = new THREE.Mesh(src.geometry, src.material);
-        if (pet) mesh.scale.setScalar(0.9 + r() * 0.3);
-        mesh.castShadow = true;
-        mesh.visible = false;
-        scene.add(mesh);
+        const body = pet ? people.length + (k - nPeople) % pets.length : k % people.length;
+        const size = pet ? 0.9 + r() * 0.3 : 1;
         this.walkers.push({
           edge: e.id, dir: r() < 0.5 ? -1 : 1, s, side, speed: (pet ? 1.2 : 0.8) + r() * 0.6,
-          phase: r() * 10, pet, fx: 0, fz: 0, x: this.ox + p.x, z: this.oz + p.z, r, mesh,
+          phase: r() * 10, pet, fx: 0, fz: 0, waitT: 0, x: this.ox + p.x, z: this.oz + p.z, r, body, size,
         });
         placed = true;
       }
     }
+    bodies.forEach((src, bi) => {
+      const n = this.walkers.filter(w => w.body === bi).length;
+      if (!n) return;
+      const im = new THREE.InstancedMesh(src.geometry, src.material, n);
+      im.castShadow = true;
+      im.frustumCulled = false;
+      im.count = 0;
+      this.meshes[bi] = im;
+      scene.add(im);
+    });
   }
 
-  hide(): void { for (const w of this.walkers) w.mesh.visible = false; }
+  hide(): void { for (const m of this.meshes) if (m) m.count = 0; }
 
-  dispose(): void { for (const w of this.walkers) this.scene.remove(w.mesh); }
+  dispose(): void { for (const m of this.meshes) if (m) this.scene.remove(m); }
+
+  /** is the walker about to step off the kerb onto a carriageway? */
+  private stepsOntoRoad(e: { id: number }, w: Walker): boolean {
+    const ed = this.graph.edges[e.id];
+    const here = this.graph.sample(ed, w.s, w.side), ahead = this.graph.sample(ed, w.s + w.dir * 1.5, w.side);
+    return !(this.occ.bits(here.x, here.z) & ROAD) && (this.occ.bits(ahead.x, ahead.z) & ROAD) !== 0;
+  }
 
   /** may a dodging walker stand at world (x, z)? */
   private free(x: number, z: number): boolean {
@@ -121,22 +144,44 @@ export class IslandWalkers {
   /** advance the crowd at game time t; `threat` is a ground vehicle to get
    * out of the way of (or null), `rail` the trains they wait for at level
    * crossings (null: none), `viewer` decides who is drawn */
-  update(dt: number, t: number, rail: Railway | null, threat: Threat | null, viewer: THREE.Vector3 | null, draw: boolean): void {
+  update(dt: number, t: number, rail: Railway | null, threat: Threat | null, viewer: THREE.Vector3 | null, draw: boolean,
+         cars: Array<{ x: number; z: number }> | null = null): void {
     const g = this.graph;
+    const used = this.meshes.map(() => 0);
     for (const w of this.walkers) {
       let e = g.edges[w.edge];
       // walk along the edge
       const end = g.nodes[w.dir > 0 ? e.b : e.a];
       const toEnd = w.dir > 0 ? e.len - w.s : w.s;
+      const tx = e.ux * w.dir, tz = e.uz * w.dir;
+      /** the street the sidewalk carries straight on into, across the corner */
+      const straightOn = (): typeof e | undefined => end.edges.map(id => g.edges[id]).find(o => {
+        if (o.id === e.id) return false;
+        const l = leaving(g, o, end.id);
+        return l.x * tx + l.z * tz > 0.9;
+      });
+      let atCorner = false, kerb = false;
       if (end.plaza && toEnd < ROUNDABOUT_REACH + 1) {
         w.dir = -w.dir as 1 | -1;
+      } else if (toEnd < 26 && end.edges.length >= 3 && !end.mouth && this.stepsOntoRoad(e, w)) {
+        // a corner: the next step is off the kerb, across the side street —
+        // cross on the walker's own green (the side street's traffic
+        // stopped), or where there are no lights once no car is close; no
+        // sidewalk beyond: back the way they came. (Waiting on the kerb, never
+        // in the road: at an oblique corner the sidewalk line cuts through
+        // the other street's lanes.)
+        kerb = true;
+        if (!straightOn()) w.dir = -w.dir as 1 | -1;
+        else if (end.signalized) atCorner = lightState(end.x, end.z, t) !== g.phaseOf(end, e);
+        else if (cars) {
+          const nx = this.ox + end.x, nz = this.oz + end.z;
+          // (after a while at a busy corner, only a car right there holds them)
+          const r = w.waitT > 10 ? 7 : 16;
+          // (after 20 s they step out anyway: the cars stop for anybody on their crossing)
+          atCorner = w.waitT < 20 && cars.some(c => (c.x - nx) ** 2 + (c.z - nz) ** 2 < r * r);
+        }
       } else if (toEnd <= 0) {
-        const tx = e.ux * w.dir, tz = e.uz * w.dir;
-        const cont = end.edges.map(id => g.edges[id]).find(o => {
-          if (o.id === e.id) return false;
-          const l = leaving(g, o, end.id);
-          return l.x * tx + l.z * tz > 0.9;
-        });
+        const cont = straightOn();
         if (cont) {
           // same sidewalk line on the next edge: keep the world-side offset
           const flip = cont.ux * e.ux + cont.uz * e.uz < 0;
@@ -157,7 +202,9 @@ export class IslandWalkers {
       }
       // a level crossing: wait short of it while a train is near, hurry off
       // it if the warning caught them on it
-      let pace = 1, waiting = false;
+      // (the time at the kerb keeps counting while they step out)
+      w.waitT = kerb ? w.waitT + dt : 0;
+      let pace = 1, waiting = atCorner;
       if (rail) {
         for (const cr of e.crossings) {
           const ahead = (cr.s - w.s) * w.dir;
@@ -221,16 +268,22 @@ export class IslandWalkers {
       w.x = x; w.z = z;
       if (!draw) continue;
       const near = !viewer || Math.hypot(x - viewer.x, z - viewer.z) < DRAW_R;
-      w.mesh.visible = near;
-      if (!near) continue;
+      const im = this.meshes[w.body];
+      if (!near || !im) continue;
       w.phase += dt * (running ? (w.pet ? 16 : 14) : waiting ? 0 : 6);
       // (up on a bridge deck where the sidewalk crosses the river)
       const dk = deckAt(x, z);
       const y0 = dk && dk.kind === 'road' ? dk.y : 0;
-      w.mesh.position.set(x, y0 + 0.1 + Math.abs(Math.sin(w.phase)) * (running ? 0.16 : w.pet ? 0.06 : 0.04), z);
-      w.mesh.rotation.set(running ? (w.pet ? 0.1 : 0.18) : 0,
+      _p.set(x, y0 + 0.1 + Math.abs(Math.sin(w.phase)) * (running ? 0.16 : w.pet ? 0.06 : 0.04), z);
+      _e.set(running ? (w.pet ? 0.1 : 0.18) : 0,
         running && threat ? Math.atan2(x - threat.x, z - threat.z) : Math.atan2(e.ux * w.dir, e.uz * w.dir), 0);
+      im.setMatrixAt(used[w.body]++, _m.compose(_p, _q.setFromEuler(_e), _s.setScalar(w.size)));
     }
+    if (draw) this.meshes.forEach((im, bi) => {
+      if (!im) return;
+      im.count = used[bi];
+      im.instanceMatrix.needsUpdate = true;
+    });
   }
 
   /** debug: current spots */

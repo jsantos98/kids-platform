@@ -95,8 +95,10 @@ export class IslandSim {
 
   private tick(dt: number, t: number, player: THREE.Vector3 | null, threat: Threat | null, draw: boolean): void {
     this.simTime = t;
-    this.cars.update(dt, t, this.opts.railway, player, draw);
-    this.walkers.update(dt, t, this.opts.railway, threat, player, draw);
+    // (the cars stop for the walkers on their crossings, the walkers wait
+    // at the corners for the cars — each sees the other's last step)
+    this.cars.update(dt, t, this.opts.railway, player, draw, this.walkers.walkers);
+    this.walkers.update(dt, t, this.opts.railway, threat, player, draw, this.cars.cars);
     if (draw) this.fleet.update(this.simTime);
   }
 

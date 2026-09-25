@@ -20,7 +20,7 @@ import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
-import { WORLD_CHUNKS, chunkGroundColor } from '../../worlds/cityChunk.js';
+import { WORLD_CHUNKS, chunkGroundColor, inBox } from '../../worlds/cityChunk.js';
 import { CENTER, ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, cityBase, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
@@ -627,8 +627,16 @@ const tick = (): void => {
     // the race's countdown holds the kart on the grid
     // (no brake: at a standstill the brake pedal is reverse)
     if (race?.frozen) { input.gas = 0; input.brake = 0; input.steer = 0; st.v = 0; }
-    const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear());
+    const trainBoxes = V.kind === 'ground' ? railway.unitBoxes(st.x, st.z) : [];
+    const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear(), trainBoxes);
     const wasCrashing = player.crashT > 0;
+    // a train running into the kid's standing vehicle is a bump too: flash,
+    // and carry on from a crumb clear of the track (G1)
+    if (!wasCrashing && trainBoxes.some(b => inBox(b, st.x, st.z, V.radius))) {
+      startCrash(player);
+      audio.thud();
+      Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+    }
     const ring = course?.aim(st.x, st.z, st.heading);
     const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
@@ -732,12 +740,14 @@ const tick = (): void => {
   if (V.kind === 'heli') {
     // hover-flight life: nose dips with speed, banks into turns, rotors spin
     player.car.rotation.x = -(st.v / V.maxF) * 0.16;
-    player.car.rotation.z = input.steer * 0.12 * Math.min(1, Math.abs(st.v) / V.maxF);
+    // (banking INTO the turn: left wheel, left side down)
+    player.car.rotation.z = -input.steer * 0.12 * Math.min(1, Math.abs(st.v) / V.maxF);
     (player.car.userData.mainRotor as THREE.Object3D | undefined)!.rotation.y = elapsed * 22;
     (player.car.userData.tailRotor as THREE.Object3D | undefined)!.rotation.x = elapsed * 30;
   } else if (V.kind === 'plane') {
     // bank into the turn, nose follows the climb, propeller spins
-    player.car.rotation.z = input.steer * 0.45;
+    // banks into the turn (left wheel: left wing down), eased with the turn
+    player.car.rotation.z = -player.steerS * 0.45;
     const ring = course?.target;
     player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
     (player.car.userData.prop as THREE.Object3D | undefined)!.rotation.z = elapsed * 40;
@@ -979,11 +989,21 @@ const tick = (): void => {
 
   audio.setSiren(sirenOn);
   audio.setPump(director.pumping);
-  if (sirenOn) {
-    // alternate the lightbar: red flash / blue flash
+  {
+    // the vehicle's own roof lamps flash when its model has them (the police
+    // car, the ambulance, the fire truck); otherwise the game's light bar
+    const own = player.car.userData.siren as { red: THREE.Mesh[]; blue: THREE.Mesh[] } | null | undefined;
     const phase = Math.floor(elapsed * 5) % 2;
-    (sirenBar.red.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff3b30 : 0x4a1616);
-    (sirenBar.blue.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x3f7bff : 0x161d4a);
+    if (own) {
+      // (on: each lamp alternates glowing / dark; off: the model's own paint)
+      sirenBar.group.visible = false;
+      for (const l of own.red) { l.visible = sirenOn; (l.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff2a1a : 0x3a1010); }
+      for (const l of own.blue) { l.visible = sirenOn; (l.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x4a8cff : 0x10183a); }
+    } else if (sirenOn) {
+      // alternate the light bar: red flash / blue flash
+      (sirenBar.red.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff3b30 : 0x4a1616);
+      (sirenBar.blue.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x3f7bff : 0x161d4a);
+    }
   }
 
   if (player.crashT > 0) {

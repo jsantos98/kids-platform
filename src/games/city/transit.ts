@@ -355,10 +355,26 @@ export class Transit {
     }
   }
 
-  /** static collision from every built city (signal + crossing posts) */
+  /** collision from every built city: signal + crossing posts, and — while
+   * a crossing's booms are down — a solid bar across the street at each
+   * of its two approaches (nobody drives through a closed crossing) */
   boxesNear(): CollisionBox[] {
     const out: CollisionBox[] = [];
-    for (const inst of this.cities.values()) out.push(...inst.boxes);
+    for (const inst of this.cities.values()) {
+      out.push(...inst.boxes);
+      for (const sig of inst.signals) {
+        if (!sig.arms.length || sig.arms[0].rotation.x < -BOOM_UP * 0.6) continue; // (still up)
+        const c = sig.c, ux = Math.sin(c.heading), uz = Math.cos(c.heading);
+        for (const al of [-9.4, 9.4]) {
+          const cx = inst.ox + c.x + ux * al, cz = inst.oz + c.z + uz * al;
+          // across the carriageway (local x), a thin bar along the street
+          const hx = 7.4, hz = 0.5;
+          const ca = Math.abs(Math.cos(c.heading)), sa = Math.abs(Math.sin(c.heading));
+          const ex = hx * ca + hz * sa, ez = hx * sa + hz * ca;
+          out.push({ x1: cx - ex, x2: cx + ex, z1: cz - ez, z2: cz + ez, obb: { cx, cz, hx, hz, ry: c.heading } });
+        }
+      }
+    }
     return out;
   }
 

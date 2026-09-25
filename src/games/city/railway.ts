@@ -24,6 +24,7 @@ import { railNetFor, RAIL_TOP, type RailRoute, type LineKind } from '../../world
 import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
 import { CITY_PITCH, citySeed } from '../../worlds/cityGrid.js';
 import { deckAt } from '../../worlds/causeway.js';
+import type { CollisionBox } from '../../worlds/cityChunk.js';
 /** may the railway reach into island (bx, by) this frame? The game gates
  * it on the world worker having delivered the island (islandReady), so a
  * train never builds an island mid-frame; left open, everything builds on
@@ -609,6 +610,8 @@ export class Railway {
       obj.position.set(p.x, RAIL_TOP + p.y, p.z);
       obj.rotation.set(0, 0, 0);
       obj.rotation.y = p.h;
+      obj.userData.h = p.h;
+      obj.userData.len = u.len;
       obj.rotateX(-Math.atan2(f.y - b.y, u.len * 0.8));
       obj.visible = true;
     });
@@ -654,6 +657,29 @@ export class Railway {
       k.s -= seg.route.total;
       [k.bx, k.by] = stepIsland('ns', k.bx, k.by, 1);
     }
+  }
+
+  /** the drawn train units within r of world (x, z), as solid footprints
+   * (a road vehicle can't drive through a train — index.ts) */
+  unitBoxes(x: number, z: number, r = 40): CollisionBox[] {
+    const out: CollisionBox[] = [];
+    const views = this.kid?.view ? [...this.views, this.kid.view] : this.views;
+    for (const v of views) {
+      if (!v.used) continue;
+      for (const o of v.objs) {
+        if (!o || !o.visible) continue;
+        const dx = o.position.x - x, dz = o.position.z - z;
+        if (dx * dx + dz * dz > r * r) continue;
+        const h = (o.userData.h as number) ?? 0, hz = ((o.userData.len as number) ?? 8) / 2, hx = 1.5;
+        const ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
+        const ex = hx * ca + hz * sa, ez = hx * sa + hz * ca;
+        out.push({
+          x1: o.position.x - ex, x2: o.position.x + ex, z1: o.position.z - ez, z2: o.position.z + ez,
+          obb: { cx: o.position.x, cz: o.position.z, hx, hz, ry: h },
+        });
+      }
+    }
+    return out;
   }
 
   /** advance to game time t, drawing the trains near the player */

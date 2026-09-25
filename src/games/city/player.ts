@@ -139,6 +139,9 @@ export interface Player {
   crashT: number;
   /** where + how to resume (always on a road lane) */
   crash: { x: number; z: number; heading: number };
+  /** the plane's steering, eased (keys are all-or-nothing): it turns and
+   * banks into the turn smoothly */
+  steerS: number;
 }
 
 export interface PhysicsInput {
@@ -161,6 +164,7 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
     wheels: [],
     crashT: 0,
     crash: { x: 0, z: 0, heading: 0 },
+    steerS: 0,
   };
   if (V.glb) {
     // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
@@ -171,11 +175,65 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
       // roof height of the kit model (measured before parenting, so in car
       // space), so the lightbar can sit on it
       car.userData.top = new THREE.Box3().setFromObject(g).max.y;
+      // its own roof lamps, flashed when the siren is on (index.ts)
+      car.userData.siren = sirenLampsOf(g);
       car.add(g);
       p.wheels = wheelNodes(g) as THREE.Object3D[];
     }).catch(() => {});
   }
   return p;
+}
+
+/**
+ * The red and blue lamps of a Car Kit model's roof light bar, as flash
+ * overlays: the faces near the top of the model that sample the palette's
+ * bottom-row red / blue swatches (probed: u 0.25-0.375 red, 0.375-0.5 blue,
+ * v > 0.75), copied into two meshes laid a hair over them. null when the
+ * model has none (the game's own light bar is used instead).
+ */
+export function sirenLampsOf(root: THREE.Object3D): { red: THREE.Mesh[]; blue: THREE.Mesh[] } | null {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const band = box.max.y - (box.max.y - box.min.y) * 0.2;
+  const red: THREE.Mesh[] = [], blue: THREE.Mesh[] = [];
+  const mkMat = (color: number): THREE.MeshBasicMaterial => new THREE.MeshBasicMaterial({
+    color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
+  });
+  const meshes: THREE.Mesh[] = [];
+  root.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
+  const v = new THREE.Vector3();
+  for (const m of meshes) {
+    const g = m.geometry as THREE.BufferGeometry;
+    const pos = g.attributes.position as THREE.BufferAttribute, uv = g.attributes.uv as THREE.BufferAttribute | undefined;
+    if (!pos || !uv) continue;
+    const idx = g.index;
+    const n = idx ? idx.count : pos.count;
+    const at = (k: number): number => (idx ? idx.getX(k) : k);
+    const out: Record<'red' | 'blue', number[]> = { red: [], blue: [] };
+    for (let t = 0; t + 2 < n; t += 3) {
+      let u = 0, w = 0, y = 0;
+      for (let k = 0; k < 3; k++) {
+        const i = at(t + k);
+        u += uv.getX(i) / 3; w += uv.getY(i) / 3;
+        y += v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).y / 3;
+      }
+      if (y < band || w < 0.75) continue;
+      const kind = u >= 0.25 && u < 0.375 ? 'red' : u >= 0.375 && u < 0.5 ? 'blue' : null;
+      if (!kind) continue;
+      for (let k = 0; k < 3; k++) { const i = at(t + k); out[kind].push(pos.getX(i), pos.getY(i), pos.getZ(i)); }
+    }
+    for (const kind of ['red', 'blue'] as const) {
+      if (!out[kind].length) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(out[kind], 3));
+      const lamp = new THREE.Mesh(geo, mkMat(kind === 'red' ? 0xff3b30 : 0x3f7bff));
+      lamp.visible = false;
+      lamp.renderOrder = 1;
+      m.add(lamp);
+      (kind === 'red' ? red : blue).push(lamp);
+    }
+  }
+  return red.length && blue.length ? { red, blue } : null;
 }
 
 /** begin the flash-and-resume sequence (bump or stuck). The caller sets
@@ -251,7 +309,8 @@ export function physicsStep(
     else if (input.brake) st.v = Math.max(PLANE_MIN_V, st.v - V.brake * dt);
     else st.v += (Math.max(PLANE_MIN_V, Math.min(st.v, 18)) - st.v) * Math.min(1, dt * 0.3);
     st.v = Math.max(PLANE_MIN_V, st.v);
-    st.heading += input.steer * V.steerMax * dt;
+    p.steerS += (input.steer - p.steerS) * Math.min(1, dt * 2.5);
+    st.heading += p.steerS * V.steerMax * dt;
     st.alt += Math.max(-6 * dt, Math.min(6 * dt, altTarget - st.alt));
     st.x += Math.sin(st.heading) * st.v * dt;
     st.z += Math.cos(st.heading) * st.v * dt;
@@ -325,6 +384,14 @@ export function physicsStep(
     // (never a crash), so a kid who leaves the road on a beach just slides
     // along the waterline
     // (already off the land — a resume gone wrong — it may always move)
+    // the parapets of a raised bridge deck are the same soft wall: up on
+    // a river bridge the vehicle slides along its sides, never over them
+    if (offDeckSide(st.x, st.z, nx, nz, V.halfW)) {
+      if (!offDeckSide(st.x, st.z, nx, st.z, V.halfW)) st.x = nx;
+      else if (!offDeckSide(st.x, st.z, st.x, nz, V.halfW)) st.z = nz;
+      st.v *= 1 - Math.min(0.9, dt * 4);
+      return { crashed: false };
+    }
     if (!onGround(nx, nz) && onGround(st.x, st.z)) {
       if (onGround(nx, st.z)) st.x = nx;
       else if (onGround(st.x, nz)) st.z = nz;
@@ -343,6 +410,19 @@ export function physicsStep(
     }
   }
   return { crashed };
+}
+
+/** would moving from (x, z) to (nx, nz) take a road vehicle off the side of
+ * the river bridge it is on (anywhere but the ramp ends)? */
+function offDeckSide(x: number, z: number, nx: number, nz: number, r: number): boolean {
+  const dk = deckAt(x, z);
+  if (!dk || !dk.river || dk.kind !== 'road' || dk.y < 0.25) return false;
+  const d = dk.river, c = cityAt(x, z);
+  // across the deck, the vehicle's side stays inside the parapet (moving
+  // back inward is always fine)
+  const acr = (px: number, pz: number): number => Math.abs((px - c.ox - d.ax) * d.uz - (pz - c.oz - d.az) * d.ux);
+  const a1 = acr(nx, nz);
+  return a1 > d.half - 0.6 - r && a1 > acr(x, z);
 }
 
 /** can a road vehicle stand at world (x, z)? Dry land, a causeway deck (the

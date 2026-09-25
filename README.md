@@ -1,76 +1,153 @@
-# Kids' Game Platform
+# Kids' Game Platform — Endless City
 
-A browser game platform for a 4–5 year old, driven by a USB steering wheel.
-**Stack:** TypeScript · three.js · Vite. Art: CC0 Kenney kits + a procedural pastel model kit.
+A browser driving game for a 4–5 year old, played with a USB steering wheel
+(keyboard and mouse work too). No reading needed: every choice is made by
+turning the wheel and pressing the pedal, and the names are spoken aloud.
 
-![Fire truck](concept-art/ts-city.png)
+**Stack:** TypeScript · three.js · Vite. **Art:** CC0 [Kenney](https://kenney.nl)
+kits plus a procedural pastel model kit.
+
+![The garage: pick a vehicle with the wheel](docs/screenshots/garage.jpg)
+
+## What it is
+
+**Endless City** is an endless archipelago of island cities joined by
+causeways. Each island is grown from a seed. It has its own shoreline, a
+river, two railway lines with stations and gated level crossings, and a
+street web at many angles. Its districts run from downtown towers out to
+suburbs, parks, forests and rail yards. Every tenth island in each direction
+is a small race island that is a whole kart circuit.
+
+The world keeps running while you play:
+- cars follow the streets and stop at red lights;
+- people and pets walk the sidewalks and cross at the corners;
+- trains run on a timetable from island to island;
+- boats sail under the causeways' raised spans.
+
+Nobody can be run over, and a bump never ends the game: the vehicle flashes
+and carries on from a spot just behind.
+
+### The nine play modes
+
+| Mode | What the kid does |
+|---|---|
+| 🚒 Fire truck | Drive to fires and cats in trees; spray the hose, raise the ladder |
+| 🚓 Police car | Chase the getaway cars — bump one and it dashes off; stay right behind it to catch it |
+| 🚑 Ambulance | Drive to people who need help and steer the stretcher into the ambulance |
+| 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up |
+| 🚁 Police helicopter | Keep the getaway car in the searchlight |
+| ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
+| 🚤 Boat | Sail round the island through the buoys |
+| 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off |
+| 🏎️ Kart race | Three laps against three AI karts on a race island |
+
+| | |
+|---|---|
+| ![Fire truck](docs/screenshots/fire-truck.jpg) | ![Police chase](docs/screenshots/police.jpg) |
+| ![Rescue helicopter over downtown](docs/screenshots/helicopter.jpg) | ![The train](docs/screenshots/train.jpg) |
+| ![Kart race](docs/screenshots/race.jpg) | ![Hose scene](docs/screenshots/scene-fire.jpg) |
+
+Reaching a call opens its **mission scene**. The wheel is the only input
+there: sweep the hose over the flames, slide the ladder to the cat, or hold
+the winch hook over the person.
+
+![Winch scene](docs/screenshots/scene-winch.jpg)
+
+## How to play
+
+1. Open the game. The **garage** shows the vehicles on a turntable.
+2. **Turn the wheel** to spin the carousel (keep it turned to keep stepping).
+3. **Press the pedal** (or any wheel button, Enter, or click **GO!**) to start.
+4. Follow the **arrow over the vehicle**. The badge at the top shows what the
+   call is and how far away it is. The arrow swings into a turn well before
+   the junction.
+5. At the call, stop (or hover, in a helicopter) and its scene opens.
+
+Back to the garage: the 🏠 button, **Esc**, or hold the wheel's start/select
+button for a second.
+
+### Controls
+
+| Action | USB wheel | Keyboard |
+|---|---|---|
+| Steer | wheel | `A` / `D` or ← / → |
+| Gas / brake (reverse) | right / left pedal (triggers) | `W` / `S` or ↑ / ↓ |
+| Spray / rescue | the A button | `Space` |
+| Siren | — | `E` (or the SIREN button) |
+| Camera: chase / high / cab | — | `C` |
+| Reset | — | `R` |
+
+In mission scenes only steering counts (the wheel, `A`/`D`, or the mouse's
+x position).
+
+### Useful URL options
+
+The game page is `play/city.html`.
+
+| Option | Effect |
+|---|---|
+| `?mode=truck\|police\|ambulance\|heliMedical\|heliPolice\|plane\|boat\|train\|race` | pick the play mode directly |
+| `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
+| `?cam=high` | start with the high camera |
+| `?scene=fire\|cat\|rescue\|patient\|caught` | open a mission scene straight away |
+| `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
+| `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |
 
 ## Run it
 
-```
+You need [Node.js](https://nodejs.org) 20.19+ or 22.12+ (what Vite 7 requires).
+
+```sh
+git clone https://github.com/jsantos98/kids-platform.git
+cd kids-platform
 npm install
-npm run dev          # → http://localhost:8321
+npm run dev            # → http://localhost:8321
 ```
 
-The garage at the root is the launcher: one vehicle per play mode on a turntable, chosen with the wheel (turn it to spin the carousel, press the pedal or any button to go; arrow keys + Enter and the mouse work too) — no reading required, the name is spoken. In the game, the 🏠 button, Esc, or holding the wheel's start / select button for a second goes back to the garage. While an island loads, a progress card shows what is happening and about how long is left.
-`npm run build` produces a minified `dist/`; `npm run preview` serves it.
+## Build it
 
-**Endless City** is an endless archipelago of seeded island cities joined by
-causeways. Each island grows its own seeded shoreline — bays, beaches and
-headlands reaching out to the four causeways — ringed by open sea, and its own
-street plan: a coastal ring road, riverside embankments, and districts whose
-streets run at their own angles, meeting at every kind of junction. Every
-block belongs to a district — downtown business at the centre, a mixed ring,
-suburban houses with fenced gardens toward the shore, works yards and a rail
-yard along the railway, a park beside downtown — and is built over inside,
-not just along its streets. Every new game rolls a fresh seed and writes it into the URL, and
-`?seed=N` replays that world exactly. Pick a mode from the garage (or
-`?mode=`): fire truck (fires + cats), police car and police helicopter
-(chase the getaway car — stay close, or keep it in the searchlight),
-ambulance and medical helicopter (people to rescue), plane (sky rings), boat
-(buoy course), train (stop at the yellow board and passengers get on and
-off) and kart race (three laps
-against three AI karts on the race islands — every island at x, y multiples
-of 10 is a small island that is one Racing Kit circuit, each its own shape,
-starting from island (0,0); the other modes start on island (1,0)). The world keeps running while you play: two railway lines cross
-every island (north-south and west-east, meeting at a diamond) and carry on
-over the causeways to the neighbours, with stations, gated level crossings
-and trains on a timetable that never stops; boats pass under the causeways'
-raised spans, traffic obeys
-the lights, an EMS helicopter patrols the sky, and whenever the kid isn't
-driving it the fire truck drives itself.
+```sh
+npm run build          # typecheck (src + tools) and a minified build in dist/
+npm run preview        # serve dist/ on http://localhost:8321
+```
 
-## Controls (Endless City)
+`dist/` is a static site: copy it to any static web host. It uses relative
+paths, so it also works from a sub-folder.
 
-WASD / arrow keys or the USB wheel (steering axis + triggers).
-`E` toggles the siren, `C` cycles chase / high / cab cameras (or `?cam=high`),
-`R` resets. Drive to a call's beacon and stop (hover, in the helicopter) and
-its mission scene opens: sweep the hose over a burning house, tree or car,
-slide the ladder to a cat or to people at the windows of a burning building,
-steer the stretcher into the ambulance, or hold the helicopter's winch over the
-person — the wheel only (A/D or the mouse work too).
+## Checks
+
+The world generator is a stack of hard rules (streets, railway, river,
+coast, traffic…). They are listed in [AGENTS.md](AGENTS.md) with the code or
+check that enforces each one. Before changing world or traffic code, run:
+
+```sh
+npm run typecheck
+npx tsx tools/audit-world.ts 7        # every world rule, for one seed (try several)
+npx tsx tools/check-walkers.ts        # nobody can be run over
+npx tsx tools/check-traffic.ts        # the traffic never jams
+npx tsx tools/plan-hash.ts            # for refactors: the cities must not change
+```
 
 ## Project layout
 
 | Path | What |
 |---|---|
-| `src/engine/` | shared engine: pastel palette, stage factory, vertex-color batching (`Baked`), CC0 glTF loader + palette-baker, procedural audio (siren/pump/thud), keyboard + wheel input, dev capture |
-| `src/kit/` | procedural model kit by family (nature, people, buildings, vehicles, animals, props) |
-| `src/worlds/` | parametric generators: city street, valley, railroad, and the endless-city **chunk generator** |
-| `src/games/city/` | the playable game, one module per concern: player physics, chunk streaming, traffic + working traffic lights, missions, spray + ladder mini-scenes, particles, save state |
-| `src/games/city/train.ts`, `patrol.ts` | ambient life: the train shuttles the rail corridor; a helicopter circles the neighbourhood |
-| `src/games/registry.ts` | the list of games the launcher renders |
-| `src/games/diorama/` | the three concept dioramas, now proper modules |
-| `public/assets/kenney/` | CC0 Kenney models (Car Kit, City Kit, Nature Kit) + licenses |
-| `docs/engine-notes.md` | engine decision record, measured perf, wheel plan |
-| `AGENTS.md` | the world-generation rules (R1–R28); read before touching world code |
-| `tools/audit-world.ts` | checks the world rules: `npm run audit:world -- <seed>` |
+| `index.html`, `src/main.ts` | the garage (launcher) |
+| `play/city.html`, `src/games/city/` | the game: modes, player physics, missions, guide arrow, robbers, race, trains, sea, HUD, loading |
+| `src/games/city/activity/` | the mission scenes (hose, cat ladder, rescue ladder, stretcher, winch, caught) |
+| `src/games/city/island/` | each island's traffic and walkers |
+| `src/worlds/` | the world generators: coast, streets, rail, river, blocks and lots, occupancy grid, chunk baking, and the world and chunk workers |
+| `src/engine/` | shared engine: palette, stage, vertex-colour batching, Kenney model loader, audio, wheel and keyboard input |
+| `src/kit/` | the procedural model kit (vehicles, people, animals, buildings, nature, props) |
+| `src/games/diorama/`, `diorama/` | the three early concept dioramas |
+| `public/assets/kenney/` | the CC0 Kenney kits, with their licence files |
+| `tools/` | the audit and check scripts |
+| `AGENTS.md` | the world and gameplay rules — read it before touching world code |
+| `docs/engine-notes.md` | the engine decision record and measured performance |
 
-## Conventions
+## Credits
 
-- **Deterministic worlds**: every generator is a pure function of a seed — seed 7 is seed 7 forever, so the kid can revisit "their" city and seeds can be shared as links.
-- **One draw call per city chunk**: Kenney models are baked per-face into vertex-colored merged geometry by `src/engine/assets.ts` (see `bakeTemplate`). If an asset fails to load, the procedural fallback kicks in — the game never breaks.
-- **Adding a game**: one entry in `src/games/registry.ts` + one rollup input in `vite.config.ts`.
-- **Captures** (docs/screenshots): load any page with `?still=1&capture=name.png` — the frame lands in `concept-art/` via the dev-server middleware.
-
-See [docs/engine-notes.md](docs/engine-notes.md) for the engine decision record and measured performance.
+3D models: [Kenney](https://kenney.nl) — Car Kit, City Kit (Commercial,
+Industrial, Suburban, Roads), Nature Kit, Mini Forest, Survival Kit, Cube
+Pets, Mini Characters, Train Kit, Watercraft Kit, Toy Car Kit and Racing
+Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).

@@ -4,6 +4,7 @@
 // simulating the whole time — only its rendering is swapped out.
 import * as THREE from 'three';
 import type { Activity, ActivityInput } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 const FADE = 0.4;       // seconds for each fade half
 const REWARD = 1.8;     // seconds of celebration before returning
@@ -79,7 +80,7 @@ export class Director {
         if (this.step(dt, elapsed, inp)) {
           this.frozen = { ...inp };
           this.act!.celebrate();
-          this.last.prompt = 'WELL DONE!';
+          this.last.prompt = tr('scene.wellDone');
           this.last.progress = 1;
           this.phase = 'reward';
           this.t = 0;
@@ -87,7 +88,7 @@ export class Director {
         break;
       case 'reward':
         this.act!.update(dt, elapsed, this.frozen);
-        this.last.prompt = 'WELL DONE!';
+        this.last.prompt = tr('scene.wellDone');
         if (this.t >= REWARD) { this.phase = 'back'; this.t = 0; }
         break;
       case 'back':

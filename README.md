@@ -3,6 +3,7 @@
 A browser driving game for a 4–5 year old, played with a USB steering wheel
 (keyboard and mouse work too). No reading needed: every choice is made by
 turning the wheel and pressing the pedal, and the names are spoken aloud.
+It speaks **Portuguese (Portugal)** by default, or **English**.
 
 **Stack:** TypeScript · three.js · Vite. **Art:** CC0 [Kenney](https://kenney.nl)
 kits plus a procedural pastel model kit.
@@ -66,6 +67,18 @@ the winch hook over the person.
 Back to the garage: the 🏠 button, **Esc**, or hold the wheel's start/select
 button for a second.
 
+### Language
+
+The game is in **Portuguese (Portugal)** by default. To switch to English
+(or back), click **Português / English** under the stars at the top right of
+the garage, or press **L**. The choice is remembered for every page. For one
+visit only, add `?lang=en` or `?lang=pt` to the address.
+
+The names are spoken in the chosen language. For a Portugal accent the
+computer needs a Portuguese (Portugal) voice, for example Windows'
+"Microsoft Helia" (Settings → Time & language → Speech → Add voices).
+Without one, the browser uses any Portuguese voice it has.
+
 ### Controls
 
 | Action | USB wheel | Keyboard |
@@ -88,6 +101,7 @@ The game page is `play/city.html`.
 |---|---|
 | `?mode=truck\|police\|ambulance\|heliMedical\|heliPolice\|plane\|boat\|train\|race` | pick the play mode directly |
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
+| `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |
 | `?scene=fire\|cat\|rescue\|patient\|caught` | open a mission scene straight away |
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
@@ -125,6 +139,7 @@ npm run typecheck
 npx tsx tools/audit-world.ts 7        # every world rule, for one seed (try several)
 npx tsx tools/check-walkers.ts        # nobody can be run over
 npx tsx tools/check-traffic.ts        # the traffic never jams
+npx tsx tools/check-i18n.ts           # every text is translated
 npx tsx tools/plan-hash.ts            # for refactors: the cities must not change
 ```
 
@@ -139,6 +154,7 @@ npx tsx tools/plan-hash.ts            # for refactors: the cities must not chang
 | `src/worlds/` | the world generators: coast, streets, rail, river, blocks and lots, occupancy grid, chunk baking, and the world and chunk workers |
 | `src/engine/` | shared engine: palette, stage, vertex-colour batching, Kenney model loader, audio, wheel and keyboard input |
 | `src/kit/` | the procedural model kit (vehicles, people, animals, buildings, nature, props) |
+| `src/i18n/` | every visible text, in English (`en.ts`, which defines the keys) and Portuguese (`pt.ts`) |
 | `src/games/diorama/`, `diorama/` | the three early concept dioramas |
 | `public/assets/kenney/` | the CC0 Kenney kits, with their licence files |
 | `tools/` | the audit and check scripts |

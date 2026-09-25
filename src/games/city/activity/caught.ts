@@ -8,6 +8,7 @@ import { spawnVehicle } from '../../../engine/assets.js';
 import { PRIMS as P } from '../../../engine/stage.js';
 import { makeHelicopter } from '../../../kit/index.js';
 import { makeSet, makeHuman, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 const PLAY = 2.6; // seconds
 
@@ -82,7 +83,7 @@ export class CaughtActivity implements Activity {
       if (rotor) rotor.rotation.y = elapsed * 22;
     }
     this.particles.update(dt);
-    return { progress: Math.min(1, this.t / PLAY), prompt: '🚓 CAUGHT!', done: this.t >= PLAY };
+    return { progress: Math.min(1, this.t / PLAY), prompt: tr('scene.caught'), done: this.t >= PLAY };
   }
 
   celebrate(): void {

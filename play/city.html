@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-PT">
 <head>
 <meta charset="utf-8">
 <title>Endless City</title>
@@ -162,8 +162,8 @@
 </style>
 </head>
 <body>
-<div id="hint"><b>W / ↑</b> gas &nbsp; <b>S / ↓</b> brake &nbsp; <b>A D / ← →</b> steer &nbsp; <b>SPACE / A</b> spray / rescue &nbsp; <b>E</b> siren &nbsp; <b>C</b> camera (chase · high · cab) &nbsp; <b>R</b> reset<br>USB wheel: steering axis + triggers work automatically</div>
-<div id="mission">loading…</div>
+<div id="hint" data-i18n-html="city.hint"></div>
+<div id="mission" data-i18n="city.loadingPanel"></div>
 <div id="guide">
   <div id="guideBadge"><span id="guideIcon"></span>
     <svg id="guideArrow" width="190" height="190" viewBox="0 0 100 100">
@@ -178,13 +178,13 @@
 <div id="prompt"><span id="promptText"></span><div class="bar"><div id="promptFill"></div></div></div>
 <div id="camLabel"></div>
 <div id="fade"></div>
-<button id="sirenBtn" type="button"><span class="ic">🚨</span>SIREN</button>
+<button id="sirenBtn" type="button"><span class="ic">🚨</span><span data-i18n="city.siren"></span></button>
 <canvas id="minimap" width="256" height="256"></canvas>
-<button id="homeBtn" type="button" title="back to the garage (Esc)"><span>🏠</span></button>
+<button id="homeBtn" type="button" data-i18n-title="city.home"><span>🏠</span></button>
 <div id="islandPill"><span class="t"></span><span class="mini"><div></div></span></div>
 <div id="loading">
   <div class="isle">🏝️</div>
-  <div class="label">Getting ready…</div>
+  <div class="label" data-i18n="load.ready"></div>
   <div class="track"><div class="fill"></div><div class="car"></div></div>
   <div class="eta"></div>
 </div>

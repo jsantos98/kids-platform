@@ -5,6 +5,7 @@ import { createStage, makeHUD } from '../../engine/stage.js';
 import { paramsFromURL } from '../../engine/params.js';
 import { setupDevCapture } from '../../engine/capture.js';
 import { generateCity } from '../../worlds/cityStreet.js';
+import { t as tr, applyI18n, numberLocale } from '../../i18n/index.js';
 
 export function run(): void {
   const camMode = new URLSearchParams(location.search).get('cam') ?? 'chase';
@@ -36,6 +37,7 @@ export function run(): void {
   controls.target.copy(camTarget);
   controls.update();
 
+  applyI18n('diorama.firetruck');
   const hud = makeHUD();
   const clock = new THREE.Clock();
   let statTime = 0;
@@ -56,7 +58,7 @@ export function run(): void {
     if (t - statTime > 0.5) {
       statTime = t;
       const i = renderer.info.render;
-      hud.set(`fire truck · seed ${P.seed} · ${camMode}  ·  draw calls ${i.calls}  ·  triangles ${i.triangles.toLocaleString('en-US')}`);
+      hud.set(tr('diorama.hud', { name: tr('diorama.name.firetruck'), seed: P.seed, cam: camMode, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()) }));
       document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
       (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
     }

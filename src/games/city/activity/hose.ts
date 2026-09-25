@@ -7,6 +7,7 @@ import { spawnVehicle } from '../../../engine/assets.js';
 import { C, PRIMS as P } from '../../../engine/stage.js';
 import { makeHouse, makeTree, makeCar } from '../../../kit/index.js';
 import { makeSet, Flame, WaterJet, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 export type FireVariant = 'house' | 'tree' | 'car';
 
@@ -172,7 +173,7 @@ export class HoseActivity implements Activity {
       o.position.y = 6 + o.userData.smoke * 1.6 + Math.sin(elapsed * 0.7 + o.userData.smoke) * 0.4;
     });
     this.particles.update(dt);
-    return { progress, prompt: 'SPRAY THE FIRE!', done: progress >= 0.999 };
+    return { progress, prompt: tr('scene.spray'), done: progress >= 0.999 };
   }
 
   celebrate(): void {

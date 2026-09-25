@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { rng } from '../../../engine/rng.js';
 import { C, PRIMS as P } from '../../../engine/stage.js';
 import { makeSet, makeHuman, Flame, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 const COLS = [-3.6, -1.2, 1.2, 3.6];
 const FLOORS = [1.6, 4.1, 6.6];
@@ -123,7 +124,7 @@ export class RescueLadderActivity implements Activity {
     const progress = (saved + (climbing ? climbing.t : 0)) / this.people.length;
     return {
       progress,
-      prompt: climbing ? 'HOLD STILL…' : 'MOVE THE LADDER TO THE PEOPLE!',
+      prompt: climbing ? tr('scene.holdStill') : tr('scene.ladderPeople'),
       done: saved === this.people.length,
     };
   }

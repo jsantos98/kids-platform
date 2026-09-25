@@ -10,6 +10,9 @@ import { makeHelicopter, makePlane, makeTree, makeConifer, makeCloud } from './k
 import { rng } from './engine/rng.js';
 import { GAMES, type GameEntry } from './games/registry.js';
 import { loadTotals } from './games/city/state.js';
+import { t as tr, applyI18n, getLang, setLang, speechVoice, LANGS } from './i18n/index.js';
+
+applyI18n('garage.pageTitle');
 
 const PICK_KEY = 'garage.pick';
 let sel = Math.max(0, GAMES.findIndex(g => g.id === (localStorage.getItem(PICK_KEY) ?? '')));
@@ -144,6 +147,10 @@ function say(text: string): void {
     if (!synth) return;
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
+    // (in the chosen language: Portugal's voice when the system has one)
+    const { lang, voice } = speechVoice();
+    u.lang = lang;
+    if (voice) u.voice = voice;
     u.rate = 0.95; u.pitch = 1.15;
     synth.speak(u);
   } catch { /* no voice: fine */ }
@@ -160,6 +167,29 @@ addEventListener('resize', layout);
 layout();
 showName();
 
+// ---- the language: Português (the default) or English, for every page ----
+const langBox = document.getElementById('lang')!;
+function drawLang(): void {
+  langBox.replaceChildren(...LANGS.map(l => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = l.label;
+    b.lang = l.id === 'pt' ? 'pt-PT' : 'en';
+    b.classList.toggle('on', l.id === getLang());
+    b.addEventListener('click', e => { e.stopPropagation(); pickLang(l.id); });
+    return b;
+  }));
+}
+function pickLang(l: 'pt' | 'en'): void {
+  if (l === getLang()) return;
+  setLang(l);
+  applyI18n('garage.pageTitle');
+  drawLang();
+  showName();
+  say(GAMES[sel].title);
+}
+drawLang();
+
 // the all-time scores, from the game's saved totals
 {
   const t = loadTotals();
@@ -171,7 +201,7 @@ let going = false;
 function go(): void {
   if (going) return;
   going = true;
-  say(`${GAMES[sel].title}. Let's go!`);
+  say(tr('garage.letsGo', { title: GAMES[sel].title }));
   const wipe = document.getElementById('wipe')!;
   wipe.textContent = GAMES[sel].icon;
   wipe.classList.add('on');
@@ -182,7 +212,8 @@ renderer.domElement.addEventListener('click', go);
 
 // ---- keys ----
 addEventListener('keydown', e => {
-  if (e.code === 'ArrowLeft' || e.code === 'KeyA') choose(sel - 1);
+  if (e.code === 'KeyL') pickLang(getLang() === 'pt' ? 'en' : 'pt');
+  else if (e.code === 'ArrowLeft' || e.code === 'KeyA') choose(sel - 1);
   else if (e.code === 'ArrowRight' || e.code === 'KeyD') choose(sel + 1);
   else if (['Enter', 'Space', 'ArrowUp', 'KeyW', 'NumpadEnter'].includes(e.code)) { e.preventDefault(); go(); }
 });

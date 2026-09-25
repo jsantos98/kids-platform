@@ -7,6 +7,7 @@ import { rng } from '../../../engine/rng.js';
 import { spawnVehicle } from '../../../engine/assets.js';
 import { C, PRIMS as P } from '../../../engine/stage.js';
 import { makeSet, makeHuman, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 const START_Z = 9, DOOR_Z = -1.5;
 const SPEED = 1.7;       // m/s the stretcher rolls
@@ -84,7 +85,7 @@ export class StretcherActivity implements Activity {
     this.bed.rotation.x = this.state === 'bump' && this.bumpT < 0.3 ? Math.sin(this.bumpT * 40) * 0.05 : 0;
     this.particles.update(dt);
     const progress = this.state === 'in' ? 1 : Math.max(0, (START_Z - this.z) / (START_Z - DOOR_Z - 1.2)) * 0.95;
-    const prompt = this.state === 'bump' ? 'OOPS! TRY AGAIN!' : 'STEER INTO THE AMBULANCE!';
+    const prompt = this.state === 'bump' ? tr('scene.tryAgain') : tr('scene.stretcher');
     return { progress, prompt, done: this.state === 'in' && this.z <= DOOR_Z - 1.3 };
   }
 

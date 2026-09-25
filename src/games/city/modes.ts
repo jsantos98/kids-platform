@@ -12,7 +12,6 @@ export type CourseKind = 'gates' | 'rings' | 'buoys';
 
 export interface ModeDef {
   id: ModeId;
-  title: string;
   icon: string;
   vehicle: VehicleConfig;
   /** emergency calls answered (in rotation) */
@@ -36,15 +35,15 @@ export interface ModeDef {
 const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, chase: false, spawn: 'street' as const };
 
 export const MODES: Record<ModeId, ModeDef> = {
-  truck: { ...base, id: 'truck', title: 'Fire Truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'cat', 'fire', 'rescue'], lightbar: true },
-  police: { ...base, id: 'police', title: 'Police Car', icon: '🚓', vehicle: VEHICLES.police, chase: true, lightbar: true },
-  ambulance: { ...base, id: 'ambulance', title: 'Ambulance', icon: '🚑', vehicle: VEHICLES.ambulance, calls: ['patient'], lightbar: true },
-  heliMedical: { ...base, id: 'heliMedical', title: 'Medical Helicopter', icon: '🚁', vehicle: VEHICLES.heliMedical, calls: ['patient'], lightbar: true, winch: true },
-  heliPolice: { ...base, id: 'heliPolice', title: 'Police Helicopter', icon: '🚁', vehicle: VEHICLES.heliPolice, chase: true, lightbar: true, searchlight: true },
-  plane: { ...base, id: 'plane', title: 'Plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },
-  boat: { ...base, id: 'boat', title: 'Boat', icon: '🚤', vehicle: VEHICLES.boat, course: 'buoys', spawn: 'sea' },
-  train: { ...base, id: 'train', title: 'Train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },
-  race: { ...base, id: 'race', title: 'Kart Race', icon: '🏎️', vehicle: VEHICLES.kart, spawn: 'race' },
+  truck: { ...base, id: 'truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'cat', 'fire', 'rescue'], lightbar: true },
+  police: { ...base, id: 'police', icon: '🚓', vehicle: VEHICLES.police, chase: true, lightbar: true },
+  ambulance: { ...base, id: 'ambulance', icon: '🚑', vehicle: VEHICLES.ambulance, calls: ['patient'], lightbar: true },
+  heliMedical: { ...base, id: 'heliMedical', icon: '🚁', vehicle: VEHICLES.heliMedical, calls: ['patient'], lightbar: true, winch: true },
+  heliPolice: { ...base, id: 'heliPolice', icon: '🚁', vehicle: VEHICLES.heliPolice, chase: true, lightbar: true, searchlight: true },
+  plane: { ...base, id: 'plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },
+  boat: { ...base, id: 'boat', icon: '🚤', vehicle: VEHICLES.boat, course: 'buoys', spawn: 'sea' },
+  train: { ...base, id: 'train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },
+  race: { ...base, id: 'race', icon: '🏎️', vehicle: VEHICLES.kart, spawn: 'race' },
 };
 
 /** old ?vehicle= values */

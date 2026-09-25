@@ -51,6 +51,9 @@ import { riverFor } from '../../worlds/riverRoute.js';
 import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 import { LoadingScreen, nextFrame } from './loading.js';
+import { t as tr, applyI18n, ordinal, numberLocale, type Key } from '../../i18n/index.js';
+
+applyI18n('city.pageTitle');
 
 // ---- params ----
 const q = new URLSearchParams(location.search);
@@ -165,7 +168,7 @@ const loading = new LoadingScreen(MODE.icon);
 let kitF = 0, islandF = q.get('noprefetch') === '1' ? 1 : 0;
 const bootProgress = (): void => {
   loading.set(0.15 * kitF + 0.55 * islandF,
-    islandF < 1 ? 'Growing your island…' : kitF < 1 ? 'Unpacking the toys…' : 'Laying the streets…');
+    tr(islandF < 1 ? 'load.island' : kitF < 1 ? 'load.kits' : 'load.streets'));
 };
 bootProgress();
 const kitsReady = import('./kitdefs.js')
@@ -262,7 +265,7 @@ let river = riverFor(START.bx, START.by);
   for (let i = 0; i < boot.length; i++) {
     chunks.addChunk(...boot[i]);
     if (performance.now() - t > 40) {
-      loading.set(0.7 + (0.28 * (i + 1)) / boot.length, 'Laying the streets…');
+      loading.set(0.7 + (0.28 * (i + 1)) / boot.length, tr('load.streets'));
       await nextFrame();
       t = performance.now();
     }
@@ -441,7 +444,6 @@ const nearestRobber = (x: number, z: number): Robber | null => {
 /** race mode: the race on this island's circuit (none elsewhere) */
 let race: Race | null = null;
 let raceCheer = 0, raceMsg = '', raceMsgT = 0;
-const ordinal = (n: number): string => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 /** the world worker builds the neighbouring islands ahead of the kid */
 const prefetch = new IslandPrefetch();
 // the trains never build an island mid-frame: they wait for the worker's
@@ -484,8 +486,8 @@ const hud = makeHUD();
 let runStars = 0;
 function updateMissionPanel(): void {
   missionEl.innerHTML = MODE.id === 'truck'
-    ? `<span style="color:#e25c5c;font-weight:800">this run: ${missions.sFires} fires · ${missions.sCats} rescues</span><br>all time: ${totals.fires} 🔥 · ${totals.cats} 🐱 saved`
-    : `<span style="color:#e25c5c;font-weight:800">${MODE.icon} this run: ${runStars} ⭐</span><br>all time: ${totals.stars} ⭐`;
+    ? `<span style="color:#e25c5c;font-weight:800">${tr('score.runTruck', { fires: missions.sFires, cats: missions.sCats })}</span><br>${tr('score.totalTruck', { fires: totals.fires, cats: totals.cats })}`
+    : `<span style="color:#e25c5c;font-weight:800">${MODE.icon} ${tr('score.run', { n: runStars })}</span><br>${tr('score.total', { n: totals.stars })}`;
 }
 /** a finished task outside the fire truck's fires/cats */
 function earnStar(msg: string, at: THREE.Vector3): void {
@@ -504,7 +506,7 @@ let camMode = CAM_MODES.includes(camParam ?? '') ? camParam! : 'chase';
 let camLabelTimer = 0;
 function cycleCamera(): void {
   camMode = CAM_MODES[(CAM_MODES.indexOf(camMode) + 1) % CAM_MODES.length];
-  camLabel.textContent = 'CAMERA: ' + camMode.toUpperCase();
+  camLabel.textContent = tr('cam.label', { mode: tr(`cam.${camMode}` as Key) });
   camLabel.style.opacity = '1';
   clearTimeout(camLabelTimer);
   camLabelTimer = window.setTimeout(() => { camLabel.style.opacity = '0'; }, 1200);
@@ -546,13 +548,13 @@ function openCall(o: Objective): void {
     missions.remove(o);
     if (o.type === 'fire') {
       missions.sFires++; totals.fires++;
-      toast = '🔥 FIRE EXTINGUISHED!';
+      toast = tr('call.fireOut');
     } else if (o.type === 'cat' || o.type === 'rescue') {
       missions.sCats++; totals.cats++;
-      toast = o.type === 'cat' ? '🐱 CAT RESCUED!' : '🧑‍🚒 EVERYONE IS SAFE!';
+      toast = tr(o.type === 'cat' ? 'call.catSaved' : 'call.allSafe');
     } else {
       runStars++; totals.stars++;
-      toast = '🆘 PERSON RESCUED!';
+      toast = tr('call.personSaved');
     }
     saveTotals(totals);
     updateMissionPanel();
@@ -694,7 +696,7 @@ const tick = (): void => {
     }
     islandPill.style.display = show ? 'block' : 'none';
     if (show) {
-      islandPillText.textContent = `🏝️ The next island is on its way… ${show.eta < 1.5 ? 'almost there!' : `about ${Math.ceil(show.eta)} s`}`;
+      islandPillText.textContent = tr('load.nextIsland', { eta: show.eta < 1.5 ? tr('load.almost') : tr('load.about', { s: Math.ceil(show.eta) }) });
       islandPillFill.style.width = `${(show.f * 100).toFixed(0)}%`;
     }
   }
@@ -761,12 +763,12 @@ const tick = (): void => {
     if (wall) { st.x += wall.dx; st.z += wall.dz; st.v *= 1 - Math.min(0.5, dt * 2); }
     const ev = race.update(dt, st.x, st.z);
     const at = new THREE.Vector3(st.x, 2, st.z);
-    if (ev.go) { raceMsg = 'GO!'; raceMsgT = 1.5; particles.burstConfetti(at); }
-    if (ev.lap) { raceMsg = ev.lap === LAPS ? '🏁 LAST LAP!' : `LAP ${ev.lap}!`; raceMsgT = 2; }
+    if (ev.go) { raceMsg = tr('race.go'); raceMsgT = 1.5; particles.burstConfetti(at); }
+    if (ev.lap) { raceMsg = ev.lap === LAPS ? tr('race.lastLap') : tr('race.lapN', { n: ev.lap }); raceMsgT = 2; }
     raceMsgT -= dt;
     if (ev.finished) {
       const place = ev.finished;
-      earnStar(place === 1 ? '🏆 YOU WON THE RACE!' : `🏁 ${ordinal(place)} PLACE — GREAT RACE!`, at);
+      earnStar(place === 1 ? tr('race.wonRace') : tr('race.placeRace', { place: ordinal(place) }), at);
       raceCheer = 0;
     }
     if (race.phase === 'finished') {
@@ -802,7 +804,7 @@ const tick = (): void => {
         mode = 'activity';
         const seed = robberCount + k;
         director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
-          earnStar('🚓 ROBBER CAUGHT!', player.car.position.clone());
+          earnStar(tr('chase.caught'), player.car.position.clone());
           mode = 'drive';
           robberWait[k] = 3;
         });
@@ -1013,10 +1015,10 @@ const tick = (): void => {
     showGuide('🦹', rd, Math.round((5 * robber.caught) / CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
     const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
-    promptText.textContent = robber.dashT > 0 ? 'IT RUNS AWAY — AFTER IT!'
+    promptText.textContent = tr(robber.dashT > 0 ? 'chase.runs'
       : V.kind === 'heli'
-      ? (close ? 'KEEP THE CAR IN YOUR LIGHT!' : 'FLY AFTER THE GETAWAY CAR!')
-      : (close ? 'STAY RIGHT BEHIND IT!' : 'CATCH THE GETAWAY CAR!');
+      ? (close ? 'chase.light' : 'chase.flyAfter')
+      : (close ? 'chase.behind' : 'chase.catch'));
   } else if (race) {
     // ---- the race: lap, place, countdown ----
     const rv = race.view();
@@ -1026,12 +1028,12 @@ const tick = (): void => {
     guideIcon.textContent = '🏁';
     guideArrow.style.transform = `rotate(${(camYaw - bearingR).toFixed(3)}rad)`;
     guideArrow.style.display = '';
-    guideDist.innerHTML = `<span class="m">LAP ${rv.lap}/${LAPS} · ${ordinal(rv.place)}</span>`;
+    guideDist.innerHTML = `<span class="m">${tr('race.badge', { lap: rv.lap, laps: LAPS, place: ordinal(rv.place) })}</span>`;
     guideWait.textContent = '';
     // (the lap and place are on the guide badge: the prompt only speaks
     // for the countdown, the cheers and the finish)
-    const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : 'GO!')
-      : rv.phase === 'finished' ? (rv.finalPlace === 1 ? '🏆 YOU WON!' : `🏁 ${ordinal(rv.finalPlace)} PLACE!`)
+    const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : tr('race.go'))
+      : rv.phase === 'finished' ? (rv.finalPlace === 1 ? tr('race.won') : tr('race.place', { place: ordinal(rv.finalPlace) }))
       : raceMsgT > 0 ? raceMsg : '';
     promptEl.style.display = say ? 'block' : 'none';
     promptFill.style.width = `${(rv.progress * 100).toFixed(1)}%`;
@@ -1040,13 +1042,13 @@ const tick = (): void => {
     // ---- checkpoint course: every glowing gate, in any order ----
     showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,
       Math.round((5 * course.passedCount) / course.gates.length));
-    promptText.textContent = course.kind === 'gates' ? 'DRIVE THROUGH THE GATES!'
-      : course.kind === 'rings' ? 'FLY THROUGH THE RINGS!' : 'SAIL THROUGH THE BUOYS!';
+    promptText.textContent = tr(course.kind === 'gates' ? 'course.gates'
+      : course.kind === 'rings' ? 'course.rings' : 'course.buoys');
     promptFill.style.width = `${(100 * course.passedCount) / course.gates.length}%`;
     const res = course.update(elapsed, st.x, st.alt + 2, st.z);
     if (res === 'passed') particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z));
     if (res === 'finished') {
-      earnStar(course.kind === 'gates' ? '🏁 PATROL DONE!' : course.kind === 'rings' ? '⭕ ALL RINGS!' : '🚩 COURSE SAILED!',
+      earnStar(tr(course.kind === 'gates' ? 'course.gatesDone' : course.kind === 'rings' ? 'course.ringsDone' : 'course.buoysDone'),
         new THREE.Vector3(st.x, st.alt + 2, st.z));
       courseWait = 2.5;
     }
@@ -1056,10 +1058,10 @@ const tick = (): void => {
     const gap = station.gap;
     showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
     promptFill.style.width = '0%';
-    promptText.textContent = gap < 12 ? (pose.v < 0.5 ? `ALL ABOARD! ${'🧍'.repeat(Math.min(6, boarding.boardedKid))}` : 'STOP AT THE YELLOW BOARD!')
-      : gap < 70 ? 'SLOW DOWN…' : 'DRIVE TO THE STATION';
+    promptText.textContent = gap < 12 ? (pose.v < 0.5 ? tr('train.aboard', { people: '🧍'.repeat(Math.min(6, boarding.boardedKid)) }) : tr('train.board'))
+      : gap < 70 ? tr('train.slow') : tr('train.station');
     if (gap < 12 && pose.v < 0.5) {
-      earnStar('🚉 STATION STOP!', new THREE.Vector3(st.x, 3, st.z));
+      earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
       stationDone = { x: station.x, z: station.z };
     }
   } else if (near) {
@@ -1072,15 +1074,13 @@ const tick = (): void => {
     const heliMode = V.kind === 'heli';
     const reach = heliMode ? 9 : near.type === 'cat' ? 12 : 15;
     const stopped = heliMode ? Math.abs(st.v) < 4 : Math.abs(st.v) < 1 && player.crashT <= 0;
-    const what = near.type === 'fire' ? 'THE FIRE' : near.type === 'cat' ? 'THE CAT'
-      : near.type === 'rescue' ? 'THE BURNING HOUSE' : 'THE PERSON';
-    promptText.textContent = nd < reach ? (heliMode ? 'HOVER HERE!' : 'STOP HERE!')
-      : `${heliMode ? 'FLY' : 'DRIVE'} TO ${what}`;
+    promptText.textContent = nd < reach ? tr(heliMode ? 'call.hover' : 'call.stop')
+      : tr(`call.${heliMode ? 'fly' : 'drive'}.${near.type}` as Key);
     if (nd < reach && stopped) openCall(near);
   } else {
     guideEl.style.opacity = '1';
     promptEl.style.display = 'none';
-    guideWait.textContent = toast || (course ? 'new course coming…' : 'waiting for a call…');
+    guideWait.textContent = toast || tr(course ? 'call.newCourse' : 'call.waiting');
     guideIcon.textContent = '🚨';
     guideArrow.style.transform = '';
     guideArrow.style.display = 'none';
@@ -1109,7 +1109,7 @@ const tick = (): void => {
 
   if (player.crashT > 0) {
     promptEl.style.display = 'block';
-    promptText.textContent = 'OOPS! ↺';
+    promptText.textContent = tr('call.oops');
     promptFill.style.width = '0%';
   }
 
@@ -1119,8 +1119,9 @@ const tick = (): void => {
     statTime = elapsed;
     const i = renderer.info.render;
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(`city ${curCity.bx},${curCity.by} · ${MODE.id} · ${kmh} km/h · draw calls ${i.calls} · triangles ${i.triangles.toLocaleString('en-US')}`);
-    document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
+    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()) }));
+    // (the tab shows the page's name; the dev probe keeps its stats title)
+    if (q.get('debugsea') === '1') document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
   }
 };

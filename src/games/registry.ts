@@ -1,13 +1,16 @@
 // The platform's game registry — the garage (the launcher) shows this list,
 // one vehicle each, chosen with the wheel. Only the play modes of the
 // island world are here (modes.ts); the concept dioramas stay as pages of
-// their own, off the menu. Adding a mode = one entry here (and its ModeDef).
+// their own, off the menu. Adding a mode = one entry here (and its ModeDef),
+// and its title + blurb in src/i18n (mode.<id>.title / .blurb).
+import { t, type Key } from '../i18n/index.js';
 export interface GameEntry {
   /** the play mode (`?mode=`) */
   id: string;
-  title: string;
+  /** its name and one-line pitch, in the current language (i18n) */
+  readonly title: string;
   icon: string;
-  blurb: string;
+  readonly blurb: string;
   url: string;
   /** the garage's turntable model: a kit GLB (its length in metres and the
    * turn it needs to face +z), or a procedural stand-in by name */
@@ -18,50 +21,50 @@ export interface GameEntry {
 
 const mode = (id: string): string => `play/city.html?mode=${id}`;
 
+/** an entry whose title and blurb are read in the current language */
+function entry(e: Omit<GameEntry, 'title' | 'blurb'>): GameEntry {
+  return {
+    ...e,
+    get title() { return t(`mode.${e.id}.title` as Key); },
+    get blurb() { return t(`mode.${e.id}.blurb` as Key); },
+  };
+}
+
 export const GAMES: GameEntry[] = [
-  {
-    id: 'truck', title: 'Fire Truck', icon: '🚒', color: '#e25c5c',
-    blurb: 'Put out fires and rescue cats!',
+  entry({
+    id: 'truck', icon: '🚒', color: '#e25c5c',
     url: mode('truck'), model: { glb: 'assets/kenney/firetruck.glb', len: 6.6 },
-  },
-  {
-    id: 'police', title: 'Police Car', icon: '🚓', color: '#4f7fd1',
-    blurb: 'Chase the getaway cars!',
+  }),
+  entry({
+    id: 'police', icon: '🚓', color: '#4f7fd1',
     url: mode('police'), model: { glb: 'assets/kenney/police.glb', len: 4.6 },
-  },
-  {
-    id: 'ambulance', title: 'Ambulance', icon: '🚑', color: '#f2a93b',
-    blurb: 'Help the people who need you!',
+  }),
+  entry({
+    id: 'ambulance', icon: '🚑', color: '#f2a93b',
     url: mode('ambulance'), model: { glb: 'assets/kenney/ambulance.glb', len: 5.4 },
-  },
-  {
-    id: 'heliMedical', title: 'Rescue Helicopter', icon: '🚁', color: '#63b0a8',
-    blurb: 'Fly and winch people to safety!',
+  }),
+  entry({
+    id: 'heliMedical', icon: '🚁', color: '#63b0a8',
     url: mode('heliMedical'), model: { make: 'heliMedical', len: 7.8 },
-  },
-  {
-    id: 'heliPolice', title: 'Police Helicopter', icon: '🔦', color: '#6a79d6',
-    blurb: 'Keep the robbers in your light!',
+  }),
+  entry({
+    id: 'heliPolice', icon: '🔦', color: '#6a79d6',
     url: mode('heliPolice'), model: { make: 'heliPolice', len: 7.8 },
-  },
-  {
-    id: 'plane', title: 'Plane', icon: '✈️', color: '#f6c952',
-    blurb: 'Swoop through the sky rings!',
+  }),
+  entry({
+    id: 'plane', icon: '✈️', color: '#f6c952',
     url: mode('plane'), model: { make: 'plane', len: 8 },
-  },
-  {
-    id: 'boat', title: 'Boat', icon: '🚤', color: '#3fa3d6',
-    blurb: 'Sail through the buoy gates!',
+  }),
+  entry({
+    id: 'boat', icon: '🚤', color: '#3fa3d6',
     url: mode('boat'), model: { glb: 'assets/kenney/watercraft/boat-speed-a.glb', len: 6.5 },
-  },
-  {
-    id: 'train', title: 'Train', icon: '🚆', color: '#8b6fd6',
-    blurb: 'Drive the train to every station!',
+  }),
+  entry({
+    id: 'train', icon: '🚆', color: '#8b6fd6',
     url: mode('train'), model: { glb: 'assets/kenney/train/train-electric-city-a.glb', len: 9 },
-  },
-  {
-    id: 'race', title: 'Kart Race', icon: '🏎️', color: '#e8743b',
-    blurb: 'Three laps — race to the flag!',
+  }),
+  entry({
+    id: 'race', icon: '🏎️', color: '#e8743b',
     url: mode('race'), model: { glb: 'assets/kenney/toycar/vehicle-racer.glb', len: 4, yaw: Math.PI },
-  },
+  }),
 ];

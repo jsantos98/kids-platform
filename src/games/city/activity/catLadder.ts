@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { rng, type Rng } from '../../../engine/rng.js';
 import { C, PRIMS as P } from '../../../engine/stage.js';
 import { makeSet, makeCat, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 export type CatVariant = 'tree' | 'building';
 
@@ -143,8 +144,8 @@ export class CatLadderActivity implements Activity {
       if (t >= 1) this.state = 'seek';
     }
     this.particles.update(dt);
-    const prompt = this.oops > 0 ? 'OOPS! HOLD THE LADDER STILL!'
-      : this.state === 'climb' ? 'HOLD STILL…' : 'MOVE THE LADDER TO THE CAT!';
+    const prompt = this.oops > 0 ? tr('scene.ladderOops')
+      : this.state === 'climb' ? tr('scene.holdStill') : tr('scene.ladderCat');
     return { progress: this.progress, prompt, done: this.progress >= 1 };
   }
 

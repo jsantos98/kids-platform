@@ -3,6 +3,7 @@
 // shows what is happening, a bar with the mode's vehicle driving along it,
 // and about how long is left (from the pace so far). Also the small pill
 // that says the next island is on its way (index.ts).
+import { t as tr } from '../../i18n/index.js';
 export class LoadingScreen {
   private el: HTMLElement;
   private fill: HTMLElement;
@@ -36,13 +37,13 @@ export class LoadingScreen {
       const est = (el * (1 - this.shown)) / this.shown;
       // (eased, so the number doesn't jump about)
       this.left = this.left < 0 ? est : this.left + (est - this.left) * 0.15;
-      this.eta.textContent = this.left < 1.5 ? 'almost there!' : `about ${Math.ceil(this.left)} s`;
+      this.eta.textContent = this.left < 1.5 ? tr('load.almost') : tr('load.about', { s: Math.ceil(this.left) });
     }
   }
 
   /** fade away (the game is ready) */
   done(): void {
-    this.set(1, 'Ready!');
+    this.set(1, tr('load.done'));
     this.el.classList.add('gone');
     setTimeout(() => { this.el.style.display = 'none'; }, 650);
   }

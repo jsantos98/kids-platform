@@ -7,6 +7,7 @@ import { rng } from '../../../engine/rng.js';
 import { C, PRIMS as P } from '../../../engine/stage.js';
 import { makeHelicopter, makeTree } from '../../../kit/index.js';
 import { makeSet, makeHuman, ease, disposeScene, type Activity, type ActivityInput, type ActivityState } from './common.js';
+import { t as tr } from '../../../i18n/index.js';
 
 const HOVER_Y = 11;
 const OVER = 0.9;        // hook within this of the person counts
@@ -75,7 +76,7 @@ export class WinchActivity implements Activity {
     this.hook.position.set(this.x, hookY - 0.2, 0.6);
     if (this.t >= 0.5) this.who.position.set(this.x, hookY - 1.7, 0.4);
     this.particles.update(dt);
-    const prompt = this.t >= 0.5 ? 'LIFTING… HOLD IT STEADY!' : over ? 'LOWERING…' : 'STEER OVER THE PERSON!';
+    const prompt = this.t >= 0.5 ? tr('scene.winchLift') : over ? tr('scene.winchLower') : tr('scene.winchOver');
     return { progress: this.t, prompt, done: this.t >= 1 };
   }
 

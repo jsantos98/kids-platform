@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { RAIL_Y, railNetFor, layRails, railTile, type RailRoute } from '../../worlds/railRoute.js';
+import { riverDecksFor, riverDeckProfile, type RiverDeck } from '../../worlds/riverDecks.js';
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor, platformSide, type Crossing, type Station } from '../../worlds/cityPlan.js';
@@ -131,7 +132,13 @@ export class Transit {
     const B = new Baked();
     // the track: both lines on dry land (the decks lay their own), broken
     // at the diamond, where one square plate carries all four rails
-    const keep = (x: number, z: number): boolean => coast.inLand(x, z, 1) && Math.hypot(x - D.x, z - D.z) > 2.7;
+    // (and off the raised trestles, which carry their own rails)
+    const trestles = riverDecksFor(bx, by).filter(d => d.kind === 'rail');
+    const onTrestle = (x: number, z: number): boolean => trestles.some(d => {
+      const t = (x - d.ax) * d.ux + (z - d.az) * d.uz;
+      return t > 0.3 && t < d.len - 0.3 && Math.abs((x - d.ax) * d.uz - (z - d.az) * d.ux) < 3;
+    });
+    const keep = (x: number, z: number): boolean => coast.inLand(x, z, 1) && Math.hypot(x - D.x, z - D.z) > 2.7 && !onTrestle(x, z);
     const RB = new Baked();
     for (const L of net.lines) { layRails(RB, L, railTile(), keep); yield; }
     RB.box(5.6, 0.1, 5.6, 0xb9a88c, D.x, RAIL_Y + 0.05, D.z);
@@ -154,7 +161,8 @@ export class Transit {
     let baked = 0;
     for (const st of plan.stations) { this.bakeStation(B, st, r, ox, oz, inst); baked++; }
     yield;
-    for (const L of net.lines) { baked += this.bakeTrestles(B, L, river, ox, oz); yield; }
+    for (const d of trestles) { this.bakeTrestle(B, d, ox, oz); baked++; yield; }
+    for (const L of net.lines) { baked += this.bakeTrestles(B, L, river, ox, oz, onTrestle); yield; }
     for (const c of plan.crossings) { this.makeCrossing(B, c, ox, oz, inst); baked++; yield; }
     if (baked > 0) {
       inst.mesh = B.build();
@@ -204,13 +212,45 @@ export class Transit {
     });
   }
 
+  // ---- a raised timber trestle where the line crosses the river on a deck
+  // (riverDecks.ts): the track ramps up onto it, the water flows beneath ----
+  private bakeTrestle(B: Baked, d: RiverDeck, ox: number, oz: number): void {
+    const rx = Math.cos(d.heading), rz = -Math.sin(d.heading);
+    const box = (t: number, l: number, a: number, w: number, h: number, lift: number, color: number): void => {
+      const y0 = riverDeckProfile(d, t - l / 2), y1 = riverDeckProfile(d, t + l / 2);
+      const pitch = Math.atan2(y1 - y0, l);
+      const g = new THREE.BoxGeometry(w, h, l / Math.cos(pitch) + 0.03);
+      g.rotateX(-pitch);
+      g.rotateY(d.heading);
+      g.translate(ox + d.ax + d.ux * t + rx * a, (y0 + y1) / 2 + lift, oz + d.az + d.uz * t + rz * a);
+      B.add(g, color);
+    };
+    const STEP = 2;
+    for (let t = 0; t < d.len - 1e-6; t += STEP) {
+      const l = Math.min(STEP, d.len - t), tm = t + l / 2;
+      box(tm, l, 0, 4.4, 0.35, RAIL_Y - 0.15, 0x8a6a4a);
+      for (const a of [-0.72, 0.72]) box(tm, l, a, 0.12, 0.14, RAIL_Y + 0.12, 0x8d939e);
+      for (const a of [-2.05, 2.05]) box(tm, l, a, 0.16, 0.55, RAIL_Y + 0.3, 0xd9cdb4);
+    }
+    for (let t = 0.5; t < d.len; t += 0.9) box(t, 0.28, 0, 2.4, 0.1, RAIL_Y + 0.05, 0x6e5238);
+    // timber posts down into the water wherever the deck stands clear
+    for (let t = 3; t < d.len - 2; t += 4) {
+      const y = riverDeckProfile(d, t);
+      if (y < 0.45) continue;
+      for (const a of [-1.7, 1.7]) {
+        B.box(0.28, y, 0.28, 0x7a5c40, ox + d.ax + d.ux * t + rx * a, y / 2, oz + d.az + d.uz * t + rz * a);
+      }
+    }
+  }
+
   // ---- wooden trestle decks where the line crosses the water ----
-  private bakeTrestles(B: Baked, route: RailRoute, river: RiverRoute, ox: number, oz: number): number {
+  private bakeTrestles(B: Baked, route: RailRoute, river: RiverRoute, ox: number, oz: number,
+                       raised: (x: number, z: number) => boolean = () => false): number {
     let decks = 0;
     const pts = route.pts;
     let k = 0;
     while (k < pts.length) {
-      if (!river.inWater(pts[k].x, pts[k].z)) { k++; continue; }
+      if (!river.inWater(pts[k].x, pts[k].z) || raised(pts[k].x, pts[k].z)) { k++; continue; }
       let end = k;
       let sx = 0, sz = 0, sh = 0;
       while (end < pts.length && river.inWater(pts[end].x, pts[end].z)) {

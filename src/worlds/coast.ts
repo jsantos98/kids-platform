@@ -8,7 +8,7 @@
 // railway, stations, props, walkers); the chunk baker cuts slabs and beaches
 // to the shore; boats sail an offshore lane that follows it.
 import { rng, chunkSeed } from '../engine/rng.js';
-import { citySeed, southExit, eastExit, STRAIT } from './cityGrid.js';
+import { citySeed, southExit, eastExit, STRAIT, isRaceIsland } from './cityGrid.js';
 import { ISLAND, CENTER, SCALE } from './world.js';
 
 const N = Math.round(256 * SCALE); // polygon vertices (~10 m apart)
@@ -41,9 +41,12 @@ export function coastFor(bx: number, by: number): Coast {
   let c = cache.get(key);
   if (c) return c;
   const r = rng(chunkSeed(key, 0xc0a57, 1));
-  const R0 = (360 + r() * 70) * SCALE;
+  // a race island is a smaller, rounder island round its circuit (R32): no
+  // headlands — its causeways run out over the sea to it
+  const race = isRaceIsland(bx, by);
+  const R0 = race ? 400 + r() * 40 : (360 + r() * 70) * SCALE;
   const harm = [2, 3, 4, 5].map((k, i) => ({
-    k, a: (r() - 0.5) * 2 * [0.06, 0.045, 0.03, 0.02][i], ph: r() * Math.PI * 2,
+    k, a: (r() - 0.5) * 2 * [0.06, 0.045, 0.03, 0.02][i] * (race ? 0.5 : 1), ph: r() * Math.PI * 2,
   }));
   // the four causeway portals: where each exit line meets the cell edge
   const portals = [
@@ -59,7 +62,7 @@ export function coastFor(bx: number, by: number): Coast {
     const rim = rimDist(th);
     rr = Math.min(rr, rim - RIM_MARGIN);
     // headlands: swell out toward the portal so the causeway lands close
-    for (const tp of portals) {
+    for (const tp of race ? [] : portals) {
       let d = Math.abs(th - tp);
       if (d > Math.PI) d = Math.PI * 2 - d;
       // (~120 m wide at the shore whatever the island's size)

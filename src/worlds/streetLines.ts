@@ -10,11 +10,31 @@
 // causeway avenues, which exist first and which it must cross square.
 // Kept free of cityPlan / streetGen imports (they read the rail) so there is
 // no module cycle.
-import { citySeed, southExit, eastExit } from './cityGrid.js';
+import { citySeed, southExit, eastExit, isRaceIsland } from './cityGrid.js';
 import { ISLAND } from './world.js';
+import { coastFor } from './coast.js';
 
 /** how far the causeway avenues run inland from the rim (streetGen lays them) */
 export const EXIT_IN = 300;
+
+/** ... per avenue: EXIT_IN, except on a race island, whose shore lies far
+ * in — there each avenue runs on until 40 m past the coastal ring road
+ * (RING_INSET 58 m inside the shore) so the ring still crosses it (R19) */
+export function exitsIn(bx: number, by: number): { n: number; s: number; w: number; e: number } {
+  if (!isRaceIsland(bx, by)) return { n: EXIT_IN, s: EXIT_IN, w: EXIT_IN, e: EXIT_IN };
+  const coast = coastFor(bx, by);
+  const exN = southExit(bx, by - 1) * 64, exS = southExit(bx, by) * 64;
+  const exW = eastExit(bx - 1, by) * 64, exE = eastExit(bx, by) * 64;
+  const reach = (at: (t: number) => { x: number; z: number }): number => {
+    let t = 0;
+    while (t < ISLAND / 2 && !coast.inLand(at(t).x, at(t).z, 58 + 40)) t += 2;
+    return Math.max(EXIT_IN, t);
+  };
+  return {
+    n: reach(t => ({ x: exN, z: t })), s: reach(t => ({ x: exS, z: ISLAND - t })),
+    w: reach(t => ({ x: t, z: exW })), e: reach(t => ({ x: ISLAND - t, z: exE })),
+  };
+}
 
 export interface StreetLine {
   id: number;
@@ -82,9 +102,10 @@ export function streetCandidatesFor(bx: number, by: number): StreetCandidates {
   if (!c) {
     const exN = southExit(bx, by - 1) * 64, exS = southExit(bx, by) * 64;
     const exW = eastExit(bx - 1, by) * 64, exE = eastExit(bx, by) * 64;
+    const X = exitsIn(bx, by);
     const segs: Array<[number, number, number, number]> = [
-      [exN, 0, exN, EXIT_IN], [exS, ISLAND - EXIT_IN, exS, ISLAND],
-      [0, exW, EXIT_IN, exW], [ISLAND - EXIT_IN, exE, ISLAND, exE],
+      [exN, 0, exN, X.n], [exS, ISLAND - X.s, exS, ISLAND],
+      [0, exW, X.w, exW], [ISLAND - X.e, exE, ISLAND, exE],
     ];
     const lines: StreetLine[] = segs.map(([ax, az, bx2, bz], id) => {
       const len = Math.hypot(bx2 - ax, bz - az);

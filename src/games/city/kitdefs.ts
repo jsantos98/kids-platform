@@ -83,21 +83,19 @@ for (const f of ['barrel', 'barrel-open', 'box', 'box-large', 'box-large-open', 
   'resource-planks', 'resource-wood', 'resource-stone-large', 'bucket', 'signpost', 'tree-autumn', 'tree-tall',
   'tree-log', 'rock-a', 'tent-canvas', 'campfire-pit']) KITDEFS[`sv-${f}`] = surv(f);
 
-// race islands (R32): the Toy Car Kit's wide road track, gates, cones and
-// cars, with the Racing Kit's tent and forest tiles on the apron
+// race islands (R32): the Racing Kit's track tiles (the Starter-Kit-Racing
+// set) and its forest / tent tiles in the infield, Toy Car Kit trees on the
+// apron (the karts are Toy Car Kit racers, spawned as vehicles)
 const TOYKIT = '/assets/kenney/toycar';
 const RACEKIT = '/assets/kenney/racing';
 const toy = (f: string): BakeDef => [`${TOYKIT}/${f}.glb`, `${TOYKIT}/Textures/colormap.png`];
+const rk = (f: string): BakeDef => [`${RACEKIT}/${f}.glb`, `${RACEKIT}/Textures/colormap.png`];
 Object.assign(KITDEFS, {
-  'tc-straight': toy('track-road-wide-straight'),
-  'tc-corner': toy('track-road-wide-corner-large'),
-  'tc-corner-s': toy('track-road-wide-corner-small'),
-  'tc-gate-finish': toy('gate-finish'),
-  'tc-gate': toy('gate'),
-  'tc-cone': toy('item-cone'),
-  'tc-box': toy('item-box'),
+  'rk-straight': rk('track-straight'),
+  'rk-corner': rk('track-corner'),
+  'rk-finish': rk('track-finish'),
+  'rk-tents': rk('decoration-tents'),
+  'rk-forest': rk('decoration-forest'),
   'tc-tree': toy('tree'),
   'tc-pine': toy('tree-pine'),
-  'rk-tents': [`${RACEKIT}/decoration-tents.glb`, `${RACEKIT}/Textures/colormap.png`],
-  'rk-forest': [`${RACEKIT}/decoration-forest.glb`, `${RACEKIT}/Textures/colormap.png`],
 });

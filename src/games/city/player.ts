@@ -192,14 +192,47 @@ export function physicsStep(
   const { state: st, V } = p;
 
   if (V.kind === 'heli') {
-    // simplified helicopter: hover-drive at a fixed altitude, above it all
+    // simplified helicopter: hover-drive at a fixed altitude, over all but
+    // the tallest buildings — flying into one is a bump like the truck's:
+    // it flashes, then carries on from just back along its path, clear of
+    // the building, still facing the same way (G1)
+    st.alt = HELI_ALT;
+    if (p.crashT > 0) {
+      p.crashT -= dt;
+      p.car.visible = (Math.floor(performance.now() / 1000 * 9) % 2) === 0;
+      if (p.crashT <= 0) {
+        st.x = p.crash.x; st.z = p.crash.z; st.heading = p.crash.heading;
+        st.v = 0;
+        p.car.visible = true;
+      }
+      return { crashed: false };
+    }
     if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
     if (input.brake) st.v = Math.max(-V.maxF * 0.5, st.v - V.brake * dt);
     st.v -= st.v * 0.5 * dt;
     st.heading += input.steer * 1.0 * dt * (0.35 + Math.abs(st.v) / V.maxF);
-    st.x += Math.sin(st.heading) * st.v * dt;
-    st.z += Math.cos(st.heading) * st.v * dt;
-    st.alt = HELI_ALT;
+    const nx = st.x + Math.sin(st.heading) * st.v * dt;
+    const nz = st.z + Math.cos(st.heading) * st.v * dt;
+    // (the rotor disc reaches ~2.5 m below the hover height)
+    const tall = boxes.filter(b => (b.top ?? 0) > HELI_ALT - 2.5);
+    const hits = (x: number, z: number): boolean => tall.some(b => b.obb
+      ? inBox(b, x, z, V.radius)
+      : x > b.x1 - V.radius && x < b.x2 + V.radius && z > b.z1 - V.radius && z < b.z2 + V.radius);
+    if (tall.length && hits(nx, nz)) {
+      if (Math.abs(st.v) > 1.5) {
+        startCrash(p);
+        // resume just back along the path, at the first clear spot
+        const bx = -Math.sin(p.crash.heading), bz = -Math.cos(p.crash.heading);
+        for (let d = 6; d <= 60; d += 1) {
+          const x = p.crash.x + bx * d, z = p.crash.z + bz * d;
+          if (!hits(x, z)) { p.crash.x = x; p.crash.z = z; break; }
+        }
+        return { crashed: true };
+      }
+      st.v = 0; // nudging it at a crawl just stops
+      return { crashed: false };
+    }
+    st.x = nx; st.z = nz;
     return { crashed: false };
   }
 

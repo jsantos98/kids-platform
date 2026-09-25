@@ -93,6 +93,8 @@ export class Baked {
   }
 
   build(opts: BakedOptions = {}): THREE.Mesh {
+    // (nothing baked — a chunk wholly out at sea: an empty mesh)
+    if (!this.geos.length) return meshOf(new THREE.BufferGeometry(), opts);
     return meshOf(this.merged(), opts);
   }
 

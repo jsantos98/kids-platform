@@ -12,7 +12,8 @@ import type { RiverRoute } from '../src/worlds/riverRoute.js';
 import type { CityGrid } from '../src/worlds/grid.js';
 import { railNetFor, railPortals, clearRailCache, STEM } from '../src/worlds/railRoute.js';
 import { occupancyFor, clearOccupancyCache, ROAD, RAIL, RIVER, LOT, PLAZA, SEA, DECK, RACE } from '../src/worlds/grid.js';
-import { isRaceIsland, raceTrackFor, clearRaceCache, UNIT } from '../src/worlds/raceIsland.js';
+import { isRaceIsland, raceTrackFor, clearRaceCache } from '../src/worlds/raceIsland.js';
+import { TILE } from '../src/worlds/raceLoop.js';
 import { buildIslandData, installIslandData } from '../src/worlds/islandData.js';
 import { generateCityChunk, generateCityChunkData } from '../src/worlds/cityChunk.js';
 import { meshFromBakedData } from '../src/engine/baked.js';
@@ -326,7 +327,10 @@ for (const [bx, by] of cells) {
   // R26: the river spans shore to shore, keeps clear of the north / south
   // causeway avenues (12 m water to kerb), never runs beneath a street, and
   // meets every street bridge at a right angle
-  {
+  // (a race island has no river at all — its circuit fills the middle, R32)
+  if (isRaceIsland(bx, by)) {
+    if (riverFor(bx, by).pts.length) { riverFails++; console.log(`  R26 detail: race island ${bx},${by} has a river`); }
+  } else {
     const river = riverFor(bx, by);
     let zmin = Infinity, zmax = -Infinity, laneMin = Infinity;
     for (const p of river.pts) {
@@ -466,7 +470,8 @@ for (const [bx, by] of cells) {
   const ringD: Record<string, number[]> = { downtown: [], urban: [], residential: [] };
   for (const b of plan.blocks) {
     biggestBlock = Math.max(biggestBlock, b.area);
-    if (b.area > BLOCK_GIANT) {
+    // (a race island's parkland round its circuit is no city block: exempt)
+    if (b.area > BLOCK_GIANT && !(isRaceIsland(bx, by) && !builtD(b.district))) {
       giantBlocks++;
       console.log(`  R37 detail: city ${bx},${by} ${b.district} block at (${b.cx.toFixed(0)},${b.cz.toFixed(0)}) is ${(b.area / 1000).toFixed(0)}k m2`);
     }
@@ -498,34 +503,43 @@ for (const [bx, by] of cells) {
   }
 }
 
-// R32: every race island carries a closed Toy Car Kit loop in its own
-// block, the apron carries nothing but grass and props (no street, track,
-// water, lot or sea), the track keeps clear of every street, and the island
-// still meets its four neighbours (four causeway mouths on one web)
+// R32: every race island is a smaller island that IS a circuit: a closed
+// loop of Racing Kit tiles in the middle of the island (every tile meets the
+// next edge to edge, the heading carried through), in its own block, the
+// apron carrying nothing but grass and props (no street, track, water, lot
+// or sea), the track clear of every street, both railway lines clear of the
+// zone's ringing road by 20 m, no river, no lots, four causeway mouths on
+// one web — and no two race islands grow the same loop
 {
-  const raceIslands: Array<[number, number]> = [...cells.filter(([bx, by]) => isRaceIsland(bx, by)), [10, 0], [0, -10]];
+  const raceIslands: Array<[number, number]> = [...cells.filter(([bx, by]) => isRaceIsland(bx, by)), [10, 0], [0, -10], [-10, 10]];
+  const shapes = new Set<string>();
   for (const [bx, by] of raceIslands) {
     const T = raceTrackFor(bx, by);
     if (!T) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} has no circuit`); continue; }
-    // the pieces chain end to end, back to the first
     for (let i = 0; i < T.pieces.length; i++) {
       const p = T.pieces[i], q = T.pieces[(i + 1) % T.pieces.length];
-      const u = { x: Math.sin(p.ry), z: Math.cos(p.ry) }, l = { x: -Math.cos(p.ry), z: Math.sin(p.ry) };
-      const R = p.kind === 'corner' ? 4 * UNIT : 2 * UNIT;
-      const ex = p.kind === 'straight' ? { x: p.x + u.x * 4 * UNIT, z: p.z + u.z * 4 * UNIT, h: p.ry }
-        : { x: p.x + (u.x + l.x) * R, z: p.z + (u.z + l.z) * R, h: p.ry - Math.PI / 2 };
-      let dh = Math.abs(ex.h - q.ry) % (Math.PI * 2);
+      const ex = { x: p.x + Math.sin(p.hOut) * TILE, z: p.z + Math.cos(p.hOut) * TILE };
+      let dh = Math.abs(p.hOut - q.hIn) % (Math.PI * 2);
       dh = Math.min(dh, Math.PI * 2 - dh);
-      if (Math.hypot(ex.x - q.x, ex.z - q.z) > 0.05 || dh > 0.01) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} piece ${i} does not meet piece ${(i + 1) % T.pieces.length}`); break; }
+      if (Math.hypot(ex.x - q.x, ex.z - q.z) > 0.05 || dh > 0.01) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} tile ${i} does not meet tile ${(i + 1) % T.pieces.length}`); break; }
     }
+    if (Math.hypot(T.cx - ISLAND / 2, T.cz - ISLAND / 2) > 60) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} circuit off the middle`); }
+    const shape = `${T.data.nx}x${T.data.nz}:${T.data.cells.join(',')}`;
+    if (shapes.has(shape)) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} repeats another island's loop`); }
+    shapes.add(shape);
     const plan = cityPlanFor(bx, by);
     if (!plan.blocks.some(b => b.district === 'raceway')) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} circuit has no block of its own`); }
+    if (plan.data.lots.length) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} carries ${plan.data.lots.length} lots`); }
     const mouths = plan.nodes.filter(n => n.mouth).length;
     if (mouths !== 4) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} has ${mouths} causeway mouths`); }
     // the track clear of every street (its apron and ringing road between)
     for (const q of T.path) {
       if (plan.edges.some(e => segDist(q, plan.nodes[e.a], plan.nodes[e.b]) < 7 + 6 + 8)) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} track at (${q.x.toFixed(0)},${q.z.toFixed(0)}) hugs a street`); break; }
     }
+    // the railway round the circuit, never through it
+    const rail = railNetFor(bx, by);
+    if (rail.lines.some(L => L.pts.some(q => T.inZone(q.x, q.z, 16 + 20)))) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} railway runs into the circuit`); }
+    if (riverFor(bx, by).pts.length) { raceFaults++; console.log(`  R32 detail: race island ${bx},${by} has a river`); }
     const occ = occupancyFor(bx, by);
     let bad = 0;
     for (let i = 0; i < occ.raw.length; i++) if ((occ.raw[i] & RACE) && (occ.raw[i] & (ROAD | RAIL | RIVER | LOT | SEA))) bad++;
@@ -633,7 +647,7 @@ if (worstTrestleSkew > 30) fail('R27', `trestle meets the water at ${worstTrestl
 if (roadOverlaps > 0) fail('R35', `${roadOverlaps} pairs of road pieces overlap`);
 if (giantBlocks > 0) fail('R37', `${giantBlocks} blocks over ${BLOCK_GIANT / 1000}k m2 (biggest ${(biggestBlock / 1000).toFixed(0)}k)`);
 if (thinBlocks > 0) fail('R33', `${thinBlocks} built blocks under 55% built over (worst ${(worstFill * 100).toFixed(0)}%)`);
-if (raceFaults > 0) fail('R32', `${raceFaults} race-island faults (circuit missing / open, apron built on, track by a street, mouths)`);
+if (raceFaults > 0) fail('R32', `${raceFaults} race-island faults (circuit missing / open / off the middle / repeated, apron built on, track by a street, rail or river in it, lots, mouths)`);
 if (polesInLots > 0) fail('R6', `${polesInLots} traffic-light poles stand inside a lot`);
 if (districtFaults > 0) fail('R33', `${districtFaults} district placement faults (rings from the centre, industry by the rail)`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
@@ -719,7 +733,17 @@ const fingerprint = (bx: number, by: number) => {
   return { H: nodes, V: nodes, segs, dists, rail };
 };
 for (const [sa, sb] of [[baseSeed, baseSeed + 1], [baseSeed + 1, baseSeed + 2]] as Array<[number, number]>) {
-  for (const [bx, by] of [[0, 0], [1, 1]] as Array<[number, number]>) {
+  // (race island (0,0) is parkland round a circuit: its own loop must
+  // differ instead — R32)
+  {
+    setCityBase(sa); clearAllWorldCaches();
+    const la = raceTrackFor(0, 0)?.data.cells.join(',');
+    setCityBase(sb); clearAllWorldCaches();
+    const lb = raceTrackFor(0, 0)?.data.cells.join(',');
+    setCityBase(baseSeed); clearAllWorldCaches();
+    if (la === lb) fail('R25', `seeds ${sa} and ${sb} grow the same race circuit on island (0,0)`);
+  }
+  for (const [bx, by] of [[1, 0], [1, 1]] as Array<[number, number]>) {
     setCityBase(sa); clearAllWorldCaches();
     const A = fingerprint(bx, by);
     setCityBase(sb); clearAllWorldCaches();

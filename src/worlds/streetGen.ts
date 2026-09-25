@@ -25,7 +25,7 @@ import { citySeed, southExit, eastExit, STRAIT } from './cityGrid.js';
 import { coastFor, insetShore } from './coast.js';
 import { baseRiverFor, type RiverRoute } from './riverRoute.js';
 import { railNetFor, STEM } from './railRoute.js';
-import { EXIT_IN } from './streetLines.js';
+import { exitsIn } from './streetLines.js';
 import { ISLAND, CENTER, SCALE } from './world.js';
 import { blocksOf, type Block } from './blocks.js';
 import { ringPolygon, RING_INSET } from './ringRoad.js';
@@ -1035,10 +1035,11 @@ function generate(bx: number, by: number): StreetNet {
   // ---- 1. exit avenues: straight in from each causeway mouth ----
   const exN = southExit(bx, by - 1) * 64, exS = southExit(bx, by) * 64;
   const exW = eastExit(bx - 1, by) * 64, exE = eastExit(bx, by) * 64;
-  insertDry({ x: exN, z: 0 }, { x: exN, z: EXIT_IN }, 'exit', true);
-  insertDry({ x: exS, z: ISLAND }, { x: exS, z: ISLAND - EXIT_IN }, 'exit', true);
-  insertDry({ x: 0, z: exW }, { x: EXIT_IN, z: exW }, 'exit', true);
-  insertDry({ x: ISLAND, z: exE }, { x: ISLAND - EXIT_IN, z: exE }, 'exit', true);
+  const XI = exitsIn(bx, by);
+  insertDry({ x: exN, z: 0 }, { x: exN, z: XI.n }, 'exit', true);
+  insertDry({ x: exS, z: ISLAND }, { x: exS, z: ISLAND - XI.s }, 'exit', true);
+  insertDry({ x: 0, z: exW }, { x: XI.w, z: exW }, 'exit', true);
+  insertDry({ x: ISLAND, z: exE }, { x: ISLAND - XI.e, z: exE }, 'exit', true);
 
   // ---- 2. the coastal ring road: chords ~58 m inside the shore, crossing
   // the river on a dead-square stretch ----
@@ -1067,8 +1068,8 @@ function generate(bx: number, by: number): StreetNet {
   };
   const RN = ringPoly.length;
   const exitSegs: Array<[P, P]> = [
-    [{ x: exN, z: 0 }, { x: exN, z: EXIT_IN }], [{ x: exS, z: ISLAND - EXIT_IN }, { x: exS, z: ISLAND }],
-    [{ x: 0, z: exW }, { x: EXIT_IN, z: exW }], [{ x: ISLAND - EXIT_IN, z: exE }, { x: ISLAND, z: exE }],
+    [{ x: exN, z: 0 }, { x: exN, z: XI.n }], [{ x: exS, z: ISLAND - XI.s }, { x: exS, z: ISLAND }],
+    [{ x: 0, z: exW }, { x: XI.w, z: exW }], [{ x: ISLAND - XI.e, z: exE }, { x: ISLAND, z: exE }],
   ];
   for (let i = 0; i < RN; i++) {
     const a = ringPoly[i], b = ringPoly[(i + 1) % RN];
@@ -1234,6 +1235,10 @@ function generate(bx: number, by: number): StreetNet {
     }
   }
 
+  // a race island has no city round its circuit: no corridor streets,
+  // patches or lattices — the ring, the avenues, the circuit's road and its
+  // spokes (R32)
+  if (!race) {
   // ---- 2c. the railway corridor: square level-crossing streets every
   // ~125 m (laid first, so nothing snaps them askew), and a railside road
   // 26 m either side of each line that they and the patch streets T into —
@@ -1324,6 +1329,8 @@ function generate(bx: number, by: number): StreetNet {
       }
     }
   });
+
+  }
 
   // ---- 6. link up what the rules stranded: every exit, and every piece of
   // street bigger than a block, joins the main web with a straight link ----
@@ -1421,7 +1428,7 @@ function generate(bx: number, by: number): StreetNet {
   let circuitJoined = joinCircuit() > 0;
   const tried = new Set<string>();
   // (one cut a round: the rounds grow with the island's area)
-  for (let round = 0; round < Math.round(160 * SCALE * SCALE); round++) {
+  for (let round = 0; round < (race ? 0 : Math.round(160 * SCALE * SCALE)); round++) {
     const faces = blocksOf(B.result()).sort((p, q) => q.area - p.area);
     let did = false;
     for (const f of faces) {

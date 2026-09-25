@@ -14,6 +14,7 @@ import { SCALE } from '../../../worlds/world.js';
 import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
 import { lightState, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST } from '../transit.js';
+import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
 
 const MODELS = [
@@ -295,7 +296,9 @@ export class IslandCars {
         const near = !player || Math.hypot(c.x - player.x, c.z - player.z) < DRAW_R;
         c.obj.visible = near;
         if (near) {
-          c.obj.position.set(c.x, 0, c.z);
+          // (up on a causeway's deck where the avenue runs out over the sea)
+          const dk = deckAt(c.x, c.z);
+          c.obj.position.set(c.x, dk && dk.kind === 'road' ? dk.y : 0, c.z);
           // the body swings round smoothly (the path's heading steps at the
           // joints of a tight curve, like a U-turn's apex)
           let dh = c.h - c.obj.rotation.y;

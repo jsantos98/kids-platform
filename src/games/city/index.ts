@@ -634,7 +634,9 @@ const tick = (): void => {
     if (step.crashed) {
       audio.thud();
       toast = '';
-      Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+      // (road vehicles resume on a breadcrumb; the helicopter picked its
+      // spot itself, just back along its path)
+      if (V.kind === 'ground') Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
     } else if (!wasCrashing && V.kind === 'ground' && mode === 'drive') {
       crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
       // stuck detector: gas held the whole window yet the truck went nowhere
@@ -660,6 +662,9 @@ const tick = (): void => {
     if (race.offTrack(st.x, st.z) > 1.5 && Math.abs(st.v) > 5) st.v *= 1 - Math.min(0.5, dt * 1.2);
     const push = race.bump(st.x, st.z);
     if (push) { st.x += push.dx; st.z += push.dz; st.v *= 1 - Math.min(0.5, dt * 3); }
+    // the kit tiles' walls: slide along them, a little slower
+    const wall = race.wall(st.x, st.z, V.halfW);
+    if (wall) { st.x += wall.dx; st.z += wall.dz; st.v *= 1 - Math.min(0.5, dt * 2); }
     const ev = race.update(dt, st.x, st.z);
     const at = new THREE.Vector3(st.x, 2, st.z);
     if (ev.go) { raceMsg = 'GO!'; raceMsgT = 1.5; particles.burstConfetti(at); }
@@ -807,7 +812,7 @@ const tick = (): void => {
   sea.update(elapsed);
   scenery.update(elapsed);
   patrol?.update(dt, elapsed, st.x, st.z);
-  if (V.kind === 'ground' && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
+  if (V.kind === 'ground' && st.alt < 0.3 && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);
     splashTimer -= dt;
     if (Math.abs(st.v) > 1.5 && splashTimer <= 0) {

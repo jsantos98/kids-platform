@@ -20,6 +20,7 @@ import { ROUNDABOUT_REACH } from '../../../worlds/cityPlan.js';
 import { graphFor, leaving, type StreetGraph } from '../../../worlds/streetGraph.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
 import type { Railway } from '../railway.js';
+import { deckAt } from '../../../worlds/causeway.js';
 
 /** kit characters are ~0.7 units tall; scale them to villager height (~1.6 m) */
 const PED_SCALE = 2.2;
@@ -223,7 +224,10 @@ export class IslandWalkers {
       w.mesh.visible = near;
       if (!near) continue;
       w.phase += dt * (running ? (w.pet ? 16 : 14) : waiting ? 0 : 6);
-      w.mesh.position.set(x, 0.1 + Math.abs(Math.sin(w.phase)) * (running ? 0.16 : w.pet ? 0.06 : 0.04), z);
+      // (up on a bridge deck where the sidewalk crosses the river)
+      const dk = deckAt(x, z);
+      const y0 = dk && dk.kind === 'road' ? dk.y : 0;
+      w.mesh.position.set(x, y0 + 0.1 + Math.abs(Math.sin(w.phase)) * (running ? 0.16 : w.pet ? 0.06 : 0.04), z);
       w.mesh.rotation.set(running ? (w.pet ? 0.1 : 0.18) : 0,
         running && threat ? Math.atan2(x - threat.x, z - threat.z) : Math.atan2(e.ux * w.dir, e.uz * w.dir), 0);
     }

@@ -18,7 +18,7 @@
 import { rng, chunkSeed } from '../engine/rng.js';
 import { makePath, type WorldPath } from './spline.js';
 import { WORLD_CHUNKS, ISLAND, CENTER, BRIDGE_X, SCALE } from './world.js';
-import { citySeed, southExit } from './cityGrid.js';
+import { citySeed, southExit, isRaceIsland } from './cityGrid.js';
 import { streetNetFor } from './streetGen.js';
 import { STEM } from './railRoute.js';
 
@@ -50,7 +50,24 @@ const baseCache = new Map<string, Array<{ x: number; z: number; w: number }>>();
  * seed requires a flush or stale rivers come back */
 export function clearRiverCache(): void { cache.clear(); baseCache.clear(); }
 
+/** a race island has no river — the circuit fills its middle (R32): no
+ * water anywhere, every query far away */
+const NO_RIVER: RiverRoute = {
+  path: {
+    total: 0, pts: [],
+    sample: () => ({ x: -1e6, z: -1e6, h: 0 }),
+    nearest: () => ({ d2: Infinity, p: { x: -1e6, z: -1e6, h: 0 }, i: 0 }),
+    within: () => false,
+  },
+  pts: [],
+  distTo: () => Infinity,
+  halfAt: () => 0,
+  inWater: () => false,
+  near: () => false,
+};
+
 export function riverFor(bx: number, by: number): RiverRoute {
+  if (isRaceIsland(bx, by)) return NO_RIVER;
   const seed = citySeed(bx, by);
   const key = `${bx},${by},${seed}`;
   let rv = cache.get(key);
@@ -69,6 +86,7 @@ export function riverFor(bx: number, by: number): RiverRoute {
 /** the river before any street has been laid (the street generator decides
  * its crossings against this one) */
 export function baseRiverFor(bx: number, by: number): RiverRoute {
+  if (isRaceIsland(bx, by)) return NO_RIVER;
   return routeOf(baseSamples(bx, by));
 }
 

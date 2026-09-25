@@ -31,7 +31,8 @@ ambulance and medical helicopter (people to rescue), plane (sky rings), boat
 (buoy course), train (stop at the yellow board and passengers get on and
 off) and kart race (three laps
 against three AI karts on the race islands — every island at x, y multiples
-of 10, starting from island (0,0); the other modes start on island (1,0)). The world keeps running while you play: two railway lines cross
+of 10 is a small island that is one Racing Kit circuit, each its own shape,
+starting from island (0,0); the other modes start on island (1,0)). The world keeps running while you play: two railway lines cross
 every island (north-south and west-east, meeting at a diamond) and carry on
 over the causeways to the neighbours, with stations, gated level crossings
 and trains on a timetable that never stops; boats pass under the causeways'

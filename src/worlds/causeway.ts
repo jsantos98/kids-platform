@@ -8,6 +8,7 @@
 import { causewaySpan } from './coast.js';
 import { cityAt, CITY_PITCH } from './cityGrid.js';
 import { RAIL_OFFSET } from './railRoute.js';
+import { riverDeckAt, type RiverDeck } from './riverDecks.js';
 
 /** top of the raised span above the water (m) */
 export const SPAN_H = 5.5;
@@ -64,7 +65,7 @@ export function deckSlope(t: number, len: number): number {
  * it is and how far along. Checks the decks this city owns and the ones its
  * north / west neighbours lay across onto our shore.
  */
-export function deckAt(x: number, z: number): { y: number; kind: 'road' | 'rail'; span: Span; t: number } | null {
+export function deckAt(x: number, z: number): { y: number; kind: 'road' | 'rail'; span?: Span; river?: RiverDeck; t: number } | null {
   const c = cityAt(x, z);
   const owners: Array<[number, number, number, number]> = [
     [c.bx, c.by, x - c.ox, z - c.oz],
@@ -81,5 +82,8 @@ export function deckAt(x: number, z: number): { y: number; kind: 'road' | 'rail'
       return { y: deckProfile(t, s.to - s.from), kind: s.kind, span: s, t };
     }
   }
+  // ... and the river bridges and trestles on the island (riverDecks.ts)
+  const rd = riverDeckAt(c.bx, c.by, x - c.ox, z - c.oz);
+  if (rd) return { y: rd.y, kind: rd.deck.kind, river: rd.deck, t: rd.t };
   return null;
 }

@@ -15,8 +15,10 @@ import { citySeed } from './cityGrid.js';
 import { occupancyFor, BLOCKED_FOR_PROPS, STRUCTURED, LOT, SEA } from './grid.js';
 import { coastFor, clipToRect, insetShore } from './coast.js';
 import { spansOf, deckProfile, deckSlope, type Span } from './causeway.js';
+import { riverDecksFor, riverDeckProfile, type RiverDeck } from './riverDecks.js';
 import { WORLD_CHUNKS, ISLAND } from './world.js';
-import { raceTrackFor, UNIT, TRACK_HALF, APRON, type RaceTrack } from './raceIsland.js';
+import { raceTrackFor, UNIT, TRACK_HALF, type RaceTrack } from './raceIsland.js';
+import { TILE } from './raceLoop.js';
 
 /** the race track's surface height: flush with the street asphalt */
 export const TRACK_TOP = 0.19;
@@ -34,6 +36,8 @@ export interface CollisionBox {
   /** the axis-aligned bound (the whole box, when there is no obb) */
   x1: number; x2: number; z1: number; z2: number;
   small?: number;
+  /** a building's roof height (m) — what a helicopter can hit */
+  top?: number;
   /** a footprint turned to its street: centre, half extents, rotation */
   obb?: { cx: number; cz: number; hx: number; hz: number; ry: number };
 }
@@ -86,11 +90,9 @@ function kenneyTPL() {
     rocks: ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     lightCurved: bakedModel('light-curved'),
     track: {
-      straight: bakedModel('tc-straight'),
-      corner: bakedModel('tc-corner'),
-      cornerS: bakedModel('tc-corner-s'),
-      finish: bakedModel('tc-gate-finish'),
-      cone: bakedModel('tc-cone'),
+      straight: bakedModel('rk-straight'),
+      corner: bakedModel('rk-corner'),
+      finish: bakedModel('rk-finish'),
       tree: bakedModel('tc-tree'),
       pine: bakedModel('tc-pine'),
       tents: bakedModel('rk-tents'),
@@ -229,7 +231,16 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
 
   // ---- the river: water ribbon, sandy banks and a footpath, interrupted
   // where a street bridges it ----
-  const bridges = plan.riverBridges.filter(b => b.x > X0 - 30 && b.x < X0 + CH + 30 && b.z > Z0 - 30 && b.z < Z0 + CH + 30);
+  // (a street bridge with a real deck — riverDecks.ts — keeps the water
+  // flowing on underneath; only a plain crossing hides it)
+  const decks = riverDecksFor(bx, by);
+  const onDeck = (x: number, z: number, kind: 'road' | 'rail', m = 0): boolean => decks.some(d => {
+    if (d.kind !== kind) return false;
+    const t = (x - d.ax) * d.ux + (z - d.az) * d.uz;
+    return t > -m && t < d.len + m && Math.abs((x - d.ax) * d.uz - (z - d.az) * d.ux) < d.half + m;
+  });
+  const bridges = plan.riverBridges.filter(b => b.x > X0 - 30 && b.x < X0 + CH + 30 && b.z > Z0 - 30 && b.z < Z0 + CH + 30)
+    .filter(b => !onDeck(b.x, b.z, 'road'));
   const nearBridge = (x: number, z: number): boolean =>
     bridges.some(b => Math.hypot(b.x - x, b.z - z) < (b.exit ? 16 : 11));
   {
@@ -289,6 +300,58 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     }
     for (const sd of [-1, 1]) {
       B.box(hw * 2 + 6, 0.55, 1.3, BRIDGE_STEEL, b.x + ux * sd * 10.2, 0.28, b.z + uz * sd * 10.2, 0, b.heading, 0);
+    }
+  }
+
+  // real bridges: the road rises onto a humped deck over the water
+  for (const d of decks) {
+    if (d.kind !== 'road') continue;
+    const mx = d.ax + d.ux * d.len / 2, mz = d.az + d.uz * d.len / 2;
+    if (mx >= X0 && mx < X0 + CH && mz >= Z0 && mz < Z0 + CH) bakeBridgeDeck(d);
+  }
+  /** a box `w` wide, `h` tall, `l` long, turned to the deck's heading and
+   * tilted to its slope, centred `t` along it and `a` across (+ = right) */
+  function deckBox(d: RiverDeck, t: number, l: number, a: number, w: number, h: number, lift: number, color: number): void {
+    const y0 = riverDeckProfile(d, t - l / 2), y1 = riverDeckProfile(d, t + l / 2);
+    const pitch = Math.atan2(y1 - y0, l);
+    const g = new THREE.BoxGeometry(w, h, l / Math.cos(pitch) + 0.04);
+    g.rotateX(-pitch);
+    g.rotateY(d.heading);
+    const rx = Math.cos(d.heading), rz = -Math.sin(d.heading);
+    g.translate(d.ax + d.ux * t + rx * a, (y0 + y1) / 2 + lift, d.az + d.uz * t + rz * a);
+    B.add(g, color);
+  }
+  function bakeBridgeDeck(d: RiverDeck): void {
+    const TOP = 0.13; // the kit road's top (the tiles rest at 0.1)
+    const STEP = 2;
+    for (let t = 0; t < d.len - 1e-6; t += STEP) {
+      const l = Math.min(STEP, d.len - t), tm = t + l / 2;
+      deckBox(d, tm, l, 0, ROAD_HALF * 2, 0.5, TOP - 0.25, ROAD_ASPHALT);
+      for (const sd of [-1, 1]) {
+        // kerb, walkway and a cream parapet
+        deckBox(d, tm, l, sd * (ROAD_HALF + 0.35), 0.7, 0.62, TOP - 0.19, ROAD_KERB);
+        deckBox(d, tm, l, sd * (ROAD_HALF + 1.8), 2.2, 0.6, TOP - 0.2, SIDEWALK);
+        deckBox(d, tm, l, sd * (d.half - 0.25), 0.5, 1.4, TOP + 0.4, 0xe8e4d8);
+        // steel fascia girders under the raised part
+        if (riverDeckProfile(d, tm) > 0.35) deckBox(d, tm, l, sd * (d.half - 0.6), 0.9, 0.9, TOP - 0.85, BRIDGE_STEEL);
+      }
+      if (Math.floor(t / STEP) % 3 === 0) deckBox(d, tm, Math.min(1.6, l), 0, 0.25, 0.04, TOP + 0.02, 0xe8e4d8);
+    }
+    // stone piers on both banks, down into the river bed
+    const pts = river.pts;
+    for (const sd of [-1, 1]) {
+      // where the water's edge meets the deck
+      let tb = -1;
+      for (let t = d.len / 2; t > 0 && t < d.len; t += sd * 0.5) {
+        const x = d.ax + d.ux * t, z = d.az + d.uz * t;
+        if (!river.near(x, z, river.halfAt(x, z) + 0.5)) { tb = t; break; }
+      }
+      if (tb < 0 || !pts.length) continue;
+      const y = riverDeckProfile(d, tb);
+      const g = new THREE.BoxGeometry(d.half * 2 - 1, y + 0.4, 1.4);
+      g.rotateY(d.heading);
+      g.translate(d.ax + d.ux * tb, (y + 0.4) / 2 - 0.2 + TOP - 0.45, d.az + d.uz * tb);
+      B.add(g, 0xbfb5a3);
     }
   }
 
@@ -457,8 +520,10 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     }
   }
   for (const p of chunkRoadPieces(plan, cx, cz)) {
-    // past the shore a causeway avenue is a deck, not road tiles
+    // past the shore a causeway avenue is a deck, not road tiles; over the
+    // river the bridge deck carries the street
     if (occ.bits(p.x, p.z) & SEA) continue;
+    if (p.kind === 'straight' && onDeck(p.x, p.z, 'road', -0.5)) continue;
     if (p.kind === 'pad') {
       padSurface(p.poly!);
       continue;
@@ -617,13 +682,15 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
   const race = raceTrackFor(bx, by);
   if (race) bakeCircuit(race);
   function bakeCircuit(T: RaceTrack): void {
-    const SY = 0.6; // the kit track's 0.3-unit slab, flattened to ~0.18 m
-    // (probed: the kit's asphalt sits 0.9 units below its origin, the kerbs
-    // 0.7, the slab's underside 1.0 — R15)
-    const y = TRACK_TOP + 0.9 * SY;
+    // the Racing Kit's 10-unit tiles at UNIT m a unit across, their low
+    // walls and corner stands a little taller than native; the road surface
+    // is the tile's base (its kerbs 0.1 units up, R15), laid just over the
+    // ground slabs
+    const SY = 1.4;
+    const y = 0.16;
     for (const p of T.pieces) {
       if (!inChunk(p.mx, p.mz)) continue;
-      const tpl = p.kind === 'straight' ? TPL.track.straight : p.kind === 'corner' ? TPL.track.corner : TPL.track.cornerS;
+      const tpl = p.kind === 'finish' ? TPL.track.finish ?? TPL.track.straight : p.kind === 'straight' ? TPL.track.straight : TPL.track.corner;
       if (tpl) bakeModel(B, tpl, p.x, y, p.z, p.ry, 1, [UNIT, SY, UNIT]);
     }
     if (!TPL.track.straight) {
@@ -634,65 +701,30 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
         B.box(TRACK_HALF * 2, 0.08, Math.hypot(b.x - a.x, b.z - a.z) + 0.3, ROAD_ASPHALT, (a.x + b.x) / 2, TRACK_TOP - 0.04, (a.z + b.z) / 2, 0, a.h, 0);
       }
     }
-    // the finish gate across the start line
+    // a chequered start line across the finish tile
     const st = T.sample(T.startS);
     if (inChunk(st.x, st.z)) {
       const rx = Math.cos(st.h), rz = -Math.sin(st.h); // right of the heading
-      if (TPL.track.finish) bakeModel(B, TPL.track.finish, st.x, TRACK_TOP, st.z, st.h, (TRACK_HALF * 2 + 1.5) / TPL.track.finish.size.x);
-      else for (const sd of [-1, 1]) B.box(0.5, 6, 0.5, 0xe25c5c, st.x + rx * sd * (TRACK_HALF + 0.7), 3, st.z + rz * sd * (TRACK_HALF + 0.7));
-      for (const sd of [-1, 1]) {
-        const px = st.x + rx * sd * (TRACK_HALF + 0.8), pz = st.z + rz * sd * (TRACK_HALF + 0.8);
-        boxes.push({ x1: px - 0.4, x2: px + 0.4, z1: pz - 0.4, z2: pz + 0.4, small: 1 });
-      }
-      // a chequered start line
       for (let k = 0; k < 12; k++) {
         const off = -TRACK_HALF + (k + 0.5) * (TRACK_HALF * 2 / 12);
         B.box(TRACK_HALF * 2 / 12, 0.02, 1, k % 2 ? 0x2b2b2b : 0xf4f4f4, st.x + rx * off, TRACK_TOP + 0.02, st.z + rz * off, 0, st.h, 0);
       }
     }
-    // the tent village outside the start straight (right of the travel)
-    if (TPL.track.tents) {
-      const tp = T.sample(T.startS + 20);
-      const size = 12;
-      const x = tp.x + Math.cos(tp.h) * (TRACK_HALF + 2 + size / 2), z = tp.z - Math.sin(tp.h) * (TRACK_HALF + 2 + size / 2);
-      if (inChunk(x, z)) {
-        bakeModel(B, TPL.track.tents, x, 0.1, z, tp.h, size / TPL.track.tents.size.x);
-        boxes.push(obbBox(x, z, size / 2 - 1, size / 2 - 1, tp.h));
-      }
+    // the infield: the kit's forest and tent tiles, solid (a truck that
+    // wanders in bumps them; the karts' soft walls keep them on the track)
+    for (const d of T.decor) {
+      if (!inChunk(d.x, d.z)) continue;
+      const tpl = d.kind === 'tents' ? TPL.track.tents : TPL.track.forest;
+      if (!tpl) continue;
+      bakeModel(B, tpl, d.x, 0.1, d.z, d.ry, 1, [UNIT, SY, UNIT]);
+      boxes.push(obbBox(d.x, d.z, TILE / 2 - 3, TILE / 2 - 3, d.ry));
     }
-    // forest tiles down the infield (between the two long straights)
-    if (TPL.track.forest) {
-      const ax = Math.sin(T.ry), az = Math.cos(T.ry); // the loop's long axis
-      const across = (T.hx - APRON - TRACK_HALF) * 2 - 2 * TRACK_HALF; // infield width
-      const size = Math.min(16, across - 10);
-      const len = (T.hz - APRON - TRACK_HALF) * 2 - 2 * TRACK_HALF - 10;
-      if (size >= 8) {
-        const n = Math.max(1, Math.floor(len / (size + 4)));
-        for (let k = 0; k < n; k++) {
-          const off = (k - (n - 1) / 2) * (size + 4);
-          const x = T.cx + ax * off, z = T.cz + az * off;
-          if (!inChunk(x, z)) continue;
-          bakeModel(B, TPL.track.forest, x, 0.1, z, T.ry + (k % 2) * Math.PI / 2, size / TPL.track.forest.size.x);
-          boxes.push(obbBox(x, z, size / 2 - 1.5, size / 2 - 1.5, T.ry));
-        }
-      }
-    }
-    // cones along the outside of the corners, trees on the apron
-    for (let k = 0; k < T.path.length; k += 3) {
-      const a = T.path[k], b = T.path[(k + 3) % T.path.length];
-      let dh = b.h - a.h;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      if (Math.abs(dh) < 0.05) continue; // on a straight
-      const x = a.x + Math.cos(a.h) * (TRACK_HALF + 1), z = a.z - Math.sin(a.h) * (TRACK_HALF + 1);
-      if (!inChunk(x, z)) continue;
-      if (TPL.track.cone) bakeModel(B, TPL.track.cone, x, 0.1, z, a.h, 0.9 / TPL.track.cone.size.y);
-      else B.cyl(0.05, 0.3, 0.9, 8, 0xf08a3c, x, 0.55, z);
-    }
+    // trees on the apron, clear of the track and the infield tiles
     const trees = [TPL.track.tree, TPL.track.pine].filter((t): t is BakedTemplate => !!t);
     for (let i = 0; i < 14 && trees.length; i++) {
       const x = X0 + 4 + r() * (CH - 8), z = Z0 + 4 + r() * (CH - 8);
-      if (!T.inZone(x, z, -2) || T.nearest(x, z).d < TRACK_HALF + 5) continue;
+      if (!T.inZone(x, z, -2) || T.nearest(x, z).d < TILE / 2 + 3) continue;
+      if (T.decor.some(d => Math.hypot(d.x - x, d.z - z) < TILE * 0.72)) continue;
       if (occ.claims(x, z, 1.2, STRUCTURED)) continue;
       bakeModel(B, pick(r, trees), x, 0.1, z, r() * Math.PI * 2, (4.5 + r() * 2) / 0.83);
       boxes.push({ x1: x - 0.6, x2: x + 0.6, z1: z - 0.6, z2: z + 0.6, small: 1 });
@@ -720,13 +752,13 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
           : tpls[((lot.v * tpls.length) | 0) % tpls.length];
         const s = Math.min((lot.w * 0.92) / tpl.size.x, (lot.d * 0.92) / tpl.size.z);
         bakeModel(B, tpl, lot.x, 0.1, lot.z, lot.ry, s);
-        boxes.push(obbBox(lot.x, lot.z, lot.w / 2, lot.d / 2, lot.ry));
+        boxes.push({ ...obbBox(lot.x, lot.z, lot.w / 2, lot.d / 2, lot.ry), top: tpl.size.y * s + 0.1 });
       } else {
         // procedural fallback house
         const h = 2.9 * (2 + ((lot.v * 3) | 0)) + 0.6;
         B.box(lot.w / 1.2, h, lot.d / 1.2, HOUSE_COLORS[(lot.v * HOUSE_COLORS.length) | 0], lot.x, h / 2, lot.z, 0, lot.ry, 0);
         B.box(lot.w / 1.2 + 0.3, 0.3, lot.d / 1.2 + 0.3, ROOFS[(lot.v * ROOFS.length) | 0], lot.x, h + 0.15, lot.z, 0, lot.ry, 0);
-        boxes.push(obbBox(lot.x, lot.z, lot.w / 2.4, lot.d / 2.4, lot.ry));
+        boxes.push({ ...obbBox(lot.x, lot.z, lot.w / 2.4, lot.d / 2.4, lot.ry), top: h + 0.3 });
       }
     } else if (lot.kind === 'trees') {
       bakeTrees(lot.x, lot.z, 2 + ((lot.v * 2) | 0), lot.w / 2, lot);
@@ -780,7 +812,7 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     const p = lotPt(lot, 0, lot.d / 2 - hd - 0.5);
     B.box(lot.w - 0.3, 0.04, lot.d - 0.3, 0xa8d487, lot.x, 0.13, lot.z, 0, lot.ry, 0);
     bakeModel(B, tpl, p.x, 0.12, p.z, lot.ry, s);
-    boxes.push(obbBox(p.x, p.z, (tpl.size.x * s) / 2, hd, lot.ry));
+    boxes.push({ ...obbBox(p.x, p.z, (tpl.size.x * s) / 2, hd, lot.ry), top: tpl.size.y * s + 0.12 });
     // and a tree in the back garden when there is room for one
     if (lot.d - hd * 2 > 3.5 && TPL.gardenTrees.length && lot.v > 0.35) {
       prop(lot, TPL.gardenTrees[((lot.v * 7) | 0) % TPL.gardenTrees.length], (lot.v - 0.5) * lot.w * 0.6, -lot.d / 2 + 1.8, 4.5 + lot.v * 1.5);

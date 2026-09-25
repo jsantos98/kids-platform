@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { graphFor, type StreetGraph, type SEdge } from '../../worlds/streetGraph.js';
+import { deckAt } from '../../worlds/causeway.js';
 
 export const CATCH_R = 9;
 export const CATCH_T = 4;
@@ -127,7 +128,8 @@ export class Robber {
     // the right-hand lane of its direction of travel
     const p = g.sample(e, this.s, LANE * this.dir);
     const h = this.dir > 0 ? e.heading : e.heading + Math.PI;
-    this.group.position.set(p.x + this.ox, 0, p.z + this.oz);
+    const dk = deckAt(p.x + this.ox, p.z + this.oz);
+    this.group.position.set(p.x + this.ox, dk && dk.kind === 'road' ? dk.y : 0, p.z + this.oz);
     // turn smoothly into the new street
     let dh = h - this.group.rotation.y;
     while (dh > Math.PI) dh -= Math.PI * 2;

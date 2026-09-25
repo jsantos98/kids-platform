@@ -1,66 +1,54 @@
 // Race islands: every island at bx % 10 == 0 && by % 10 == 0 (island (0,0)
-// among them) carries a racing circuit — a closed loop of Kenney Toy Car Kit
-// track pieces on an apron of grass, tents and trees, with a road ringing
-// the apron (streetGen.ts lays it; the island's streets, both railway lines
-// and the river all keep outside). Everything here is pure geometry, decided
-// once per island and shared by the street generator, the plan, the chunk
-// baker, the occupancy grid, the race and the audit (R32).
+// among them) is a smaller island that IS a racing circuit — a closed loop
+// of Kenney Racing Kit tiles (the Starter-Kit-Racing look) in the middle of
+// the island, its infield dressed with the kit's forest and tent tiles, on a
+// grass apron ringed by its own road. Every race island grows its own loop
+// (raceLoop.ts). The circuit is decided from the island's coast alone and
+// FIRST: the railway lines then run round it and the streets round both
+// (streetGen.ts lays the ringing road, the coastal ring road, the causeway
+// avenues and the spokes between them — no city). Pure geometry, shared by
+// the street generator, the rail, the plan, the chunk baker, the occupancy
+// grid, the race and the audit (R32).
 //
-// Kit geometry (probed from the GLBs): a piece's entry is its origin,
-// heading +z; the wide road is 2 units across; a straight is 4 units long;
-// `corner-large` turns 90° left (heading -90°, exit at (-4, 4)) about a
-// centreline radius of 4. Everything is laid at UNIT metres per kit unit.
+// Kit geometry (probed from the GLBs, R15): every tile is 10 x 10 units
+// centred on its origin with a 6-unit road; the straight runs along z; the
+// corner opens to +z and -x about the tile corner (-5, +5) (centreline
+// radius 5); the road surface sits 0.1 units up. Laid at 2 m a unit: 20 m
+// tiles, a 12 m road.
 import { rng, chunkSeed } from '../engine/rng.js';
-import { citySeed, southExit, eastExit } from './cityGrid.js';
-import { ringPolygon } from './ringRoad.js';
+import { citySeed, isRaceIsland } from './cityGrid.js';
+import { CENTER } from './world.js';
+import { makeLoop, TILE, type Loop, type LoopTile } from './raceLoop.js';
 
-function inPoly(p: { x: number; z: number }, poly: Array<{ x: number; z: number }>): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i], b = poly[j];
-    if ((a.z > p.z) !== (b.z > p.z) && p.x < ((b.x - a.x) * (p.z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
-  }
-  return inside;
-}
-import { baseRiverFor } from './riverRoute.js';
-import { railNetFor } from './railRoute.js';
-import { EXIT_IN } from './streetLines.js';
-import { ISLAND, CENTER } from './world.js';
+export { isRaceIsland };
 
-/** metres per kit unit: the wide track is 12 m across */
-export const UNIT = 6;
-export const TRACK_HALF = UNIT;
-/** a straight piece's length, and the centreline radius of the large and
- * small corners (compact circuits use the small ones where room is short) */
-const STRAIGHT = 4 * UNIT;
-const R_LARGE = 4 * UNIT, R_SMALL = 2 * UNIT;
-/** grass, tents and trees round the loop, inside the ringing road */
+/** metres per kit unit */
+export const UNIT = TILE / 10;
+/** half the kit road's width */
+export const TRACK_HALF = 3 * UNIT;
+/** grass round the loop, inside the ringing road */
 export const APRON = 16;
 /** the road round the apron runs this far outside the zone */
 export const ZONE_ROAD = 16;
-/** the ringing road's own clearances, measured from that road (its square
- * corners reach 16√2 m out from the zone's): the track (streets keep 14 m
- * unless square across it), the water (the river cut takes half + 16 m),
- * the avenues (a junction keeps 20 m from a street it doesn't meet), and
- * the island's ring road — a spoke of at least a street's length between */
-const TIERS = [
-  { rail: 26, river: 30, exit: 26, ring: 40, diamond: 64 },
-  // a crowded island: still every street rule's own minimum plus a margin
-  { rail: 20, river: 24, exit: 22, ring: 34, diamond: 44 },
-];
 
-export type TrackPieceKind = 'straight' | 'corner' | 'cornerSmall';
+export type TrackPieceKind = 'straight' | 'corner' | 'finish';
 
 export interface TrackPiece {
   kind: TrackPieceKind;
-  /** entry point (the model's origin) and the model's rotation */
+  /** the tile's centre (the kit tile's origin) and its rotation */
   x: number;
   z: number;
   ry: number;
-  /** the piece's middle (which chunk lays it) */
+  /** which chunk lays it (the centre) */
   mx: number;
   mz: number;
+  /** travel heading into and out of the tile */
+  hIn: number;
+  hOut: number;
 }
+
+/** an infield tile of scenery */
+export interface TrackDecor { kind: 'forest' | 'tents'; x: number; z: number; ry: number }
 
 export interface RaceTrack {
   bx: number;
@@ -72,6 +60,7 @@ export interface RaceTrack {
   hz: number;
   ry: number;
   pieces: TrackPiece[];
+  decor: TrackDecor[];
   /** the centreline, closed, every ~2 m, with cumulative arc length */
   path: Array<{ x: number; z: number; h: number; s: number }>;
   length: number;
@@ -91,15 +80,10 @@ export interface RaceTrack {
   data: RaceData;
 }
 
-/** does island (bx, by) hold a race circuit? */
-export function isRaceIsland(bx: number, by: number): boolean {
-  return ((bx % 10) + 10) % 10 === 0 && ((by % 10) + 10) % 10 === 0;
-}
-
 const cache = new Map<string, RaceTrack | null>();
 export function clearRaceCache(): void { cache.clear(); }
 
-/** island (bx, by)'s race circuit, or null (not a race island, or no room) */
+/** island (bx, by)'s race circuit, or null (not a race island) */
 export function raceTrackFor(bx: number, by: number): RaceTrack | null {
   if (!isRaceIsland(bx, by)) return null;
   const key = `${bx},${by},${citySeed(bx, by)}`;
@@ -110,174 +94,104 @@ export function raceTrackFor(bx: number, by: number): RaceTrack | null {
   return cache.get(key)!;
 }
 
-/** the loop in its own frame: a rectangle of nA x nB straights with four
- * large corners, driven with left turns from the origin heading +z */
-function layout(nA: number, nB: number, small: boolean): { pieces: Array<{ kind: TrackPieceKind; x: number; z: number; h: number }>; bx0: number; bx1: number; bz0: number; bz1: number } {
-  const RADIUS = small ? R_SMALL : R_LARGE;
-  const pieces: Array<{ kind: TrackPieceKind; x: number; z: number; h: number }> = [];
-  let x = 0, z = 0, h = 0;
-  const fwd = (d: number): void => { x += Math.sin(h) * d; z += Math.cos(h) * d; };
-  for (const n of [nA, nB, nA, nB]) {
-    for (let k = 0; k < n; k++) { pieces.push({ kind: 'straight', x, z, h }); fwd(STRAIGHT); }
-    pieces.push({ kind: small ? 'cornerSmall' : 'corner', x, z, h });
-    // exit of a left 90° turn: forward R, then left R
-    const ux = Math.sin(h), uz = Math.cos(h), lx = -uz, lz = ux; // left of heading (heading - 90°)
-    x += (ux + lx) * RADIUS; z += (uz + lz) * RADIUS;
-    h -= Math.PI / 2;
-  }
-  const bx0 = -2 * RADIUS - nB * STRAIGHT - TRACK_HALF, bx1 = TRACK_HALF;
-  const bz0 = -RADIUS - TRACK_HALF, bz1 = nA * STRAIGHT + RADIUS + TRACK_HALF;
-  return { pieces, bx0, bx1, bz0, bz1 };
+/** a circuit as plain data: the loop's cells in driving order, its infield,
+ * and where the zone sits */
+export interface RaceData {
+  bx: number;
+  by: number;
+  nx: number;
+  nz: number;
+  /** track cells (i, j) in driving order, flattened */
+  cells: number[];
+  /** infield cells, flattened */
+  infield: number[];
+  cx: number;
+  cz: number;
+  ry: number;
 }
 
-function build(bx: number, by: number): RaceTrack | null {
-  const seed = citySeed(bx, by);
-  const r = rng(chunkSeed(seed, 0x7ace, 1));
-  const ring = ringPolygon(bx, by);
-  const river = baseRiverFor(bx, by);
-  const rail = railNetFor(bx, by);
-  const railPts: Array<{ x: number; z: number }> = [];
-  for (const L of rail.lines) for (let k = 0; k < L.pts.length; k += 2) railPts.push(L.pts[k]);
-  const riverPts = river.pts.filter((_, k) => k % 2 === 0);
-  const exN = southExit(bx, by - 1) * 64, exS = southExit(bx, by) * 64;
-  const exW = eastExit(bx - 1, by) * 64, exE = eastExit(bx, by) * 64;
-  const exits: Array<[{ x: number; z: number }, { x: number; z: number }]> = [
-    [{ x: exN, z: 0 }, { x: exN, z: EXIT_IN }], [{ x: exS, z: ISLAND - EXIT_IN }, { x: exS, z: ISLAND }],
-    [{ x: 0, z: exW }, { x: EXIT_IN, z: exW }], [{ x: ISLAND - EXIT_IN, z: exE }, { x: ISLAND, z: exE }],
-  ];
-  const segD = (p: { x: number; z: number }, a: { x: number; z: number }, b: { x: number; z: number }): number => {
-    const abx = b.x - a.x, abz = b.z - a.z, L2 = abx * abx + abz * abz;
-    const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.z - a.z) * abz) / L2));
-    return Math.hypot(a.x + abx * t - p.x, a.z + abz * t - p.z);
-  };
-  // sizes to try, the seeded favourite first, shrinking to the smallest loop
-  const sizes: Array<[number, number, boolean]> = [];
-  const nA0 = 3 + ((r() * 4) | 0), nB0 = 1 + ((r() * 3) | 0);
-  for (let a = nA0; a >= 1; a--) for (let b = Math.min(nB0, a); b >= 1; b--) sizes.push([a, b, false]);
-  // compact circuits (small corners) when nothing larger fits
-  for (let a = 3; a >= 1; a--) for (let b = Math.min(2, a); b >= 1; b--) sizes.push([a, b, true]);
-  const th0 = r() * Math.PI;
-  for (const T of TIERS) for (const [nA, nB, small] of sizes) {
-    const { rail: CLEAR_RAIL, river: CLEAR_RIVER, exit: CLEAR_EXIT, ring: CLEAR_RING, diamond: CLEAR_DIAMOND } = T;
-    const L = layout(nA, nB, small);
-    const hx = (L.bx1 - L.bx0) / 2 + APRON, hz = (L.bz1 - L.bz0) / 2 + APRON;
-    const lcx = (L.bx0 + L.bx1) / 2, lcz = (L.bz0 + L.bz1) / 2;
-    let best: { cx: number; cz: number; ry: number; score: number } | null = null;
-    for (let k = 0; k < 12; k++) {
-      const ry = th0 + (k * Math.PI) / 12;
-      const c = Math.cos(ry), s = Math.sin(ry);
-      // distance from p to the zone's ringing road (the rectangle centred at
-      // (cx, cz), grown by ZONE_ROAD)
-      const rx = hx + ZONE_ROAD, rz = hz + ZONE_ROAD;
-      const rectD = (cx: number, cz: number, p: { x: number; z: number }): number => {
-        const dx = p.x - cx, dz = p.z - cz;
-        const lx = dx * c - dz * s, lz = dx * s + dz * c;
-        return Math.hypot(Math.max(0, Math.abs(lx) - rx), Math.max(0, Math.abs(lz) - rz));
-      };
-      for (let cx = 160; cx <= ISLAND - 160; cx += 16) for (let cz = 160; cz <= ISLAND - 160; cz += 16) {
-        const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => ({
-          x: cx + sx * rx * c + sz * rz * s, z: cz - sx * rx * s + sz * rz * c,
-        }));
-        // inside the ring road, and how far from it (it must clear CLEAR_RING;
-        // the closer to it the better — one side then faces the ring road
-        // across open ground, a short square spoke away)
-        if (!corners.every(q => inPoly(q, ring))) continue;
-        let depth = Infinity;
-        for (let i = 0; i < 4; i++) {
-          const a = corners[i], b = corners[(i + 1) % 4];
-          for (let t = 0; t <= 1; t += 0.1) {
-            const q = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
-            for (let j = 0; j < ring.length; j++) depth = Math.min(depth, segD(q, ring[j], ring[(j + 1) % ring.length]));
-          }
-        }
-        if (depth < CLEAR_RING) continue;
-        const score = (depth - CLEAR_RING) + 0.05 * Math.hypot(cx - CENTER, cz - CENTER);
-        if (best && score >= best.score) continue;
-        if (rectD(cx, cz, rail.diamond) < CLEAR_DIAMOND) continue;
-        if (railPts.some(p => rectD(cx, cz, p) < CLEAR_RAIL)) continue;
-        if (riverPts.some(p => rectD(cx, cz, p) < CLEAR_RIVER + p.w / 2)) continue;
-        // the avenues: sampled along each, against the rectangle
-        let hitExit = false;
-        for (const [a, b] of exits) {
-          for (let t = 0; t <= 1 && !hitExit; t += 0.02) {
-            if (rectD(cx, cz, { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t }) < CLEAR_EXIT) hitExit = true;
-          }
-        }
-        if (hitExit) continue;
-        best = { cx, cz, ry, score };
-      }
+function build(bx: number, by: number): RaceTrack {
+  const r = rng(chunkSeed(citySeed(bx, by), 0x7ace, 2));
+  const L = makeLoop(r);
+  // the loop in the island's middle, square or turned 15 degrees either way
+  // (turned further, its zone's corners reach out past the ring road and the
+  // railway can't pass them — the diamond sits off a corner)
+  const ry = [0, Math.PI / 12, -Math.PI / 12][(r() * 3) | 0];
+  return fromData({
+    bx, by, nx: L.nx, nz: L.nz,
+    cells: L.tiles.flatMap(t => [t.i, t.j]),
+    infield: L.infield.flat(),
+    cx: CENTER, cz: CENTER, ry,
+  }, L);
+}
+
+/** the loop's tiles from its cells (their kinds and turns follow from the
+ * neighbours) */
+function tilesOf(d: RaceData): Loop {
+  const n = d.cells.length / 2;
+  const at = (k: number): [number, number] => [d.cells[2 * ((k + n) % n)], d.cells[2 * ((k + n) % n) + 1]];
+  const hOf = (di: number, dj: number): number => Math.atan2(di, dj);
+  const tiles: LoopTile[] = [];
+  for (let k = 0; k < n; k++) {
+    const [i, j] = at(k), [pi, pj] = at(k - 1), [ni, nj] = at(k + 1);
+    const hIn = hOf(i - pi, j - pj), hOut = hOf(ni - i, nj - j);
+    if (Math.abs(Math.sin(hIn - hOut)) < 1e-6) { tiles.push({ i, j, kind: 'straight', q: Math.round(hIn / (Math.PI / 2)), hIn, hOut }); continue; }
+    const back = hIn + Math.PI, on = hOut;
+    const same = (x: number, y: number): boolean => Math.abs(Math.sin((x - y) / 2)) < 1e-6;
+    let q = 0;
+    for (let t = 0; t < 4; t++) {
+      const a = t * (Math.PI / 2), b = -Math.PI / 2 + t * (Math.PI / 2);
+      if ((same(a, back) && same(b, on)) || (same(a, on) && same(b, back))) { q = t; break; }
     }
-    if (!best) continue;
-    return fromData({ bx, by, nA, nB, small, cx: best.cx, cz: best.cz, ry: best.ry });
+    tiles.push({ i, j, kind: 'corner', q, hIn, hOut });
   }
-  return null;
+  const infield: Array<[number, number]> = [];
+  for (let k = 0; k + 1 < d.infield.length; k += 2) infield.push([d.infield[k], d.infield[k + 1]]);
+  return { nx: d.nx, nz: d.nz, tiles, infield };
 }
 
-/** a circuit as plain data: its loop size and where it was placed */
-export interface RaceData { bx: number; by: number; nA: number; nB: number; small: boolean; cx: number; cz: number; ry: number }
-
-function fromData(d: RaceData): RaceTrack {
-  const L = layout(d.nA, d.nB, d.small);
-  const hx = (L.bx1 - L.bx0) / 2 + APRON, hz = (L.bz1 - L.bz0) / 2 + APRON;
-  const lcx = (L.bx0 + L.bx1) / 2, lcz = (L.bz0 + L.bz1) / 2;
-  const T = finish(d.bx, d.by, d.nA, d.small ? R_SMALL : R_LARGE, L, lcx, lcz, hx, hz, d.cx, d.cz, d.ry);
-  T.data = d;
-  return T;
-}
-
-/** has island (bx, by)'s circuit been decided (circuit or none)? */
-export function hasRaceTrack(bx: number, by: number): boolean {
-  return !isRaceIsland(bx, by) || cache.has(`${bx},${by},${citySeed(bx, by)}`);
-}
-
-/** install a circuit (or its absence) the world worker decided */
-export function installRaceTrack(bx: number, by: number, d: RaceData | null): void {
-  const key = `${bx},${by},${citySeed(bx, by)}`;
-  if (!isRaceIsland(bx, by) || cache.has(key)) return;
-  cache.set(key, d ? fromData(d) : null);
-  if (cache.size > 16) cache.delete(cache.keys().next().value as string);
-}
-
-function finish(
-  bx: number, by: number, nA: number, RADIUS: number, L: ReturnType<typeof layout>,
-  lcx: number, lcz: number, hx: number, hz: number, cx: number, cz: number, ry: number,
-): RaceTrack {
+function fromData(d: RaceData, loop?: Loop): RaceTrack {
+  const L = loop ?? tilesOf(d);
+  const { cx, cz, ry } = d;
   const c = Math.cos(ry), s = Math.sin(ry);
-  // local (loop frame) -> world: centre the loop's box on the zone, turn by ry
-  // (local x along (c, -s), local z along (s, c) — the lots' convention)
+  const hx = (d.nx * TILE) / 2 + APRON, hz = (d.nz * TILE) / 2 + APRON;
+  // loop frame (cell (i, j)'s centre at ((i + 0.5) TILE, (j + 0.5) TILE),
+  // centred on the zone) -> world; a heading turns by ry
   const W = (x: number, z: number): { x: number; z: number } => {
-    const dx = x - lcx, dz = z - lcz;
+    const dx = x - (d.nx * TILE) / 2, dz = z - (d.nz * TILE) / 2;
     return { x: cx + dx * c + dz * s, z: cz - dx * s + dz * c };
   };
-  // a heading h in the loop frame turns by ry (the frame's +z = heading ry)
-  const pieces: TrackPiece[] = L.pieces.map(p => {
-    const w = W(p.x, p.z);
-    const mid = p.kind === 'straight'
-      ? W(p.x + Math.sin(p.h) * STRAIGHT / 2, p.z + Math.cos(p.h) * STRAIGHT / 2)
-      : W(p.x + (Math.sin(p.h) - Math.cos(p.h)) * RADIUS * 0.6, p.z + (Math.cos(p.h) + Math.sin(p.h)) * RADIUS * 0.6);
-    return { kind: p.kind, x: w.x, z: w.z, ry: p.h + ry, mx: mid.x, mz: mid.z };
-  });
-  // the centreline, every ~2 m
+  const centre = (t: { i: number; j: number }): { x: number; z: number } => ({ x: (t.i + 0.5) * TILE, z: (t.j + 0.5) * TILE });
+  // the centreline, every ~2 m, tile by tile
   const path: RaceTrack['path'] = [];
+  const tileS: number[] = [];
   let acc = 0;
   const push = (x: number, z: number, h: number): void => {
     const q = W(x, z);
     if (path.length) acc += Math.hypot(q.x - path[path.length - 1].x, q.z - path[path.length - 1].z);
     path.push({ x: q.x, z: q.z, h: h + ry, s: acc });
   };
-  for (const p of L.pieces) {
-    if (p.kind === 'straight') {
-      for (let t = 0; t < STRAIGHT; t += 2) push(p.x + Math.sin(p.h) * t, p.z + Math.cos(p.h) * t, p.h);
+  for (const t of L.tiles) {
+    const o = centre(t);
+    const bx0 = o.x - Math.sin(t.hIn) * (TILE / 2), bz0 = o.z - Math.cos(t.hIn) * (TILE / 2);
+    const first = path.length;
+    if (t.kind === 'straight') {
+      for (let k = 0; k < TILE / 2; k++) push(bx0 + Math.sin(t.hIn) * k * 2, bz0 + Math.cos(t.hIn) * k * 2, t.hIn);
     } else {
-      // left turn: the centre lies R to the left of the entry
-      const ocx = p.x - Math.cos(p.h) * RADIUS, ocz = p.z + Math.sin(p.h) * RADIUS;
-      const n = Math.ceil((RADIUS * Math.PI / 2) / 2);
-      for (let k = 0; k < n; k++) {
-        const hh = p.h - (k / n) * (Math.PI / 2);
-        // the point on the circle whose tangent heading is hh
-        push(ocx + Math.cos(hh) * RADIUS, ocz - Math.sin(hh) * RADIUS, hh);
+      // a quarter circle about the tile corner between the two open sides
+      const back = t.hIn + Math.PI;
+      const px = o.x + (Math.sin(back) + Math.sin(t.hOut)) * (TILE / 2), pz = o.z + (Math.cos(back) + Math.cos(t.hOut)) * (TILE / 2);
+      let dh = t.hOut - t.hIn;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      const a0 = Math.atan2(bx0 - px, bz0 - pz);
+      const steps = 8;
+      for (let k = 0; k < steps; k++) {
+        const a = a0 + (dh * k) / steps;
+        push(px + Math.sin(a) * (TILE / 2), pz + Math.cos(a) * (TILE / 2), t.hIn + (dh * k) / steps);
       }
     }
+    tileS.push(path[first].s);
   }
   const last = path[path.length - 1], first = path[0];
   const length = acc + Math.hypot(first.x - last.x, first.z - last.z);
@@ -293,8 +207,27 @@ function finish(
     while (dh < -Math.PI) dh += Math.PI * 2;
     return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f, h: a.h + dh * f };
   };
-  // start / finish: halfway up the first long straight
-  const startS = Math.floor(nA / 2) * STRAIGHT + (nA % 2 ? STRAIGHT / 2 : 0);
+  // start / finish: the middle tile of the longest straight run
+  const n = L.tiles.length;
+  let bestK = 0, bestLen = -1;
+  for (let k = 0; k < n; k++) {
+    if (L.tiles[k].kind !== 'straight' || L.tiles[(k - 1 + n) % n].kind === 'straight') continue;
+    let m = 0;
+    while (m < n && L.tiles[(k + m) % n].kind === 'straight') m++;
+    if (m > bestLen) { bestLen = m; bestK = (k + ((m - 1) >> 1)) % n; }
+  }
+  const startS = tileS[bestK] + TILE / 2;
+  const pieces: TrackPiece[] = L.tiles.map((t, k) => {
+    const o = W(centre(t).x, centre(t).z);
+    return {
+      kind: k === bestK ? 'finish' : t.kind, x: o.x, z: o.z, ry: t.q * (Math.PI / 2) + ry,
+      mx: o.x, mz: o.z, hIn: t.hIn + ry, hOut: t.hOut + ry,
+    };
+  });
+  const decor: TrackDecor[] = L.infield.map(([i, j], k) => {
+    const o = W((i + 0.5) * TILE, (j + 0.5) * TILE);
+    return { kind: (i * 7 + j * 3 + k) % 4 === 0 ? 'tents' : 'forest', x: o.x, z: o.z, ry: ((i + j) % 4) * (Math.PI / 2) + ry };
+  });
   const grid: RaceTrack['grid'] = [];
   for (let k = 0; k < 4; k++) {
     const p = sample(startS - 9 - k * 7);
@@ -314,10 +247,23 @@ function finish(
   const nearest = (x: number, z: number): { s: number; d: number } => {
     let bi = 0, bd = Infinity;
     for (let i = 0; i < path.length; i++) {
-      const d = (path[i].x - x) ** 2 + (path[i].z - z) ** 2;
-      if (d < bd) { bd = d; bi = i; }
+      const dd = (path[i].x - x) ** 2 + (path[i].z - z) ** 2;
+      if (dd < bd) { bd = dd; bi = i; }
     }
     return { s: path[bi].s, d: Math.sqrt(bd) };
   };
-  return { bx, by, cx, cz, hx, hz, ry, pieces, path, length, startS, grid, inZone, outline, nearest, sample, data: null as unknown as RaceData };
+  return { bx: d.bx, by: d.by, cx, cz, hx, hz, ry, pieces, decor, path, length, startS, grid, inZone, outline, nearest, sample, data: d };
+}
+
+/** has island (bx, by)'s circuit been decided (circuit or none)? */
+export function hasRaceTrack(bx: number, by: number): boolean {
+  return !isRaceIsland(bx, by) || cache.has(`${bx},${by},${citySeed(bx, by)}`);
+}
+
+/** install a circuit the world worker decided */
+export function installRaceTrack(bx: number, by: number, d: RaceData | null): void {
+  const key = `${bx},${by},${citySeed(bx, by)}`;
+  if (!isRaceIsland(bx, by) || cache.has(key)) return;
+  cache.set(key, d ? fromData(d) : null);
+  if (cache.size > 16) cache.delete(cache.keys().next().value as string);
 }

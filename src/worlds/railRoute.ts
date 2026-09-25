@@ -25,6 +25,8 @@ import {
 import { baseRiverFor, type RiverRoute } from './riverRoute.js';
 import { ISLAND, CENTER, SCALE } from './world.js';
 import { coastFor, type Coast } from './coast.js';
+import { raceTrackFor, ZONE_ROAD, type RaceTrack } from './raceIsland.js';
+import { RING_INSET } from './ringRoad.js';
 
 export const RAIL_Y = 0.11;   // track bed base, just above the slab top
 export const RAIL_TOP = 0.21; // where train wheels sit
@@ -160,6 +162,8 @@ function without(streets: StreetCandidates, veto: Set<number>): StreetCandidates
 interface Quality {
   ride: number; skew: number; folds: number; bridge: number; riverSkew: number;
   offLand: number; riverRide: number; extra: number;
+  /** samples inside a race circuit's no-go zone */
+  zone: number;
 }
 
 /** the frame a line runs in: u = progress (z for north-south, x for
@@ -172,6 +176,13 @@ interface Frame {
   /** diamond in (u, v) */
   du: number;
   dv: number;
+  /** how far each stem runs straight in from its rim (STEM; on a race
+   * island on to past the ring road — its shore lies far in) */
+  s0: number;
+  s1: number;
+  /** a race island: the circuit's no-go zone, and the stretch of u the
+   * line runs beside it at v = dv (the diamond sits at one end of it) */
+  race: { inZone: (x: number, z: number) => boolean; uLo: number; uHi: number; out: 1 | -1 } | null;
 }
 const toXZ = (f: Frame, u: number, v: number): { x: number; z: number } =>
   f.kind === 'ns' ? { x: v, z: u } : { x: u, z: v };
@@ -180,7 +191,7 @@ const vOf = (f: Frame, x: number, z: number): number => (f.kind === 'ns' ? x : z
 /** inside the island's own interior (off both stems and the strait) */
 const interior = (f: Frame, x: number, z: number, pad = 5): boolean => {
   const u = uOf(f, x, z);
-  return u > STEM + pad && u < ISLAND - STEM - pad;
+  return u > f.s0 + pad && u < ISLAND - f.s1 - pad;
 };
 
 /**
@@ -374,17 +385,21 @@ function shapeQuality(
   // stems cross the shore onto the causeway by design)
   let offLand = 0;
   for (const pt of dense) if (interior(f, pt.x, pt.z) && !coast.inLand(pt.x, pt.z, 12)) offLand++;
+  // R32: round a race circuit, never across it
+  let zone = 0;
+  if (f.race) for (const pt of dense) if (f.race.inZone(pt.x, pt.z)) zone++;
   // R31: the second line meets the first ONLY at the diamond
   const extra = other ? lineHits(pts, other.pts, toXZ(f, f.du, f.dv).x, toXZ(f, f.du, f.dv).z, 6) : 0;
-  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI, offLand, riverRide, extra };
+  return { ride, skew, folds, bridge, riverSkew: (riverSkew * 180) / Math.PI, offLand, riverRide, extra, zone };
 }
 
 const clean = (q: Quality): boolean =>
-  q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24
+  q.zone === 0 && q.offLand === 0 && q.folds === 0 && q.bridge === 0 && q.ride < 5 && q.skew < 24
   && q.riverSkew < 30 && q.riverRide === 0 && q.extra === 0;
 
 const qualityBetter = (a: Quality, b: Quality): boolean =>
-  a.extra !== b.extra ? a.extra < b.extra
+  a.zone !== b.zone ? a.zone < b.zone
+  : a.extra !== b.extra ? a.extra < b.extra
   : a.offLand !== b.offLand ? a.offLand < b.offLand
     : a.folds !== b.folds ? a.folds < b.folds
       : a.riverRide !== b.riverRide ? a.riverRide < b.riverRide
@@ -423,9 +438,68 @@ function buildNet(bx: number, by: number): RailNet {
   const zones = bridgeZones(lines, river);
   const coast = coastFor(bx, by);
   const P = railPortals(bx, by);
+  const race = raceTrackFor(bx, by);
+  if (race) return buildRaceNet(bx, by, seed, race, streets, river, zones, coast, P);
   const D = pickDiamond(bx, by, river, coast, streets);
-  const fNS: Frame = { kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x };
-  const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z };
+  const fNS: Frame = { kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x, s0: STEM, s1: STEM, race: null };
+  const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z, s0: STEM, s1: STEM, race: null };
+  const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
+  const ew = buildLine(seed, fEW, streets, river, zones, coast, ns);
+  return makeNet(ns, ew, { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] }, bx, by);
+}
+
+/** a race island's net (R32): both lines run round the circuit in the
+ * middle — each straight in from its portal over the long causeway to past
+ * the ring road, then down one side of the circuit's zone, the two sides
+ * meeting at the diamond just off one of the zone's corners. The corners
+ * are tried in a seeded order until both lines come out clean. */
+function buildRaceNet(
+  bx: number, by: number, seed: number, race: RaceTrack, streets: StreetCandidates,
+  river: RiverRoute, zones: Array<{ x: number; z: number }>, coast: Coast,
+  P: { xN: number; xS: number; zW: number; zE: number },
+): RailNet {
+  // the rail keeps 26 m off the circuit's ringing road (R32)
+  const CLEAR = ZONE_ROAD + 26;
+  const inZone = (x: number, z: number): boolean => race.inZone(x, z, CLEAR);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const q of race.outline(CLEAR)) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
+  const M = 12;
+  // each stem straight in to 90 m inside the shore (past the ring road)
+  const stemIn = (at: (t: number) => { x: number; z: number }): number => {
+    let t = 0;
+    while (t < ISLAND / 2 && !coast.inLand(at(t).x, at(t).z, 90)) t += 2;
+    return Math.max(STEM, t);
+  };
+  const sN = stemIn(t => ({ x: P.xN, z: t })), sS = stemIn(t => ({ x: P.xS, z: ISLAND - t }));
+  const sW = stemIn(t => ({ x: t, z: P.zW })), sE = stemIn(t => ({ x: ISLAND - t, z: P.zE }));
+  const r = rng(chunkSeed(seed, 0xd1b, 3));
+  const corners: Array<[number, number]> = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  for (let k = corners.length - 1; k > 0; k--) { const m = (r() * (k + 1)) | 0; [corners[k], corners[m]] = [corners[m], corners[k]]; }
+  let best: { net: RailNet; q: number } | null = null;
+  for (const [sx, sz] of corners) {
+    const D = { x: sx < 0 ? x0 - M : x1 + M, z: sz < 0 ? z0 - M : z1 + M };
+    if (!coast.inLand(D.x, D.z, RING_INSET + 40) || streets.near(D.x, D.z, 30).length) continue;
+    const fNS: Frame = {
+      kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x, s0: sN, s1: sS,
+      race: { inZone, uLo: z0 - M, uHi: z1 + M, out: sx < 0 ? -1 : 1 },
+    };
+    const fEW: Frame = {
+      kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z, s0: sW, s1: sE,
+      race: { inZone, uLo: x0 - M, uHi: x1 + M, out: sz < 0 ? -1 : 1 },
+    };
+    const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
+    const ew = buildLine(seed, fEW, streets, river, zones, coast, ns);
+    const net = makeNet(ns, ew, { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] }, bx, by);
+    const qs = [shapeQuality(ns.path, fNS, streets, null, zones, coast, null), shapeQuality(ew.path, fEW, streets, null, zones, coast, ns)];
+    const bad = qs.reduce((n, q) => n + (clean(q) ? 0 : 1 + q.zone + q.extra * 100), 0);
+    if (!bad) return net;
+    if (!best || bad < best.q) best = { net, q: bad };
+  }
+  if (best) return best.net;
+  // (no corner stands on land: the plain net, as ever)
+  const D = pickDiamond(bx, by, river, coast, streets);
+  const fNS: Frame = { kind: 'ns', v0: P.xN, v1: P.xS, du: D.z, dv: D.x, s0: sN, s1: sS, race: null };
+  const fEW: Frame = { kind: 'ew', v0: P.zW, v1: P.zE, du: D.x, dv: D.z, s0: sW, s1: sE, race: null };
   const ns = buildLine(seed, fNS, streets, river, zones, coast, null);
   const ew = buildLine(seed, fEW, streets, river, zones, coast, ns);
   return makeNet(ns, ew, { x: D.x, z: D.z, d: [ns.arcAt(D.x, D.z), ew.arcAt(D.x, D.z)] }, bx, by);
@@ -458,7 +532,7 @@ function buildLine(
     };
     for (let attempt = 0; attempt < 90; attempt++) {
       const r = rng(chunkSeed(seed, salt, 0x7e + attempt + round * 1000));
-      const a = tryLine(r, f, streets, river, zones, coast, other, mul, pre);
+      const a = f.race ? tryRaceLine(r, f, streets, coast, other, pre) : tryLine(r, f, streets, river, zones, coast, other, mul, pre);
       if (!a) continue;
       if (a.score === 0) { ranked.length = 0; ranked.push(a); break; }
       offer(a);
@@ -485,10 +559,10 @@ function buildLine(
 function stemControls(f: Frame): { head: Array<{ x: number; z: number }>; mid: Array<{ x: number; z: number }>; tail: Array<{ x: number; z: number }> } {
   const G = 22;
   return {
-    head: [toXZ(f, 0, f.v0), toXZ(f, STEM / 2, f.v0), toXZ(f, STEM, f.v0)],
+    head: [toXZ(f, 0, f.v0), toXZ(f, f.s0 / 2, f.v0), toXZ(f, f.s0, f.v0)],
     mid: [toXZ(f, f.du - G, f.dv), toXZ(f, f.du, f.dv), toXZ(f, f.du + G, f.dv)],
     tail: [
-      toXZ(f, ISLAND - STEM, f.v1), toXZ(f, ISLAND - STEM / 2, f.v1), toXZ(f, ISLAND, f.v1),
+      toXZ(f, ISLAND - f.s1, f.v1), toXZ(f, ISLAND - f.s1 / 2, f.v1), toXZ(f, ISLAND, f.v1),
       toXZ(f, ISLAND + (CITY_PITCH - ISLAND) / 2, f.v1), toXZ(f, CITY_PITCH, f.v1),
     ],
   };
@@ -520,8 +594,8 @@ function tryLine(
     }
     return out;
   };
-  const freeA = free(STEM, f.v0, f.du - 22, f.dv);
-  const freeB = free(f.du + 22, f.dv, ISLAND - STEM, f.v1);
+  const freeA = free(f.s0, f.v0, f.du - 22, f.dv);
+  const freeB = free(f.du + 22, f.dv, ISLAND - f.s1, f.v1);
   const movable = [...freeA, ...freeB];
   // slide free points out of the street-junction squares — a railway
   // through an intersection tile reads as chaos, so keep a 16 m bubble
@@ -665,11 +739,61 @@ function tryLine(
   return { control, score, path, veto };
 }
 
+/** a race island's candidate (R32): from the stem to the start of the
+ * stretch beside the circuit, down that stretch at v = dv (the diamond at one
+ * end, a seeded bow outward elsewhere), then on to the far stem */
+function tryRaceLine(
+  r: () => number, f: Frame, streets: StreetCandidates, coast: Coast,
+  other: RailRoute | null, pre: Set<number>,
+): Attempt | null {
+  const R = f.race!;
+  const { head, mid, tail } = stemControls(f);
+  const bow = (): number => R.out * (r() * 18);
+  const side: Array<{ x: number; z: number }> = [];
+  // the stretch beside the zone, the diamond's guides kept dead on dv
+  const atD = (u: number): boolean => Math.abs(u - f.du) < 40;
+  for (let u = R.uLo; u <= R.uHi + 1e-6; u += 55) {
+    if (atD(u)) continue;
+    side.push(toXZ(f, u, f.dv + bow()));
+  }
+  if (!atD(R.uHi) && !side.some(p => Math.abs(uOf(f, p.x, p.z) - R.uHi) < 12)) side.push(toXZ(f, R.uHi, f.dv + bow()));
+  // on the way in and out, a free point or two with a little wander
+  const free = (u0: number, v0: number, u1: number, v1: number): Array<{ x: number; z: number }> => {
+    const n = u1 - u0 > 120 ? 1 + ((r() * 2) | 0) : u1 - u0 > 50 ? 1 : 0;
+    const out: Array<{ x: number; z: number }> = [];
+    for (let k = 1; k <= n; k++) {
+      const t = k / (n + 1);
+      out.push(toXZ(f, u0 + (u1 - u0) * t, v0 + (v1 - v0) * t + (r() - 0.5) * 30));
+    }
+    return out;
+  };
+  const inA = free(f.s0, f.v0, R.uLo, f.dv), outB = free(R.uHi, f.dv, ISLAND - f.s1, f.v1);
+  const control = [...head, ...inA, ...side, ...mid, ...outB, ...tail]
+    .sort((p, q) => uOf(f, p.x, p.z) - uOf(f, q.x, q.z));
+  for (let k = 1; k < control.length; k++) {
+    const a = control[k - 1], b = control[k];
+    if (uOf(f, b.x, b.z) - uOf(f, a.x, a.z) < 12) return null;
+  }
+  const path = makePath(control, false);
+  const veto = vetoesFor(path, streets, pre);
+  let score = 0;
+  for (const id of veto) if (!pre.has(id)) score += 60;
+  for (const p of path.pts) {
+    if (R.inZone(p.x, p.z)) score += 50;
+    if (interior(f, p.x, p.z, 0) && !coast.inLand(p.x, p.z, 30)) score += 30;
+  }
+  if (other) {
+    const D = toXZ(f, f.du, f.dv);
+    score += 300 * lineHits(path.pts, other.pts, D.x, D.z, 12);
+  }
+  return { control, score, path, veto };
+}
+
 /** deterministic last resort: stems + diamond guides, straight in between */
 function forcedLine(f: Frame, streets: StreetCandidates, pre: Set<number>): Attempt {
   const { head, mid, tail } = stemControls(f);
-  const la = toXZ(f, (STEM + f.du - 22) / 2, (f.v0 + f.dv) / 2);
-  const lb = toXZ(f, (f.du + 22 + ISLAND - STEM) / 2, (f.dv + f.v1) / 2);
+  const la = toXZ(f, (f.s0 + f.du - 22) / 2, (f.v0 + f.dv) / 2);
+  const lb = toXZ(f, (f.du + 22 + ISLAND - f.s1) / 2, (f.dv + f.v1) / 2);
   const control = [...head, la, ...mid, lb, ...tail];
   const path = makePath(control, false);
   return { control, score: 0, path, veto: vetoesFor(path, streets, pre) };
@@ -723,10 +847,10 @@ function pinFrame(pts: Array<{ x: number; z: number }>, f: Frame, FADE = 30): Ar
     const u = uOf(f, p.x, p.z);
     let v = vOf(f, p.x, p.z);
     // stems
-    if (u <= STEM) v = f.v0;
-    else if (u < STEM + FADE) v += (f.v0 - v) * 0.5 * (1 + Math.cos((Math.PI * (u - STEM)) / FADE));
-    if (u >= ISLAND - STEM) v = f.v1;
-    else if (u > ISLAND - STEM - FADE) v += (f.v1 - v) * 0.5 * (1 + Math.cos((Math.PI * (ISLAND - STEM - u)) / FADE));
+    if (u <= f.s0) v = f.v0;
+    else if (u < f.s0 + FADE) v += (f.v0 - v) * 0.5 * (1 + Math.cos((Math.PI * (u - f.s0)) / FADE));
+    if (u >= ISLAND - f.s1) v = f.v1;
+    else if (u > ISLAND - f.s1 - FADE) v += (f.v1 - v) * 0.5 * (1 + Math.cos((Math.PI * (ISLAND - f.s1 - u)) / FADE));
     // diamond
     const ad = Math.abs(cum[k] - cum[kD]);
     if (ad <= DIAMOND_ARM) v = f.dv;

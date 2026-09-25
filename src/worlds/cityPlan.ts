@@ -439,13 +439,15 @@ function buildPlan(bx: number, by: number): CityPlan {
   const inRace = (x: number, z: number): boolean => !!race && race.inZone(x, z, ZONE_ROAD - 2);
   const blocks: CityBlock[] = blocksOf({ nodes, edges }).map(b => {
     if (inRace(b.cx, b.cz)) return { ...b, district: 'raceway' as District };
+    // a race island has no city: parkland round the circuit (R32)
+    if (race) return { ...b, district: 'park' as District };
     const nat = natureAt(b.cx, b.cz);
     const dc = Math.hypot(b.cx - CENTER, b.cz - CENTER);
     return { ...b, district: nat ?? (dc < downtownR ? 'downtown' : dc < mixedR ? 'urban' : 'residential') };
   });
   const railIn = (b: CityBlock): boolean => rail.lines.some(L => L.pts.some((p, k) => k % 3 === 0 && inBlock(b, p.x, p.z)));
   // the park: a middling block just outside downtown, clear of the track
-  {
+  if (!race) {
     const cands = blocks.filter(b => b.district !== 'raceway' && !natureAt(b.cx, b.cz) && b.area > 2500 && b.area < 30000 && !railIn(b))
       .sort((p, q) => Math.abs(Math.hypot(p.cx - CENTER, p.cz - CENTER) - downtownR) - Math.abs(Math.hypot(q.cx - CENTER, q.cz - CENTER) - downtownR));
     const pk = cands[(r() * Math.min(3, cands.length)) | 0];
@@ -453,7 +455,7 @@ function buildPlan(bx: number, by: number): CityPlan {
   }
   // industry: the railway's big blocks, grown into a few neighbours the
   // track also runs by
-  {
+  if (!race) {
     const railside = blocks.filter(b => b.district !== 'park' && b.district !== 'downtown' && b.district !== 'raceway' && !natureAt(b.cx, b.cz)
       && (railIn(b) || rail.near(b.cx, b.cz, 70)));
     railside.sort((p, q) => q.area - p.area);

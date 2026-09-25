@@ -49,6 +49,12 @@ export function streetLinesFor(bx: number, by: number): { H: number[]; V: number
   return { H, V };
 }
 
+/** is island (bx, by) a race island (a smaller island that is a circuit,
+ * one in every 10 x 10 — raceIsland.ts)? */
+export function isRaceIsland(bx: number, by: number): boolean {
+  return ((bx % 10) + 10) % 10 === 0 && ((by % 10) + 10) % 10 === 0;
+}
+
 export interface CityRef { bx: number; by: number; ox: number; oz: number; key: string }
 
 /** which city cell a world position falls in (straits belong to neither) */

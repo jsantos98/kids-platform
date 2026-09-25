@@ -77,6 +77,14 @@
   }
   #prompt .bar { width: min(560px, 56vw); height: clamp(12px, 3vh, 32px); background: rgba(74, 80, 88, .12); border-radius: 16px; margin-top: clamp(6px, 1.6vh, 16px); overflow: hidden; }
   #prompt .bar > div { height: 100%; background: var(--teal); width: 0%; }
+  /* in a mission scene the prompt keeps out of the action: a compact pill
+     in the bottom-left corner (the siren button and minimap are hidden) */
+  body.in-scene #prompt {
+    left: 2vw; bottom: 5.5vh; transform: none;
+    padding: clamp(6px, 1.4vh, 14px) clamp(12px, 2vw, 26px); border-radius: clamp(12px, 2vh, 22px);
+    font-size: clamp(14px, 2.8vh, 28px); opacity: .92;
+  }
+  body.in-scene #prompt .bar { width: min(300px, 24vw); height: clamp(8px, 1.6vh, 16px); margin-top: clamp(4px, 0.9vh, 10px); }
   #camLabel {
     position: fixed; bottom: 4vh; left: 50%; transform: translateX(-50%); z-index: 9;
     padding: 10px 24px; border-radius: 999px; background: var(--cream); color: var(--ink);

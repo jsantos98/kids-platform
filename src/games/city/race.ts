@@ -16,6 +16,8 @@ const AI_LANE = [-3.5, 3.5, 0];
 const AI_SKILL = [1.0, 0.95, 0.9];
 /** the AI karts' top speed: below the kid's kart flat out (15 m/s) */
 const AI_TOP = 13.6;
+/** the kit tiles' walls stand this far either side of the centreline (m) */
+const WALL = 9.2;
 
 interface AiKart {
   group: THREE.Group;
@@ -198,6 +200,18 @@ export class Race {
   /** how far (world x, z) is off the centreline */
   offTrack(x: number, z: number): number {
     return this.track.nearest(x - this.ox, z - this.oz).d - TRACK_HALF;
+  }
+
+  /** the kit tiles' low walls, as soft walls: a kart (radius r, world x, z)
+   * reaching one is pushed back along it, never through it — only near the
+   * track, so a kart that somehow left it isn't dragged across the infield */
+  wall(x: number, z: number, r: number): { dx: number; dz: number } | null {
+    const n = this.track.nearest(x - this.ox, z - this.oz);
+    const lim = WALL - r;
+    if (n.d <= lim || n.d > lim + 8) return null;
+    const p = this.track.sample(n.s);
+    const dx = p.x + this.ox - x, dz = p.z + this.oz - z, d = Math.hypot(dx, dz) || 1;
+    return { dx: (dx / d) * (n.d - lim), dz: (dz / d) * (n.d - lim) };
   }
 
   /** soft bumps with the AI karts: returns a push for the kid's kart */

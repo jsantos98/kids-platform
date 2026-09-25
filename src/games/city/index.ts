@@ -209,7 +209,7 @@ sirenBar.group.visible = false;
 sirenBar.group.userData.extra = true;
 player.car.add(sirenBar.group);
 // modes without a lightbar (plane, boat, train) have no siren button
-if (!MODE.lightbar) sirenBtn.style.display = 'none';
+if (!MODE.lightbar) { sirenBtn.style.display = 'none'; document.body.classList.add('no-siren'); }
 // police helicopter searchlight / medical helicopter winch
 const searchlight = MODE.searchlight ? new Searchlight(scene) : null;
 const winch = MODE.winch ? new Winch(player.car, V.scale ?? 1) : null;
@@ -915,11 +915,14 @@ const tick = (): void => {
     guideArrow.style.display = '';
     guideDist.innerHTML = `<span class="m">LAP ${rv.lap}/${LAPS} · ${ordinal(rv.place)}</span>`;
     guideWait.textContent = '';
-    promptEl.style.display = 'block';
-    promptFill.style.width = `${(rv.progress * 100).toFixed(1)}%`;
-    promptText.textContent = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : 'GO!')
+    // (the lap and place are on the guide badge: the prompt only speaks
+    // for the countdown, the cheers and the finish)
+    const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : 'GO!')
       : rv.phase === 'finished' ? (rv.finalPlace === 1 ? '🏆 YOU WON!' : `🏁 ${ordinal(rv.finalPlace)} PLACE!`)
-      : raceMsgT > 0 ? raceMsg : `LAP ${rv.lap}/${LAPS} — ${ordinal(rv.place)}`;
+      : raceMsgT > 0 ? raceMsg : '';
+    promptEl.style.display = say ? 'block' : 'none';
+    promptFill.style.width = `${(rv.progress * 100).toFixed(1)}%`;
+    promptText.textContent = say;
   } else if (course && gate) {
     // ---- checkpoint course: every glowing gate, in any order ----
     showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,

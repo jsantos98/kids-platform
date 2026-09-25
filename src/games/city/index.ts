@@ -380,6 +380,8 @@ if (q.get('debugsea') === '1') {
     boarding: () => boarding.list(),
     /** race mode: the race on this island */
     race: () => race,
+    /** where the guide arrow aims for a goal at world (tx, tz) */
+    waypoint: (tx: number, tz: number) => guideWaypoint(tx, tz, Math.hypot(tx - player.state.x, tz - player.state.z)),
     probe: (x: number, y: number, z: number) => {
       const out = v.set(x, y, z).project(camera);
       return [+out.x.toFixed(2), +out.y.toFixed(2), +out.z.toFixed(2)];
@@ -618,7 +620,22 @@ function guideWaypoint(tx: number, tz: number, dist: number): { x: number; z: nu
   let k = 0;
   while (k < best.length - 1 && near(best[k])) k++;
   if (k === best.length - 1 && near(best[k])) return { x: tx, z: tz };
-  return { x: g.nodes[best[k]].x + ox, z: g.nodes[best[k]].z + oz };
+  // a turn coming up: well before the junction (about 4 s of driving, never
+  // under 60 m, eased in over the 25 m before that) the arrow swings from
+  // the junction to three quarters of the way onto the street to take — a
+  // right turn reads as a clear right (~70° for a square one) while there's
+  // still time to slow down. (Aimed at the junction itself it only showed
+  // the turn once the vehicle was inside it.)
+  const J = g.nodes[best[k]];
+  const nxt = k + 1 < best.length ? g.nodes[best[k + 1]] : { x: tx - ox, z: tz - oz };
+  const D = Math.hypot(J.x - lx, J.z - lz) || 1;
+  const look = Math.max(60, Math.abs(player.state.v) * 4);
+  const w = 0.75 * Math.max(0, Math.min(1, (look + 25 - D) / 25));
+  const ul = Math.hypot(nxt.x - J.x, nxt.z - J.z) || 1;
+  const ax = (J.x - lx) / D * (1 - w) + (nxt.x - J.x) / ul * w;
+  const az = (J.z - lz) / D * (1 - w) + (nxt.z - J.z) / ul * w;
+  const al = Math.hypot(ax, az) || 1;
+  return { x: lx + (ax / al) * Math.max(D, 20) + ox, z: lz + (az / al) * Math.max(D, 20) + oz };
 }
 
 /** the train's next station: world position + track gap ahead of the train

@@ -7,6 +7,10 @@
 // Catching: the police car stays within CATCH_R of it for CATCH_T seconds
 // in all; the helicopter keeps it inside its searchlight for as long.
 // Several are on the run at once (ROBBERS); each keeps its own progress.
+// It is solid: the police car bumping into it knocks the police car back,
+// and the getaway car DASHES off (faster than the police car for DASH_T s,
+// away from them), then tires for DASH_REST s before it can dash again — a
+// bump is part of the chase, not its end.
 import * as THREE from 'three';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
@@ -20,6 +24,10 @@ export const ROBBERS = 3;
 const FLEE_R = 90;
 const V_FLEE = 9.5, V_CRUISE = 5.5; // m/s (the police car tops out at 12.5)
 const LANE = 3.5;
+/** the dash after a bump: its speed, how long it lasts, and the rest after it */
+export const DASH_V = 15, DASH_T = 2.2, DASH_REST = 2.5;
+/** the getaway car's footprint (the Car Kit sedan) */
+const HALF_L = 2.2, HALF_W = 1.0;
 
 export class Robber {
   readonly group = new THREE.Group();
@@ -34,6 +42,9 @@ export class Robber {
   /** seconds of catching so far */
   caught = 0;
   active = false;
+  /** seconds left of the dash after a bump, and of the rest after it */
+  dashT = 0;
+  private restT = 0;
   private marker: THREE.Mesh;
 
   constructor(private scene: THREE.Scene) {
@@ -76,6 +87,8 @@ export class Robber {
     this.s = this.edge.len / 2;
     this.v = V_CRUISE;
     this.caught = 0;
+    this.dashT = 0;
+    this.restT = 0;
     this.active = true;
     this.group.visible = true;
     this.place(0, 0);
@@ -89,15 +102,20 @@ export class Robber {
   update(dt: number, elapsed: number, px: number, pz: number, frozen = false): void {
     if (!this.active || !this.graph || !this.edge) return;
     const d = Math.hypot(this.x - px, this.z - pz);
-    const target = frozen ? 0 : d < FLEE_R ? V_FLEE : V_CRUISE;
-    this.v += Math.max(-6 * dt, Math.min(3 * dt, target - this.v));
+    if (this.dashT > 0) {
+      this.dashT -= dt;
+      if (this.dashT <= 0) this.restT = DASH_REST;
+    } else if (this.restT > 0) this.restT -= dt;
+    const dash = this.dashT > 0 && !frozen;
+    const target = frozen ? 0 : dash ? DASH_V : d < FLEE_R ? V_FLEE : V_CRUISE;
+    this.v += Math.max(-6 * dt, Math.min((dash ? 9 : 3) * dt, target - this.v));
     let left = this.v * dt;
     for (let guard = 0; guard < 4 && left > 0; guard++) {
       const room = this.dir > 0 ? this.edge.len - this.s : this.s;
       if (left < room) { this.s += left * this.dir; left = 0; break; }
       left -= room;
       this.s = this.dir > 0 ? this.edge.len : 0;
-      this.turn(px, pz, d < FLEE_R);
+      this.turn(px, pz, d < FLEE_R || dash);
     }
     this.place(elapsed, dt);
   }
@@ -137,6 +155,29 @@ export class Robber {
     this.group.rotation.y += dt > 0 ? dh * Math.min(1, dt * 8) : dh;
     this.marker.position.set(0, 3.6 + Math.sin(elapsed * 3) * 0.3, 0);
     this.marker.rotation.y = elapsed * 1.5;
+  }
+
+  /**
+   * The police car at world (x, z), radius r: if it overlaps the getaway
+   * car, the way out of its footprint (along the shallower side) — and,
+   * unless it is dashing or resting, the getaway car starts a dash.
+   */
+  bump(x: number, z: number, r: number): { dx: number; dz: number; dashed: boolean } | null {
+    if (!this.active) return null;
+    const dx = x - this.x, dz = z - this.z;
+    if (dx * dx + dz * dz > 64) return null;
+    const h = this.group.rotation.y, fx = Math.sin(h), fz = Math.cos(h);
+    const a = dx * fx + dz * fz, l = dx * fz - dz * fx;
+    const pa = HALF_L + r - Math.abs(a), pl = HALF_W + r - Math.abs(l);
+    if (pa <= 0 || pl <= 0) return null;
+    const dashed = this.dashT <= 0 && this.restT <= 0;
+    if (dashed) this.dashT = DASH_T;
+    if (pl < pa) {
+      const k = (l >= 0 ? 1 : -1) * pl;
+      return { dx: fz * k, dz: -fx * k, dashed };
+    }
+    const k = (a >= 0 ? 1 : -1) * pa;
+    return { dx: fx * k, dz: fz * k, dashed };
   }
 
   hide(): void { this.active = false; this.group.visible = false; }

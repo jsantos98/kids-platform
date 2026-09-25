@@ -901,6 +901,16 @@ const tick = (): void => {
       st.v *= 1 - Math.min(0.5, dt * 3);
       player.car.position.x = st.x; player.car.position.z = st.z;
     }
+    // the getaway cars are solid too: a bump knocks the police car back and
+    // sends the robber off on a dash (G7)
+    for (const rb of robbers) {
+      const hit = mode === 'drive' ? rb.bump(st.x, st.z, V.radius + 0.3) : null;
+      if (!hit) continue;
+      st.x += hit.dx; st.z += hit.dz;
+      player.car.position.x = st.x; player.car.position.z = st.z;
+      if (hit.dashed) { st.v *= 0.5; audio.thud(); }
+      else st.v *= 1 - Math.min(0.5, dt * 3);
+    }
   }
   railway.update(dt, elapsed, st.x, st.z);
   boarding.update(dt, elapsed, railway, curCity.bx, curCity.by);
@@ -1001,6 +1011,7 @@ const tick = (): void => {
     const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
     promptText.textContent = V.kind === 'heli'
       ? (close ? 'KEEP THE CAR IN YOUR LIGHT!' : 'FLY AFTER THE GETAWAY CAR!')
+      : robber.dashT > 0 ? 'IT RUNS AWAY — AFTER IT!'
       : (close ? 'STAY RIGHT BEHIND IT!' : 'CATCH THE GETAWAY CAR!');
   } else if (race) {
     // ---- the race: lap, place, countdown ----

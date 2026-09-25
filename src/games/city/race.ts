@@ -6,6 +6,7 @@
 // laps count however the kart gets round.
 import * as THREE from 'three';
 import { spawnVehicle } from '../../engine/assets.js';
+import { TOYCAR_YAW } from './player.js';
 import { TRACK_HALF, type RaceTrack } from '../../worlds/raceIsland.js';
 
 export const LAPS = 3;
@@ -61,7 +62,7 @@ export class Race {
       const stub = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 3.6), new THREE.MeshLambertMaterial({ color: [0xe25c5c, 0x3f7bff, 0xf2c14e][i] }));
       stub.position.y = 0.6;
       group.add(stub);
-      spawnVehicle(AI_GLBS[i], { len: 4 }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
+      spawnVehicle(AI_GLBS[i], { len: 4, yaw: TOYCAR_YAW }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
       scene.add(group);
       this.ai.push({ group, s: 0, lat: 0, v: 0, place: 0 });
     }

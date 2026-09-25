@@ -20,6 +20,8 @@ export interface VehicleConfig {
   /** GLB swapped in when loaded ('' = procedural only) */
   glb: string;
   glbLen: number;
+  /** the model's own turn to face +z (the Toy Car Kit's karts face -z) */
+  glbYaw?: number;
   kind: MoveKind;
   /** airborne: ignores collisions, the camera rides at its altitude */
   fly: boolean;
@@ -43,6 +45,10 @@ export interface VehicleConfig {
   /** model scale (procedural aircraft are drawn small) */
   scale?: number;
 }
+
+/** the Toy Car Kit models its vehicles facing -z (front wheels at -z,
+ * probed from the GLBs — R15); every vehicle here drives along +z */
+export const TOYCAR_YAW = Math.PI;
 
 const groundCar = (make: () => THREE.Group, glb: string, glbLen: number, over: Partial<VehicleConfig> = {}): VehicleConfig => ({
   make, glb, glbLen, kind: 'ground', fly: false,
@@ -102,6 +108,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     front: 4.5, halfW: 1.6, frontR: 1.6,
   },
   kart: groundCar(() => makeCar({ body: 0xe25c5c }), '/assets/kenney/toycar/vehicle-racer.glb', 4, {
+    glbYaw: TOYCAR_YAW,
     accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
     camBack: 10, camUp: 4.6, highBack: 12, highUp: 11,
     wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5, front: 1.4, halfW: 0.9, frontR: 0.9,
@@ -158,7 +165,7 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
   if (V.glb) {
     // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
     // (Kenney vehicles already face +Z — our forward — no flip needed)
-    spawnVehicle(V.glb, { len: V.glbLen }).then(g => {
+    spawnVehicle(V.glb, { len: V.glbLen, yaw: V.glbYaw ?? 0 }).then(g => {
       // keep any extras the game hung on the car (lightbar, winch)
       for (const ch of [...car.children]) if (!ch.userData.extra) car.remove(ch);
       // roof height of the kit model (measured before parenting, so in car

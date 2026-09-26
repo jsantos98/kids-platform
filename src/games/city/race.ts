@@ -5,6 +5,7 @@
 // celebrated. Progress is the kid's unwrapped arc along the centreline, so
 // laps count however the kart gets round.
 import * as THREE from 'three';
+import { nightLights } from './nightLights.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { TRACK_HALF, type RaceTrack } from '../../worlds/raceIsland.js';
 import { rivalsFor, type RaceCar } from '../raceCars.js';
@@ -165,6 +166,8 @@ export class Race {
       k.lat += Math.max(-2 * dt, Math.min(2 * dt, want - k.lat));
       k.group.position.set(p.x + rx * k.lat + this.ox, 0.19, p.z + rz * k.lat + this.oz);
       k.group.rotation.y = p.h;
+      // (at night: its lamps, G10)
+      nightLights()?.carLamps(k.group.position.x, 0.19, k.group.position.z, p.h, 1.9, 0.9, 0.45);
     }
     return out;
   }

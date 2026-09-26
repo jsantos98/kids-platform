@@ -4,6 +4,7 @@
 // The per-city shoreline dressing (foam, pier, dinghies, buoys, the picnic
 // causeway) lives in scenery.ts.
 import * as THREE from 'three';
+import { nightLights } from './nightLights.js';
 import { C, mat } from '../../engine/stage.js';
 import { bakedModel, prepBakedModels, type BakeDef } from '../../engine/assets.js';
 import { templateToMesh } from '../../engine/baked.js';
@@ -216,6 +217,15 @@ export class Fleet {
       b.mesh.rotation.y = Math.atan2(ahead.x - behind.x, ahead.z - behind.z);
       b.mesh.rotation.x = Math.sin(elapsed * 0.7 + b.phase) * 0.035;
       b.mesh.rotation.z = Math.sin(elapsed * 0.9 + b.phase) * 0.05;
+      // at night: a white masthead light and red / green side lights (G10)
+      const nl = nightLights();
+      if (nl?.dark) {
+        const h = b.mesh.rotation.y, fx = Math.sin(h), fz = Math.cos(h), y = b.mesh.position.y;
+        nl.flash({ x, y: y + 3, z, color: 0xfff4dc, size: 1.2, pool: 0 });
+        // (the right-hand side of a heading (fx, fz) is (-fz, fx): green; the left red)
+        nl.flash({ x: x - fz * 1.1, y: y + 1.2, z: z + fx * 1.1, color: 0x33ff66, size: 0.9, pool: 0, face: { x: -fz, z: fx } });
+        nl.flash({ x: x + fz * 1.1, y: y + 1.2, z: z - fx * 1.1, color: 0xff2a22, size: 0.9, pool: 0, face: { x: fz, z: -fx } });
+      }
     }
   }
 }

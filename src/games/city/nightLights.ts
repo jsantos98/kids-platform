@@ -75,7 +75,12 @@ void main() {
   gl_FragColor = vec4(vColor, a * uNight * vFade);
 }`;
 
-const MAX_STATIC = 6000, MAX_DYNAMIC = 2000;
+const MAX_STATIC = 6000, MAX_DYNAMIC = 2000, MAX_BEAMS = 400;
+
+/** the lights the game draws (one at a time: the city's) */
+let current: NightLights | null = null;
+/** the game's night lights, if it has any (vehicles add their lamps here) */
+export function nightLights(): NightLights | null { return current; }
 
 function glowMesh(geo: THREE.BufferGeometry, vs: string, fs: string, max: number, night: { value: number }, far: number, order: number, pull = 0.6): THREE.InstancedMesh {
   const mat = new THREE.ShaderMaterial({
@@ -98,11 +103,18 @@ export class NightLights {
   private halos: InstancedMesh;
   private pools: InstancedMesh;
   private flashes: InstancedMesh;
+  /** the frame's headlight beams: soft stretched pools on the road */
+  private beams: InstancedMesh;
+  private frameBeams = 0;
   private chunks = new Map<string, Glow[]>();
   private dirty = false;
   private frame: Glow[] = [];
   private _m = new THREE.Matrix4();
   private _c = new THREE.Color();
+  private _v = new THREE.Vector3();
+  private _q = new THREE.Quaternion();
+  private _s = new THREE.Vector3();
+  private _up = new THREE.Vector3(0, 1, 0);
 
   /** @param eye the camera's position (live: a one-way lamp glows toward it) */
   constructor(scene: THREE.Scene, private eye: THREE.Vector3) {
@@ -112,7 +124,38 @@ export class NightLights {
     this.pools = glowMesh(pool, POOL_VS, POOL_FS, MAX_STATIC, this.night, 200, 4);
     // (the frame's glows sit on small lenses: pulled only a little toward the eye)
     this.flashes = glowMesh(new THREE.PlaneGeometry(1, 1), HALO_VS, HALO_FS, MAX_DYNAMIC, this.night, 340, 6, 0.02);
-    scene.add(this.pools, this.halos, this.flashes);
+    this.beams = glowMesh(pool.clone(), POOL_VS, POOL_FS, MAX_BEAMS, this.night, 200, 4);
+    scene.add(this.pools, this.beams, this.halos, this.flashes);
+    current = this;
+  }
+
+  /** is it dark enough for lamps to show? */
+  get dark(): boolean { return this.night.value > 0.01; }
+
+  /** a headlight beam for this frame: a soft pool `len` long and `w` wide
+   * centred at (x, z), along heading h, at height y */
+  beam(x: number, y: number, z: number, h: number, w: number, len: number, color = 0xfff0d0, strength = 1): void {
+    if (this.frameBeams >= MAX_BEAMS) return;
+    this._m.compose(this._v.set(x, y, z), this._q.setFromAxisAngle(this._up, h), this._s.set(w / 2, 1, len / 2));
+    this.beams.setMatrixAt(this.frameBeams, this._m);
+    this.beams.setColorAt(this.frameBeams++, this._c.setHex(color).multiplyScalar(strength));
+  }
+
+  /** a road vehicle's lamps at (x, y, z) heading h (facing (sin h, cos h)):
+   * two headlamps and two tail lamps, each shining one way, and its beam
+   * on the road ahead */
+  carLamps(x: number, y: number, z: number, h: number, halfLen: number, halfW: number, lampY = 0.75, beam = true): void {
+    if (!this.dark) return;
+    const fx = Math.sin(h), fz = Math.cos(h), rx = fz, rz = -fx;
+    const front = { x: fx, z: fz }, back = { x: -fx, z: -fz };
+    const wx = Math.max(0.35, halfW - 0.3);
+    for (const side of [-1, 1]) {
+      this.flash({ x: x + fx * (halfLen - 0.1) + rx * side * wx, y: y + lampY, z: z + fz * (halfLen - 0.1) + rz * side * wx,
+        color: 0xfff4dc, size: 1.1, pool: 0, face: front });
+      this.flash({ x: x - fx * (halfLen - 0.1) + rx * side * wx, y: y + lampY, z: z - fz * (halfLen - 0.1) + rz * side * wx,
+        color: 0xff2a22, size: 0.75, pool: 0, face: back });
+    }
+    if (beam) this.beam(x + fx * (halfLen + 6), y + 0.3, z + fz * (halfLen + 6), h, halfW * 2 + 3, 14, 0xfff0d0, 0.9);
   }
 
   /** a chunk's baked lights join (world offset ox, oz) */
@@ -160,6 +203,13 @@ export class NightLights {
         m.instanceColor!.needsUpdate = true;
       }
     }
+    this.beams.visible = on;
+    this.beams.count = on ? this.frameBeams : 0;
+    if (on && this.frameBeams) {
+      this.beams.instanceMatrix.needsUpdate = true;
+      this.beams.instanceColor!.needsUpdate = true;
+    }
+    this.frameBeams = 0;
     const f = this.flashes;
     f.count = on ? this.frame.length : 0;
     if (on) {

@@ -6,6 +6,7 @@
 // They never hit the player either: a car brakes when the player is in the
 // lane ahead and eases toward the kerb when the player gets close.
 import * as THREE from 'three';
+import { nightLights } from '../nightLights.js';
 import { rng, chunkSeed, type Rng } from '../../../engine/rng.js';
 import { makeCar } from '../../../kit/index.js';
 import { spawnVehicle } from '../../../engine/assets.js';
@@ -42,6 +43,8 @@ export const TRAFFIC_MODELS: TrafficModel[] = [
   { url: `${K}garbage-truck.glb`, len: 6.5, w: 1 },
 ];
 const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
+/** cars nearer than this light their lamps at night (m) */
+const LAMP_R = 150;
 /** cars farther than this from the player aren't drawn (the fog is ~260 m) */
 const DRAW_R = 190;
 
@@ -538,6 +541,7 @@ export class IslandCars {
     if (!draw) return;
     // ---- draw: the cars near the player, packed into their model's mesh ----
     const used = this.meshes.map(() => 0);
+    const nl = nightLights(), lamps = nl?.dark && player ? nl : null;
     for (const c of this.cars) {
       if (player && (c.x - player.x) ** 2 + (c.z - player.z) ** 2 > DRAW_R * DRAW_R) continue;
       const im = this.meshes[c.model];
@@ -547,6 +551,10 @@ export class IslandCars {
       _p.set(c.x, dk && dk.kind === 'road' ? dk.y : 0, c.z);
       _q.setFromAxisAngle(_y, c.ry);
       im.setMatrixAt(used[c.model]++, _m.compose(_p, _q, _s));
+      // at night: its head and tail lamps, and the beam ahead (G10)
+      if (lamps && (c.x - player!.x) ** 2 + (c.z - player!.z) ** 2 < LAMP_R * LAMP_R) {
+        lamps.carLamps(c.x, _p.y, c.z, c.ry, c.len / 2, halfW(c), c.len > 5.2 ? 1.1 : 0.7);
+      }
     }
     this.meshes.forEach((im, mi) => {
       if (!im) return;

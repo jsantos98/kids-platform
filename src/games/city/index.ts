@@ -163,6 +163,45 @@ groundFollower.rotation.x = -Math.PI / 2;
 groundFollower.receiveShadow = true;
 scene.add(groundFollower);
 
+/** the kid's plane, helicopter or boat at night (G10): like the real
+ * thing, a red light on the left, green on the right, a blinking red
+ * beacon and double white strobes; the police helicopter flashes red and
+ * blue under its belly, the medical one lights the ground beneath it; a boat
+ * shows a white masthead light and its red / green sides */
+const _lamp = new THREE.Vector3();
+function flyingLamps(): void {
+  const at = (x: number, y: number, z: number): THREE.Vector3 => player.car.localToWorld(_lamp.set(x, y, z));
+  const lamp = (p: THREE.Vector3, color: number, size: number, strength = 1): void =>
+    nightLights.flash({ x: p.x, y: p.y, z: p.z, color, size, pool: 0, strength });
+  const t = elapsed;
+  // (facing +z, the left side is local +x)
+  if (V.kind === 'plane') {
+    lamp(at(3.8, 1.0, 0.7), 0xff2a22, 1.9);
+    lamp(at(-3.8, 1.0, 0.7), 0x33ff66, 1.9);
+    const strobe = (t % 1.2 < 0.06) || (t % 1.2 > 0.18 && t % 1.2 < 0.24);
+    if (strobe) { lamp(at(3.8, 1.05, 0.5), 0xffffff, 2.4); lamp(at(-3.8, 1.05, 0.5), 0xffffff, 2.4); }
+    lamp(at(0, 2.7, -3.2), 0xff2a22, 1.6, 0.4 + 0.6 * Math.max(0, Math.sin(t * 5)));
+  } else if (V.kind === 'heli') {
+    lamp(at(0.8, 1.3, 1.0), 0xff2a22, 1.3);
+    lamp(at(-0.8, 1.3, 1.0), 0x33ff66, 1.3);
+    if (t % 1.1 < 0.12) lamp(at(0, 3.1, -4.05), 0xff2a22, 1.4);
+    if (MODE.searchlight) {
+      // police: red and blue strobes, turn about
+      const blue = Math.floor(t * 6) % 2 === 0;
+      lamp(at(blue ? 0.5 : -0.5, 0.95, 0.4), blue ? 0x3a7bff : 0xff2a22, 1.6);
+    } else {
+      // medical: a soft landing light on the ground below
+      const g = at(0, 0, 0.8);
+      nightLights.beam(g.x, 0.3, g.z, player.state.heading, 9, 11, 0xfff4dc, 0.8);
+      lamp(at(0, 0.95, 1.2), 0xfff4dc, 1.2);
+    }
+  } else {
+    lamp(at(0, 2.6, -0.4), 0xfff4dc, 1.0);
+    lamp(at(0.9, 0.9, 0.8), 0xff2a22, 0.8);
+    lamp(at(-0.9, 0.9, 0.8), 0x33ff66, 0.8);
+  }
+}
+
 // ---- player vehicle ----
 // (the race: the car picked in the garage — ?car=, the F1 by default — on the
 // kart's physics; every car races the same, only the model differs)
@@ -902,6 +941,8 @@ const tick = (): void => {
     sirenBar.group.userData.placed = true;
   }
   searchlight?.update(st.x, st.alt + bob, st.z, st.heading);
+  searchlight?.setNight(day.night);
+  if (nightLights.dark && (V.kind === 'plane' || V.kind === 'heli' || V.kind === 'boat')) flyingLamps();
 
   // camera (flying vehicles keep the camera near their altitude)
   // (road vehicles and the train ride the causeway decks, so they follow st.alt too)
@@ -932,6 +973,8 @@ const tick = (): void => {
   stage.applyDay(day, st.x, st.z, elapsed, camera.position,
     { x: st.x + fwd.x * reach * (flying ? 0.5 : 0.25), z: st.z + fwd.z * reach * (flying ? 0.5 : 0.25), span: reach });
   groundFollower.position.set(st.x, -0.85, st.z);
+  // the kid's road vehicle lights its lamps and the road ahead at night (G10)
+  if (V.kind === 'ground') nightLights.carLamps(st.x, player.car.position.y, st.z, st.heading, V.glbLen / 2, V.halfW + 0.15, 0.85);
 
   // the archipelago is endless; stray into the sea and R brings you back
   // (one chunk a frame: a bake is 20-35 ms, and a new row of the view only

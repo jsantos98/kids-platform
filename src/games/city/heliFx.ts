@@ -22,6 +22,14 @@ export class Searchlight {
     scene.add(this.cone, this.spot);
   }
 
+  /** at night the beam turns bright white (0 day … 1 night, G10) */
+  setNight(n: number): void {
+    // (the cone passes near the camera: only a touch stronger, the spot much more)
+    (this.cone.material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.04 * n;
+    (this.spot.material as THREE.MeshBasicMaterial).opacity = 0.4 + 0.45 * n;
+    (this.spot.material as THREE.MeshBasicMaterial).color.setHex(n > 0.5 ? 0xffffff : 0xfff4c2);
+  }
+
   /** light the ground `ahead` metres in front of the helicopter */
   update(x: number, alt: number, z: number, heading: number, ahead = 7, radius = 8): void {
     const gx = x + Math.sin(heading) * ahead, gz = z + Math.cos(heading) * ahead;

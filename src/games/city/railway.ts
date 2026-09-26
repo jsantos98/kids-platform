@@ -18,6 +18,7 @@
 // kid's own train runs on its column's line, which is then kept free of
 // timetable trains; it yields at the diamond and can't stop on it.
 import * as THREE from 'three';
+import { nightLights } from './nightLights.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { railNetFor, RAIL_TOP, type RailRoute, type LineKind } from '../../worlds/railRoute.js';
@@ -617,6 +618,25 @@ export class Railway {
     });
     const h = this.pose(kind, bx, by, s);
     view.x = h.x; view.z = h.z;
+    // at night: two headlamps and a beam at the head, red tail lamps at the
+    // end (G10)
+    const nl = nightLights();
+    if (nl?.dark && view.objs[0]) {
+      // (each unit's centre sits at its arc point: the nose is half a unit on)
+      const u0 = spec.units[0], uN = spec.units[spec.units.length - 1];
+      const n = this.pose(kind, bx, by, s - u0.back + u0.len / 2 + 0.15);
+      const fx = Math.sin(n.h), fz = Math.cos(n.h), rx = fz, rz = -fx, y = RAIL_TOP + n.y;
+      for (const side of [-1, 1]) {
+        nl.flash({ x: n.x + rx * side * 0.75, y: y + 1.1, z: n.z + rz * side * 0.75, color: 0xfff4dc, size: 1.3, pool: 0, face: { x: fx, z: fz } });
+      }
+      nl.flash({ x: n.x, y: y + 3.1, z: n.z, color: 0xfff4dc, size: 1.0, pool: 0, face: { x: fx, z: fz } });
+      nl.beam(n.x + fx * 11, y + 0.3, n.z + fz * 11, n.h, 5, 22, 0xfff0d0, 1);
+      const t = this.pose(kind, bx, by, s - uN.back - uN.len / 2 - 0.15);
+      const bxv = -Math.sin(t.h), bzv = -Math.cos(t.h);
+      for (const side of [-1, 1]) {
+        nl.flash({ x: t.x + bzv * side * -0.75, y: RAIL_TOP + t.y + 1.0, z: t.z - bxv * side * -0.75, color: 0xff2a22, size: 0.9, pool: 0, face: { x: bxv, z: bzv } });
+      }
+    }
   }
 
   /** the kid's train this frame: gas / brake with a station-approach assist,

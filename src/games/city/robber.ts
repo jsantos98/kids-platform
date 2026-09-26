@@ -13,6 +13,7 @@
 // bump is part of the chase, not its end. The police helicopter's
 // searchlight startles it the same way once it has been lit SPOT_T s.
 import * as THREE from 'three';
+import { nightLights } from './nightLights.js';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { graphFor, type StreetGraph, type SEdge, type SNode } from '../../worlds/streetGraph.js';
@@ -181,6 +182,8 @@ export class Robber {
     while (dh < -Math.PI) dh += Math.PI * 2;
     this.group.rotation.y += dt > 0 ? dh * Math.min(1, dt * 8) : dh;
     this.marker.position.set(0, 3.9 + Math.sin(elapsed * 3) * 0.3, 0);
+    // at night: its lamps (G10)
+    if (this.group.visible) nightLights()?.carLamps(this.group.position.x, this.group.position.y, this.group.position.z, this.group.rotation.y, 2.2, 1.0);
   }
 
   /**

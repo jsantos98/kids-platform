@@ -15,7 +15,8 @@
 import * as THREE from 'three';
 import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
-import { graphFor, type StreetGraph, type SEdge } from '../../worlds/streetGraph.js';
+import { graphFor, type StreetGraph, type SEdge, type SNode } from '../../worlds/streetGraph.js';
+import { junctionPath, alongPath, ROUND_IN, TURN_IN, type JunctionPath } from './island/junctionPath.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { makeIconSprite, GOAL_ICON } from './guide3d.js';
 
@@ -37,6 +38,8 @@ export class Robber {
   readonly group = new THREE.Group();
   private graph: StreetGraph | null = null;
   private edge: SEdge | null = null;
+  /** taking a junction on its curve (and the street it leads onto) */
+  private curve: (JunctionPath & { s: number; next: SEdge; node: number }) | null = null;
   private dir: 1 | -1 = 1;
   private s = 0;
   private v = 0;
@@ -87,6 +90,7 @@ export class Robber {
     this.edge = pool[(this.r() * pool.length) | 0];
     this.dir = this.r() < 0.5 ? 1 : -1;
     this.s = this.edge.len / 2;
+    this.curve = null;
     this.v = V_CRUISE;
     this.caught = 0;
     this.dashT = 0;
@@ -112,22 +116,38 @@ export class Robber {
     const dash = this.dashT > 0 && !frozen;
     const target = frozen ? 0 : dash ? DASH_V : d < FLEE_R ? V_FLEE : V_CRUISE;
     this.v += Math.max(-6 * dt, Math.min((dash ? 9 : 3) * dt, target - this.v));
+    // along the street to the junction's curve, round it (junctionPath.ts —
+    // the curve the traffic takes), on along the next street
     let left = this.v * dt;
-    for (let guard = 0; guard < 4 && left > 0; guard++) {
-      const room = this.dir > 0 ? this.edge.len - this.s : this.s;
-      if (left < room) { this.s += left * this.dir; left = 0; break; }
-      left -= room;
-      this.s = this.dir > 0 ? this.edge.len : 0;
-      this.turn(px, pz, d < FLEE_R || dash);
+    const g = this.graph;
+    for (let guard = 0; guard < 6 && left > 0; guard++) {
+      const C = this.curve;
+      if (C) {
+        const L = C.cum[C.cum.length - 1];
+        if (C.s + left < L) { C.s += left; left = 0; break; }
+        left -= L - C.s;
+        this.edge = C.next;
+        this.dir = C.next.a === C.node ? 1 : -1;
+        this.s = this.dir > 0 ? C.out : C.next.len - C.out;
+        this.curve = null;
+        continue;
+      }
+      const e = this.edge!, node = g.nodes[this.dir > 0 ? e.b : e.a];
+      const IN = node.plaza ? ROUND_IN : TURN_IN;
+      const toCurve = (this.dir > 0 ? e.len - this.s : this.s) - IN;
+      if (left < toCurve) { this.s += left * this.dir; left = 0; break; }
+      left -= Math.max(0, toCurve);
+      this.s = this.dir > 0 ? e.len - IN : IN;
+      const next = this.nextStreet(node, px, pz, d < FLEE_R || dash);
+      this.curve = { ...junctionPath(g, e, this.dir, node, next), s: 0, next, node: node.id };
     }
     this.place(elapsed, dt);
   }
 
-  /** at the end of the edge: pick the next street */
-  private turn(px: number, pz: number, flee: boolean): void {
+  /** at a junction: the next street */
+  private nextStreet(node: SNode, px: number, pz: number, flee: boolean): SEdge {
     const g = this.graph!, e = this.edge!;
-    const at = this.dir > 0 ? e.b : e.a;
-    const node = g.nodes[at];
+    const at = node.id;
     let opts = node.edges.map(id => g.edges[id]).filter(o => o.id !== e.id && !g.nodes[o.a === at ? o.b : o.a].mouth);
     if (!opts.length) opts = [e]; // the street ends here: back the way it came
     let next: SEdge;
@@ -139,16 +159,20 @@ export class Robber {
         return Math.hypot(far.x + this.ox - px, far.z + this.oz - pz) > Math.hypot(b.x + this.ox - px, b.z + this.oz - pz) ? o : best;
       });
     } else next = opts[(this.r() * opts.length) | 0];
-    this.edge = next;
-    this.dir = next.a === at ? 1 : -1;
-    this.s = this.dir > 0 ? 0 : next.len;
+    return next;
   }
 
   private place(elapsed: number, dt: number): void {
     const g = this.graph!, e = this.edge!;
-    // the right-hand lane of its direction of travel
-    const p = g.sample(e, this.s, LANE * this.dir);
-    const h = this.dir > 0 ? e.heading : e.heading + Math.PI;
+    // the right-hand lane of its direction of travel, or its junction curve
+    let p: { x: number; z: number }, h: number;
+    if (this.curve) {
+      const a = alongPath(this.curve, this.curve.s);
+      p = a; h = a.h;
+    } else {
+      p = g.sample(e, this.s, LANE * this.dir);
+      h = this.dir > 0 ? e.heading : e.heading + Math.PI;
+    }
     const dk = deckAt(p.x + this.ox, p.z + this.oz);
     this.group.position.set(p.x + this.ox, dk && dk.kind === 'road' ? dk.y : 0, p.z + this.oz);
     // turn smoothly into the new street

@@ -16,6 +16,7 @@ import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../
 import { lightState, greenLeft, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST, CROSSING_BOOM } from '../transit.js';
 import type { Threat } from './walkers.js';
+import { junctionPath, lanePoint, LANE, ROUND_IN, TURN_IN } from './junctionPath.js';
 import { crosswalksFor } from '../../../worlds/crosswalks.js';
 import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
@@ -41,12 +42,6 @@ export const TRAFFIC_MODELS: TrafficModel[] = [
   { url: `${K}garbage-truck.glb`, len: 6.5, w: 1 },
 ];
 const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
-const LANE = 3.5;
-const ROUND_IN = 21;
-const RING_R = 9;
-/** an ordinary junction is taken on a curve from this far before the node
- * to this far after it (the 14 m junction pad) — never a jump between lanes */
-const TURN_IN = 7;
 /** cars farther than this from the player aren't drawn (the fog is ~260 m) */
 const DRAW_R = 190;
 
@@ -216,7 +211,7 @@ export class IslandCars {
   }
 
   private lanePoint(e: SEdge, dir: 1 | -1, s: number, extra = 0): { x: number; z: number } {
-    return this.graph.sample(e, dir > 0 ? s : e.len - s, (dir > 0 ? 1 : -1) * (LANE + extra));
+    return lanePoint(this.graph, e, dir, s, extra);
   }
 
   private place(c: Car): void {
@@ -244,58 +239,14 @@ export class IslandCars {
   }
 
   private roundPath(c: Car, node: SNode, next: SEdge): NonNullable<Car['round']> {
-    const e = this.graph.edges[c.edge];
-    const nextDir: 1 | -1 = next.a === node.id ? 1 : -1;
-    const E = this.lanePoint(e, c.dir, e.len - ROUND_IN);
-    const X = this.lanePoint(next, nextDir, ROUND_IN);
-    const hin = { x: e.ux * c.dir, z: e.uz * c.dir };
-    const hout = leaving(this.graph, next, node.id);
-    const rin = rightOf(hin.x, hin.z), rout = rightOf(hout.x, hout.z);
-    // counter-clockwise on screen (+z south): atan2(z, x) decreases
-    const aE = Math.atan2(-hin.z * RING_R + rin.z * LANE, -hin.x * RING_R + rin.x * LANE);
-    const aX = Math.atan2(hout.z * RING_R + rout.z * LANE, hout.x * RING_R + rout.x * LANE);
-    let sweep = aE - aX;
-    while (sweep <= 0.2) sweep += Math.PI * 2;
-    const pts: Array<{ x: number; z: number }> = [E];
-    const n = Math.max(4, Math.ceil((sweep * RING_R) / 2));
-    for (let q = 0; q <= n; q++) {
-      const a = aE - (sweep * q) / n;
-      pts.push({ x: node.x + Math.cos(a) * RING_R, z: node.z + Math.sin(a) * RING_R });
-    }
-    pts.push(X);
-    const cum = [0];
-    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z));
-    return { pts, cum, s: 0, next: next.id, node: node.id, out: ROUND_IN };
+    return this.turnPath(c, node, next);
   }
 
-  /** the curve through an ordinary junction: from the lane point TURN_IN
-   * before the node to the next street's lane point TURN_IN after it, bent
-   * through the corner where the two lanes meet (a quadratic Bezier — a
-   * straight run, a turn or a U-turn at a mouth all come out smooth) */
+  /** the curve through a junction (junctionPath.ts, shared with the getaway
+   * cars): a Bezier through an ordinary one, round the ring of a roundabout */
   private turnPath(c: Car, node: SNode, next: SEdge): NonNullable<Car['round']> {
-    const e = this.graph.edges[c.edge];
-    const nextDir: 1 | -1 = next.a === node.id ? 1 : -1;
-    const E = this.lanePoint(e, c.dir, e.len - TURN_IN);
-    const X = this.lanePoint(next, nextDir, TURN_IN);
-    const hin = { x: e.ux * c.dir, z: e.uz * c.dir };
-    const hout = leaving(this.graph, next, node.id);
-    const rin = rightOf(hin.x, hin.z), rout = rightOf(hout.x, hout.z);
-    const straight = hin.x * hout.x + hin.z * hout.z > 0.9;
-    const uturn = hin.x * hout.x + hin.z * hout.z < -0.9;
-    // control point: where the two lane lines cross (the lane corner); a
-    // straight run just uses the midpoint, a U-turn swings out past the node
-    const C = straight ? { x: (E.x + X.x) / 2, z: (E.z + X.z) / 2 }
-      : uturn ? { x: node.x + hin.x * TURN_IN, z: node.z + hin.z * TURN_IN }
-        : { x: node.x + (rin.x + rout.x) * LANE, z: node.z + (rin.z + rout.z) * LANE };
-    const pts: Array<{ x: number; z: number }> = [];
-    const n = 10;
-    for (let q = 0; q <= n; q++) {
-      const t = q / n, u = 1 - t;
-      pts.push({ x: u * u * E.x + 2 * u * t * C.x + t * t * X.x, z: u * u * E.z + 2 * u * t * C.z + t * t * X.z });
-    }
-    const cum = [0];
-    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k].x - pts[k - 1].x, pts[k].z - pts[k - 1].z));
-    return { pts, cum, s: 0, next: next.id, node: node.id, out: TURN_IN };
+    const jp = junctionPath(this.graph, this.graph.edges[c.edge], c.dir, node, next);
+    return { pts: jp.pts, cum: jp.cum, s: 0, next: next.id, node: node.id, out: jp.out };
   }
 
   /** the next edge at a node: straight on (usually), never a U-turn unless

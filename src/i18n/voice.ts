@@ -6,6 +6,7 @@
 // The texts come from the dictionaries: change one and re-run the script
 // (tools/check-i18n.ts fails on a clip recorded from an older text).
 import { t, getLang, speechVoice, type Key } from './index.js';
+import { EN } from './en.js';
 import { RACE_CARS } from '../games/raceCars.js';
 
 /** the garage's play modes (registry.ts), whose names it says */
@@ -27,8 +28,28 @@ export function voiceLines(): Record<string, string> {
     out[`car-${c.id}`] = title;
     out[`gocar-${c.id}`] = t('garage.letsGo', { title });
   }
+  // the narrator's lines in the game (say.start.truck -> say-start-truck)
+  for (const k of Object.keys(EN) as Key[]) {
+    if (k.startsWith('say.')) out[k.replace(/\./g, '-')] = t(k);
+  }
   return out;
 }
+
+/** the game's sound is off: say nothing (G11) */
+let muted = false;
+export function setVoiceMuted(m: boolean): void {
+  muted = m;
+  if (m) { try { playing?.stop(); } catch { /* over */ } try { window.speechSynthesis?.cancel(); } catch { /* none */ } }
+}
+
+/** can a line be heard yet? (a page may only start sound after a click or
+ * a key — until then the voice waits) */
+export function voiceReady(): boolean { return context()?.state === 'running'; }
+/** try to wake the voice now (allowed when the page came from a click) */
+export function wakeVoice(): void { void context()?.resume().catch(() => {}); }
+
+/** is a line being said right now? (the game ducks its sounds under it) */
+export function speaking(): boolean { return !!playing; }
 
 // (played through Web Audio: every clip is fetched and decoded ahead, so a
 // line starts the moment it's asked for — an <audio> element loads lazily,
@@ -69,8 +90,8 @@ function clip(id: string, root: string): Promise<AudioBuffer | null> {
 }
 
 /** load the current language's clips ahead, so the first one plays at once */
-export function preloadVoice(root = ''): void {
-  for (const id of Object.keys(voiceLines())) void clip(id, root);
+export function preloadVoice(root = '', prefix = ''): void {
+  for (const id of Object.keys(voiceLines())) if (id.startsWith(prefix)) void clip(id, root);
 }
 
 /** say a line: its recorded clip, else the system voice; settles when it
@@ -78,6 +99,7 @@ export function preloadVoice(root = ''): void {
 export function speak(id: string, root = ''): Promise<void> {
   const text = voiceLines()[id] ?? id;
   const turn = ++said;
+  if (muted) return Promise.resolve();
   return new Promise<void>(done => {
     const fallback = (): void => {
       if (turn !== said) { done(); return; }
@@ -107,7 +129,7 @@ export function speak(id: string, root = ''): Promise<void> {
       const node = c.createBufferSource();
       node.buffer = buf;
       node.connect(c.destination);
-      node.onended = () => done();
+      node.onended = () => { if (playing === node) playing = null; done(); };
       node.start();
       playing = node;
     });

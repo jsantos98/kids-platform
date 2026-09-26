@@ -8,6 +8,8 @@ import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio, type EngineKind, type SirenStyle } from '../../engine/audio.js';
 import { Soundscape } from './soundscape.js';
+import { Narrator } from './narrator.js';
+import { preloadVoice, setVoiceMuted, wakeVoice, voiceReady } from '../../i18n/voice.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
 import { createPlayer, physicsStep, startCrash, heliSirenLamps, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
@@ -294,11 +296,17 @@ camera.lookAt(spawn.x, 1.4, spawn.z);
 
 const audio = new GameAudio();
 const sound = new Soundscape(audio);
+// the narrator's voice (its clips are loaded ahead; muted with the sound)
+const narrator = new Narrator('../');
+preloadVoice('../', 'say-');
+setVoiceMuted(audio.isMuted);
+wakeVoice();
+let saidStart = false, wasNight = false, wasTalking = false;
 // sound on / off (remembered), beside the home button (G11)
 const muteBtn = document.getElementById('muteBtn')!;
 const showMute = (): void => { muteBtn.textContent = audio.isMuted ? '🔇' : '🔊'; };
 showMute();
-muteBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMuted(!audio.isMuted); showMute(); });
+muteBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMuted(!audio.isMuted); setVoiceMuted(audio.isMuted); showMute(); });
 /** the kid's engine sound, by vehicle */
 const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
   : V.kind === 'rail' ? 'train' : MODE.id === 'truck' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
@@ -472,6 +480,7 @@ if (q.get('debugsea') === '1') {
     causeways,
     get audio() { return audio; },
     get sound() { return sound; },
+    get narrator() { return narrator; },
     stage,
     /** jump the day clock to a time of day (0 = dawn … 1) */
     setPhase: (p: number) => {
@@ -699,6 +708,7 @@ function sceneFor(o: Objective): Activity {
 
 /** fade into a call's scene; when it's done the call is answered */
 function openCall(o: Objective): void {
+  narrator.say('arrive');
   activeCall = o;
   mode = 'activity';
   director.start(() => sceneFor(o), () => {
@@ -717,6 +727,7 @@ function openCall(o: Objective): void {
     updateMissionPanel();
     particles.burstConfetti(player.car.position);
     sound.event('missionDone');
+    narrator.say('praise');
     missions.cooldown = 3;
     activeCall = null;
     mode = 'drive';
@@ -880,13 +891,13 @@ const tick = (): void => {
     // and carry on from a crumb clear of the track (G1)
     if (!wasCrashing && trainBoxes.some(b => inBox(b, st.x, st.z, V.radius))) {
       startCrash(player);
-      sound.event('crash');
+      sound.event('crash'); narrator.say('oops');
       Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
     }
     const ring = course?.aim(st.x, st.z, st.heading);
     const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
-      sound.event('crash');
+      sound.event('crash'); narrator.say('oops');
       toast = '';
       // (road vehicles resume on a breadcrumb; the helicopter picked its
       // spot itself, just back along its path)
@@ -900,7 +911,7 @@ const tick = (): void => {
       if (stuck.t >= 3) {
         if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
           startCrash(player);
-          sound.event('crash');
+          sound.event('crash'); narrator.say('oops');
           Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
         }
         Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
@@ -923,11 +934,12 @@ const tick = (): void => {
     const ev = race.update(dt, st.x, st.z);
     const at = new THREE.Vector3(st.x, 2, st.z);
     if (ev.go) { raceMsg = tr('race.go'); raceMsgT = 1.5; particles.burstConfetti(at); sound.event('go'); }
-    if (ev.lap) { raceMsg = ev.lap === LAPS ? tr('race.lastLap') : tr('race.lapN', { n: ev.lap }); raceMsgT = 2; sound.event('lap'); }
+    if (ev.lap) { raceMsg = ev.lap === LAPS ? tr('race.lastLap') : tr('race.lapN', { n: ev.lap }); raceMsgT = 2; sound.event('lap'); if (ev.lap === LAPS) narrator.say('lastLap'); }
     raceMsgT -= dt;
     if (ev.finished) {
       const place = ev.finished;
       sound.event('finish');
+      narrator.say('place', place);
       earnStar(place === 1 ? tr('race.wonRace') : tr('race.placeRace', { place: ordinal(place) }), at);
       raceCheer = 0;
     }
@@ -965,6 +977,7 @@ const tick = (): void => {
         const seed = robberCount + k;
         director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
           earnStar(tr('chase.caught'), player.car.position.clone());
+          narrator.say('caught');
           mode = 'drive';
           robberWait[k] = 3;
         });
@@ -1132,6 +1145,8 @@ const tick = (): void => {
   while (missions.objectives.length < MAX_ACTIVE && missions.cooldown <= 0) {
     missions.spawn(player.state, (x, z) => chunks.forceChunkAt(x, z));
     missions.cooldown = 0.5;
+    const fresh = missions.objectives[missions.objectives.length - 1];
+    if (fresh) narrator.say('call', fresh.type);
   }
   const { o: near, d: nd } = missions.nearest(st.x, st.z);
   // the medical helicopter's winch reels in unless it's lifting someone
@@ -1223,7 +1238,10 @@ const tick = (): void => {
     // (the lap and place are on the guide badge: the prompt only speaks
     // for the countdown, the cheers and the finish)
     // (a beep for each number of the countdown; GO beeps higher, on ev.go)
-    if (rv.phase === 'countdown' && rv.count > 0 && rv.count !== lastCount) sound.event('countdown');
+    if (rv.phase === 'countdown' && rv.count > 0 && rv.count !== lastCount) {
+      sound.event('countdown');
+      if (lastCount < 0) narrator.say('raceCount');
+    }
     lastCount = rv.phase === 'countdown' ? rv.count : -1;
     const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : tr('race.go'))
       : rv.phase === 'finished' ? (rv.finalPlace === 1 ? tr('race.won') : tr('race.place', { place: ordinal(rv.finalPlace) }))
@@ -1239,8 +1257,9 @@ const tick = (): void => {
       : course.kind === 'rings' ? 'course.rings' : 'course.buoys');
     promptFill.style.width = `${(100 * course.passedCount) / course.gates.length}%`;
     const res = course.update(elapsed, st.x, st.alt + 2, st.z);
-    if (res === 'passed') { particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z)); sound.event('gate'); }
+    if (res === 'passed') { particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z)); sound.event('gate'); narrator.say('gate'); }
     if (res === 'finished') {
+      narrator.say('courseDone');
       earnStar(tr(course.kind === 'gates' ? 'course.gatesDone' : course.kind === 'rings' ? 'course.ringsDone' : 'course.buoysDone'),
         new THREE.Vector3(st.x, st.alt + 2, st.z));
       courseWait = 2.5;
@@ -1255,6 +1274,7 @@ const tick = (): void => {
       : gap < 70 ? tr('train.slow') : tr('train.station');
     if (gap < 12 && pose.v < 0.5) {
       sound.event('station');
+      narrator.say('station');
       earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
       stationDone = { x: station.x, z: station.z };
     }
@@ -1282,6 +1302,20 @@ const tick = (): void => {
     updateMissionPanel();
   }
 
+  // the narrator: the mode's briefing once the voice can be heard (not in
+  // the race: its countdown speaks), night falling and the morning, and
+  // the sound ducks under whatever it says (G9, G11)
+  narrator.tick(dt);
+  if (!saidStart && elapsed > 1 && voiceReady()) {
+    saidStart = true;
+    if (MODE.id !== 'race') narrator.say('start', MODE.id);
+    wasNight = day.night > 0.5;
+  }
+  if (saidStart && (day.night > 0.5) !== wasNight) {
+    wasNight = day.night > 0.5;
+    narrator.say(wasNight ? 'night' : 'morning');
+  }
+  if (narrator.talking !== wasTalking) { wasTalking = narrator.talking; audio.duck(wasTalking); }
   // the frame's sound (G11): engine, siren, pump, crossing bells, horns, ambience
   seaCheck -= dt;
   if (seaCheck <= 0) {

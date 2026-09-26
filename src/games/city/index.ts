@@ -1037,7 +1037,7 @@ const tick = (): void => {
   {
     const top = V.kind === 'rail' ? 4.6 : vehicleTop();
     const size = Math.max(0.7, Math.min(3.2, camera.position.distanceTo(player.car.position) / 14));
-    guideArrow3d.update(dt, elapsed, player.car.position, top + 0.9 * size, bearing, size, camera.position);
+    guideArrow3d.update(dt, elapsed, player.car.position, top + 1.6 * size, bearing, size, camera.position);
   }
   camera.getWorldDirection(camDir);
   const camYaw = Math.atan2(camDir.x, camDir.z);

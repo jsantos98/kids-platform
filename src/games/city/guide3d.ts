@@ -20,7 +20,7 @@ import * as THREE from 'three';
 const TAIL = new THREE.Color(0xf2410f);
 const NOSE = new THREE.Color(0xffb400);
 /** the arrow's size (its shape is ~2.7 m nose to tail at 1) */
-const ARROW_SCALE = 0.55;
+const ARROW_SCALE = 0.42;
 /** the arrow's plane always meets the line of sight at this angle or more */
 const MIN_VIEW = (50 * Math.PI) / 180;
 /** the shape's extent along its length (tail … nose, shape units) */

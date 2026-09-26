@@ -43,9 +43,21 @@ VOICES = {
     'pt': {'engine': 'microsoft', 'name': 'pt-PT-RaquelNeural', 'lang': 'pt-PT'},
     'en': {'engine': 'piper', 'name': 'en_GB-cori-medium', 'folder': 'en/en_GB/cori/medium'},
 }
-# a touch slower than the voices' own pace: the listeners are four
-PIPER_LENGTH_SCALE = 1.12
-MS_RATE = '-10%'
+# how each mood is said (src/i18n/voice.ts voiceMood): neither voice can act
+# an emotion on request (Raquel has no speaking styles, and edge-tts takes no
+# custom SSML), so it's in the delivery — a win comes quicker, higher and
+# louder, a bump softer and slower — and in the texts' own exclamations.
+# The base pace is a touch slower than the voices' own: the listeners are four.
+MOODS = {
+    'lively':  {'ms': {'rate': '-6%', 'pitch': '+8Hz', 'volume': '+0%'},
+                'piper': {'length_scale': 1.08, 'noise_scale': 0.72, 'noise_w_scale': 0.9}},
+    'cheer':   {'ms': {'rate': '+0%', 'pitch': '+18Hz', 'volume': '+6%'},
+                'piper': {'length_scale': 1.0, 'noise_scale': 0.78, 'noise_w_scale': 1.0}},
+    'excited': {'ms': {'rate': '+6%', 'pitch': '+30Hz', 'volume': '+12%'},
+                'piper': {'length_scale': 0.94, 'noise_scale': 0.85, 'noise_w_scale': 1.1}},
+    'warm':    {'ms': {'rate': '-12%', 'pitch': '+2Hz', 'volume': '-4%'},
+                'piper': {'length_scale': 1.16, 'noise_scale': 0.6, 'noise_w_scale': 0.8}},
+}
 
 
 # ---- Microsoft (Azure, or edge-tts) ----
@@ -53,11 +65,12 @@ def microsoft_route() -> str:
     return 'azure' if os.environ.get('AZURE_SPEECH_KEY') else 'edge-tts'
 
 
-def microsoft(text: str, v: dict, out: Path) -> None:
+def microsoft(text: str, v: dict, out: Path, mood: str) -> None:
+    m = MOODS[mood]['ms']
     if microsoft_route() == 'azure':
         region = os.environ.get('AZURE_SPEECH_REGION', 'westeurope')
         ssml = (f"<speak version='1.0' xml:lang='{v['lang']}'><voice name='{v['name']}'>"
-                f"<prosody rate='{MS_RATE}'>{escape(text)}</prosody></voice></speak>")
+                f"<prosody rate='{m['rate']}' pitch='{m['pitch']}' volume='{m['volume']}'>{escape(text)}</prosody></voice></speak>")
         req = urllib.request.Request(
             f'https://{region}.tts.speech.microsoft.com/cognitiveservices/v1',
             data=ssml.encode('utf-8'), method='POST',
@@ -69,14 +82,14 @@ def microsoft(text: str, v: dict, out: Path) -> None:
             out.write_bytes(res.read())
     else:
         import edge_tts
-        asyncio.run(edge_tts.Communicate(text, v['name'], rate=MS_RATE).save(str(out)))
+        asyncio.run(edge_tts.Communicate(text, v['name'], rate=m['rate'], pitch=m['pitch'], volume=m['volume']).save(str(out)))
 
 
 # ---- Piper (offline) ----
 _piper = {}
 
 
-def piper(text: str, v: dict, out: Path) -> None:
+def piper(text: str, v: dict, out: Path, mood: str) -> None:
     from piper import PiperVoice, SynthesisConfig
     if v['name'] not in _piper:
         CACHE.mkdir(exist_ok=True)
@@ -88,7 +101,7 @@ def piper(text: str, v: dict, out: Path) -> None:
                 urllib.request.urlretrieve(url, dst)
         _piper[v['name']] = PiperVoice.load(CACHE / f"{v['name']}.onnx")
     voice = _piper[v['name']]
-    cfg = SynthesisConfig(length_scale=PIPER_LENGTH_SCALE)
+    cfg = SynthesisConfig(**MOODS[mood]['piper'])
     # Piper now and then babbles on past the end of a line (a three-word line
     # came out 4 s long): a take much longer than the text needs is recorded
     # again (it varies a little take to take), keeping the shortest
@@ -109,10 +122,10 @@ def piper(text: str, v: dict, out: Path) -> None:
     best[1].replace(out)
 
 
-def record(text: str, v: dict, mp3: Path) -> None:
+def record(text: str, v: dict, mp3: Path, mood: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         raw = Path(tmp) / ('raw.wav' if v['engine'] == 'piper' else 'raw.mp3')
-        (piper if v['engine'] == 'piper' else microsoft)(text, v, raw)
+        (piper if v['engine'] == 'piper' else microsoft)(text, v, raw, mood)
         # silence off both ends (the Microsoft voices trail ~1 s of it), then
         # a mono MP3, loudness-matched so every line plays as loud
         trim = ('silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.08,areverse,'
@@ -136,8 +149,10 @@ def main() -> None:
     redo = '--all' in sys.argv
     manifest_path = OUT / 'manifest.json'
     old = json.loads(manifest_path.read_text('utf-8')) if manifest_path.exists() else {}
-    want = lines()
-    manifest = {'voices': {l: voice_label(VOICES[l]) for l in VOICES}}
+    got = lines()
+    want, moods = got['lines'], got['moods']
+    old_moods = old.get('moods', {})
+    manifest = {'voices': {l: voice_label(VOICES[l]) for l in VOICES}, 'moods': moods}
     for lang, entries in want.items():
         v = VOICES[lang]
         (OUT / lang).mkdir(parents=True, exist_ok=True)
@@ -148,10 +163,12 @@ def main() -> None:
         for cid, text in entries.items():
             mp3 = OUT / lang / f'{cid}.mp3'
             manifest[lang][cid] = text
-            if not redo and done.get(cid) == text and mp3.exists():
+            mood = moods.get(cid, 'lively')
+            # (a line whose text or mood changed is recorded again)
+            if not redo and done.get(cid) == text and old_moods.get(cid, 'lively') == mood and mp3.exists():
                 continue
-            record(text, v, mp3)
-            print(f'{lang}/{cid}.mp3  "{text}"')
+            record(text, v, mp3, mood)
+            print(f'{lang}/{cid}.mp3  [{mood}] "{text}"')
         # clips of lines that are gone
         for f in (OUT / lang).glob('*.mp3'):
             if f.stem not in entries:

@@ -35,6 +35,18 @@ export function voiceLines(): Record<string, string> {
   return out;
 }
 
+/** how a line is said (make-voice.py tunes the voice's pace, pitch and
+ * volume to it): a win or a finished mission `excited`, a gate `cheer`, a
+ * bump `warm` and gentle, everything else `lively` */
+export type Mood = 'excited' | 'cheer' | 'lively' | 'warm';
+const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station)/;
+export function voiceMood(id: string): Mood {
+  if (EXCITED.test(id)) return 'excited';
+  if (/^say-(gate|race-count|race-place4|race-lastLap)/.test(id)) return 'cheer';
+  if (/^say-oops/.test(id)) return 'warm';
+  return 'lively';
+}
+
 /** the game's sound is off: say nothing (G11) */
 let muted = false;
 export function setVoiceMuted(m: boolean): void {

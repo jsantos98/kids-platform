@@ -1,13 +1,16 @@
-// Prints every spoken line in both languages as JSON — {"pt": {id: text},
-// "en": {...}} — for tools/make-voice.py, which records them. The texts come
-// from src/i18n, so the clips always say what the dictionaries say.
+// Prints every spoken line in both languages as JSON — {"lines": {"pt":
+// {id: text}, "en": {...}}, "moods": {id: mood}} — for tools/make-voice.py,
+// which records them, each in its mood. The texts come from src/i18n, so
+// the clips always say what the dictionaries say.
 // Run: npx tsx tools/voice-lines.ts
 import { setLang, LANGS } from '../src/i18n/index.js';
-import { voiceLines } from '../src/i18n/voice.js';
+import { voiceLines, voiceMood } from '../src/i18n/voice.js';
 
-const out: Record<string, Record<string, string>> = {};
+const lines: Record<string, Record<string, string>> = {};
 for (const l of LANGS) {
   setLang(l.id);
-  out[l.id] = voiceLines();
+  lines[l.id] = voiceLines();
 }
-process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+const moods: Record<string, string> = {};
+for (const id of Object.keys(lines[LANGS[0].id])) moods[id] = voiceMood(id);
+process.stdout.write(JSON.stringify({ lines, moods }, null, 2) + '\n');

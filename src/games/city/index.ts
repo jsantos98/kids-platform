@@ -15,6 +15,7 @@ import { Course } from './course.js';
 import { Searchlight, Winch, SPOT_AHEAD, SPOT_R, SPOT_GRACE } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
 import { NightLights } from './nightLights.js';
+import { Causeways } from './causeways.js';
 import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { createSea, boatLoop, waveAt } from './sea.js';
@@ -391,6 +392,8 @@ if (q.get('buildall') === '1') {
 // per-city scenery: foam ring, pier, dinghies, buoys, the picnic causeway) ----
 const sea = await createSea(scene);
 const scenery = new CityScenery(scene);
+// the causeway decks between the islands, streamed on their own (R29)
+const causeways = new Causeways(scene);
 scenery.night = nightLights;
 
 // ---- mission scenes: arriving at a call fades into its own little scene ----
@@ -453,6 +456,7 @@ if (q.get('debugsea') === '1') {
   (window as unknown as { __dbg: unknown }).__dbg = {
     /** the time of day now (G10) */
     day: () => day,
+    causeways,
     stage,
     /** jump the day clock to a time of day (0 = dawn … 1) */
     setPhase: (p: number) => {
@@ -1007,6 +1011,7 @@ const tick = (): void => {
   // (one chunk a frame: a bake is 20-35 ms, and a new row of the view only
   // needs a handful every few seconds)
   chunks.ensure(1, st.x, st.z);
+  causeways.update(st.x, st.z);
 
   // ambient life: the trains, the sea with its boats and the patrol
   // helicopter; the river is a shallow ford — splash through it slowly

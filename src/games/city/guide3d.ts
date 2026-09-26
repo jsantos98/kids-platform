@@ -4,8 +4,7 @@
 // it can be spotted over the rooftops from anywhere on the island.
 //
 // The arrow is a chunky, rounded, glossy 3D piece: bevelled edges, a warm
-// gradient from an orange tail to a golden nose, a white outline on a soft
-// dark edge, a shine
+// gradient from an orange tail to a golden nose, a shine
 // that sweeps from tail to nose and a gentle breathing pulse. It lives in
 // its own little scene with its own lights, drawn after the world over a
 // cleared depth buffer (`drawOver`), so it is properly shaded yet never
@@ -17,12 +16,9 @@
 // kid, and it is never seen edge-on (G2).
 import * as THREE from 'three';
 
-/** the gradient: the tail's colour, the nose's; the outline */
+/** the gradient: the tail's colour, the nose's */
 const TAIL = new THREE.Color(0xf2410f);
 const NOSE = new THREE.Color(0xffb400);
-const OUTLINE = 0xfffdf6;
-/** the soft dark edge round the outline (reads on pale walls and sky) */
-const EDGE = 0x3b1a0c;
 /** the arrow's size (its shape is ~2.7 m nose to tail at 1) */
 const ARROW_SCALE = 0.55;
 /** the arrow's plane always meets the line of sight at this angle or more */
@@ -36,7 +32,7 @@ function norm(x: number, y: number): { x: number; y: number } {
 }
 
 /** the arrow's outline (pointing +y), every corner rounded; `grow` pushes
- * it outward (the white rim) */
+ * it outward */
 function arrowShape(grow = 0): THREE.Shape {
   // [x, y, corner radius]: a swept-back chevron head on a short fat shaft
   const pts: Array<[number, number, number]> = [
@@ -119,17 +115,9 @@ export class GuideArrow {
         ].join('\n'));
     };
     const body = new THREE.Mesh(arrowSlab(0, 0.3, 0.14, f => TAIL.clone().lerp(NOSE, f)), mat);
-    // the outline: a thinner white slab a little larger, just beneath
-    const rim = new THREE.Mesh(arrowSlab(0.16, 0.12, 0.08, () => new THREE.Color(OUTLINE)),
-      new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x9a948a, fog: false }));
-    rim.position.y = -0.07;
-    // and under it a soft dark edge, a little larger again
-    const edge = new THREE.Mesh(arrowSlab(0.27, 0.06, 0.05, () => new THREE.Color(EDGE)),
-      new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthWrite: false, fog: false }));
-    edge.position.y = -0.16;
     // (lay it flat: rotating +90 deg about x maps shape +y onto +z, the
     // heading-0 direction, and the shape's face onto +y)
-    for (const m of [edge, rim, body]) {
+    for (const m of [body]) {
       m.rotation.x = Math.PI / 2;
       m.frustumCulled = false;
       this.spin.add(m);

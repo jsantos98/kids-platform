@@ -2,10 +2,10 @@
 // several days (and from every named start) and fails if nights run longer
 // than a quarter of the day, any output jumps between neighbouring samples,
 // midnight falls under the brightness floor ("darker, not dark"), the sun is
-// down outside the night (or up in it), the shadow light dips under 14°, or
+// down outside the night (or up in it), the shadow light dips under LIGHT_MIN_ELEV, or
 // the moon skips any of its eight phases.
 //   npx tsx tools/check-daylight.ts
-import { dayState, startPhase, DAY_LEN, MOON_PHASES, type DayState } from '../src/engine/daylight.js';
+import { dayState, startPhase, DAY_LEN, MOON_PHASES, LIGHT_MIN_ELEV, type DayState } from '../src/engine/daylight.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; if (fails < 30) console.log('  FAIL ' + m); };
@@ -58,7 +58,7 @@ for (const d of samples) {
   if (d.night < 0.05 && d.sunDir[1] < 0) fail(`the sun is below the horizon by day (phase ${d.phase.toFixed(3)})`);
   if (d.night > 0.95 && d.sunDir[1] > 0) fail(`the sun is up at night (phase ${d.phase.toFixed(3)})`);
   if (d.night > 0.95 && d.moonDir[1] < 0) fail(`the moon is down mid-night (phase ${d.phase.toFixed(3)})`);
-  if (d.lightDir[1] < Math.sin((14 * Math.PI) / 180) - 1e-6) fail(`the shadow light lies at ${(Math.asin(d.lightDir[1]) * 180 / Math.PI).toFixed(1)}°`);
+  if (d.lightDir[1] < Math.sin(LIGHT_MIN_ELEV) - 1e-6) fail(`the shadow light lies at ${(Math.asin(d.lightDir[1]) * 180 / Math.PI).toFixed(1)}°`);
 }
 
 // 5. the moon walks through every phase, one step a night

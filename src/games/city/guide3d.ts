@@ -1,45 +1,64 @@
 // In-world guidance, Crazy-Taxi style: a small arrow floating just above the
-// vehicle (kept small and flat so it never covers the road ahead — the HUD
-// badge points the way too) that swings to point the way (along the streets for road vehicles), and a
-// tall glowing beacon pillar standing on every mission so it can be spotted
-// over the rooftops from anywhere on the island.
+// vehicle that swings to point the way (along the streets for road
+// vehicles), and a tall glowing beacon pillar standing on every mission so
+// it can be spotted over the rooftops from anywhere on the island.
+//
+// The arrow lies on a plane over the vehicle that is tipped toward the
+// camera just enough to be seen at a good angle (at least MIN_VIEW): from a
+// high chase camera it lies flat over the street, from the plane's low one
+// it stands up — so "ahead" reads as up the screen, "behind" as down toward
+// the kid, "left" / "right" as left / right, and it is never seen edge-on
+// (laid flat, an arrow pointing back at the plane's camera vanished). It is
+// drawn over everything, flat-coloured with a white rim and a soft shadow,
+// so no vehicle, rotor or roof hides it, by day or night (G2).
 import * as THREE from 'three';
 
 const ARROW_RED = 0xe25c5c;
 const ARROW_RIM = 0xfffdf8;
+const ARROW_SHADOW = 0x3a1d1d;
 /** the arrow's size (its shape is ~2.8 m nose to tail at 1) */
 const ARROW_SCALE = 0.55;
+/** the arrow's plane always meets the line of sight at this angle or more */
+const MIN_VIEW = (50 * Math.PI) / 180;
 
-function arrowGeometry(scale: number, depth: number): THREE.ExtrudeGeometry {
+function arrowGeometry(scale: number): THREE.ShapeGeometry {
   // chevron-headed arrow pointing along +y in shape space (+z after laying flat)
   const s = new THREE.Shape();
-  const pts: Array<[number, number]> = [[0, 1.6], [1.25, 0.2], [0.5, 0.2], [0.5, -1.2], [-0.5, -1.2], [-0.5, 0.2], [-1.25, 0.2]];
+  const pts: Array<[number, number]> = [[0, 1.6], [1.4, 0.1], [0.55, 0.1], [0.55, -1.2], [-0.55, -1.2], [-0.55, 0.1], [-1.4, 0.1]];
   pts.forEach(([x, y], k) => (k === 0 ? s.moveTo(x * scale, y * scale) : s.lineTo(x * scale, y * scale)));
   s.closePath();
-  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false });
-  g.translate(0, 0, -depth / 2);
-  return g;
+  return new THREE.ShapeGeometry(s);
 }
 
 export class GuideArrow {
   readonly group = new THREE.Group();
+  /** tips the arrow's plane toward the camera (about the camera's right) */
   private tilt = new THREE.Group();
+  /** turns the arrow in its plane */
+  private spin = new THREE.Group();
   private yaw = 0;
 
   constructor(scene: THREE.Scene) {
-    const body = new THREE.Mesh(arrowGeometry(ARROW_SCALE, 0.22), new THREE.MeshLambertMaterial({ color: ARROW_RED }));
-    const rim = new THREE.Mesh(arrowGeometry(ARROW_SCALE * 1.18, 0.12), new THREE.MeshBasicMaterial({ color: ARROW_RIM }));
-    rim.position.y = -0.07;
-    // lay the arrow flat (rotating +90 deg about x maps shape +y onto world
-    // +z, the heading-0 direction), then lift its nose so its face turns
-    // toward the chase camera behind and above the vehicle
-    for (const m of [rim, body]) {
+    const layer = (geo: THREE.BufferGeometry, color: number, order: number, y: number, opacity = 1): THREE.Mesh => {
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color, depthTest: false, depthWrite: false, fog: false, side: THREE.DoubleSide,
+        transparent: opacity < 1, opacity, toneMapped: false,
+      }));
+      // lay it flat: rotating +90 deg about x maps shape +y onto +z, the
+      // heading-0 direction (and the shape's face onto +y)
       m.rotation.x = Math.PI / 2;
-      m.castShadow = false;
-      this.tilt.add(m);
-    }
-    // (only a little: tilted further it stands up across the view)
-    this.tilt.rotation.x = -0.25;
+      m.position.y = y;
+      m.renderOrder = 1000 + order;
+      m.frustumCulled = false;
+      this.spin.add(m);
+      return m;
+    };
+    // (a soft shadow a little below and behind, the white rim, the body)
+    const shadow = layer(arrowGeometry(ARROW_SCALE * 1.18), ARROW_SHADOW, 0, -0.06, 0.35);
+    shadow.position.z = -0.12;
+    layer(arrowGeometry(ARROW_SCALE * 1.18), ARROW_RIM, 1, 0);
+    layer(arrowGeometry(ARROW_SCALE), ARROW_RED, 2, 0.01);
+    this.tilt.add(this.spin);
     this.group.add(this.tilt);
     this.group.visible = false;
     scene.add(this.group);
@@ -51,8 +70,9 @@ export class GuideArrow {
    * @param bearing world heading to point along (atan2(dx, dz)), or null to hide
    * @param size   scale (the game keeps it the same size on screen whatever
    *               the camera's distance)
+   * @param cam    the camera's position (the arrow tips toward it)
    */
-  update(dt: number, elapsed: number, at: THREE.Vector3, lift: number, bearing: number | null, size = 1): void {
+  update(dt: number, elapsed: number, at: THREE.Vector3, lift: number, bearing: number | null, size: number, cam: THREE.Vector3): void {
     this.group.visible = bearing !== null;
     if (bearing === null) return;
     // ease the swing so the arrow never snaps
@@ -60,8 +80,20 @@ export class GuideArrow {
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
     this.yaw += d * Math.min(1, dt * 6);
-    this.group.position.set(at.x, at.y + lift + Math.sin(elapsed * 3) * 0.12 * size, at.z);
-    this.group.rotation.y = this.yaw;
+    // the camera's view of the arrow: which way it looks (yaw) and how far
+    // down (pitch); tip the plane by what the pitch lacks of MIN_VIEW
+    const y = at.y + lift + Math.sin(elapsed * 3) * 0.12 * size;
+    const dx = at.x - cam.x, dz = at.z - cam.z;
+    const camYaw = Math.atan2(dx, dz);
+    const pitch = Math.atan2(cam.y - y, Math.hypot(dx, dz));
+    const tip = Math.min(MIN_VIEW, Math.max(0, MIN_VIEW - pitch));
+    const rel = this.yaw - camYaw;
+    // (pointing back, the tipped arrow's nose dips toward the vehicle: lift it clear)
+    const dip = Math.max(0, -Math.cos(rel)) * Math.sin(tip) * 1.6 * ARROW_SCALE * size;
+    this.group.position.set(at.x, y + dip, at.z);
+    this.group.rotation.set(0, camYaw, 0);
+    this.tilt.rotation.x = -tip;
+    this.spin.rotation.y = rel;
     this.group.scale.setScalar(size);
   }
 }

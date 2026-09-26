@@ -15,6 +15,8 @@ export const DAWN = 30 / DAY_LEN, DAYTIME = 420 / DAY_LEN, DUSK = 30 / DAY_LEN;
 export const SUNSET = DAWN + DAYTIME + DUSK;
 /** the sun clears the horizon mid-dawn and meets it again mid-dusk */
 export const SUN_RISE = DAWN * 0.5, SUN_SET = DAWN + DAYTIME + DUSK * 0.5;
+/** the shadow light never lies lower than this (rad), however low the sun */
+export const LIGHT_MIN_ELEV = (42 * Math.PI) / 180;
 /** the moon's phases: new, crescent, quarter, gibbous, full, and back */
 export const MOON_PHASES = 8;
 
@@ -145,10 +147,12 @@ export function dayState(t: number, start = MORNING, moonBase = 0): DayState {
   const moonDir = arc(moonA, 0.45);
   // the shadow-casting light: whichever of the two is up; it fades to
   // nothing as either meets the horizon (so the handover can't be seen),
-  // and never lies lower than 14° (long raking shadows would swamp the view)
+  // and never lies lower than LIGHT_MIN_ELEV (at 14° the shadow map
+  // stretched 4× along the light and drew long straight bands over the
+  // ground, glaring from the air)
   const up = sunDir[1] >= moonDir[1] ? sunDir : moonDir;
   const fade = Math.min(1, Math.max(0, up[1] * 5));
-  const minY = Math.sin((14 * Math.PI) / 180);
+  const minY = Math.sin(LIGHT_MIN_ELEV);
   let lightDir = up;
   if (up[1] < minY) {
     const h = Math.hypot(up[0], up[2]) || 1, k = Math.sqrt(1 - minY * minY);

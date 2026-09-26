@@ -90,8 +90,11 @@ export interface Stage {
   /** the sky dome + sun disc follow the player across the infinite city */
   followSky(x: number, z: number): void;
   /** the lights and the sky for a time of day, round a centre (G10) */
-  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3): void;
+  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3, shadow?: ShadowFocus): void;
 }
+
+/** where the shadow box sits and how far it reaches (m either side) */
+export interface ShadowFocus { x: number; z: number; span: number }
 
 export interface Dressing {
   sun: THREE.DirectionalLight;
@@ -100,8 +103,9 @@ export interface Dressing {
   /** the sky dome + sun disc follow a point (the player) */
   followSky(x: number, z: number): void;
   /** the lights, fog and sky for a time of day round centre (cx, cz): the
-   * shadow-casting light becomes the moon at night (G10) */
-  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3): void;
+   * shadow-casting light becomes the moon at night (G10); `shadow` moves
+   * the shadow box off the centre (ahead of a flying vehicle) */
+  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3, shadow?: ShadowFocus): void;
 }
 
 /** Sky (sky.ts), fog, hemisphere fill, the warm shadow-casting sun, optional
@@ -157,15 +161,34 @@ export function makeSceneDressing(scene: THREE.Scene, {
   // keep the sky centred on the player (the day's look)
   const followSky = (x: number, z: number) => sky.update(still, x, z, 0);
   const sunDist = Math.min(110, l);
-  const applyDay = (day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3) => {
+  const MAP = sun.shadow.mapSize.x;
+  let span = shadowSpan;
+  const _dir = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _c = new THREE.Vector3();
+  const applyDay = (day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3, shadow?: ShadowFocus) => {
     (scene.fog as THREE.Fog).color.setHex(day.skyBottom);
     hemi.color.setHex(day.hemiSky);
     hemi.groundColor.setHex(day.hemiGround);
     hemi.intensity = day.hemiI;
     sun.color.setHex(day.lightColor);
     sun.intensity = day.lightI;
-    sun.position.set(cx + day.lightDir[0] * sunDist, day.lightDir[1] * sunDist, cz + day.lightDir[2] * sunDist);
-    sun.target.position.set(cx, 0, cz);
+    // the shadow box: round the focus (by default the centre), its size, and
+    // snapped to whole shadow texels across the light — else every step of
+    // the kid slides the texel grid and the shadows' edges crawl
+    const sx = shadow?.x ?? cx, sz = shadow?.z ?? cz, want = shadow?.span ?? shadowSpan;
+    if (want !== span) {
+      span = want;
+      Object.assign(sun.shadow.camera, { left: -span, right: span, top: span, bottom: -span });
+      sun.shadow.camera.updateProjectionMatrix();
+    }
+    const texel = (2 * span) / MAP;
+    _dir.set(...day.lightDir);
+    _r.set(0, 1, 0).cross(_dir).normalize();
+    _u.copy(_dir).cross(_r);
+    _c.set(sx, 0, sz);
+    const a = Math.round(_c.dot(_r) / texel) * texel, b = Math.round(_c.dot(_u) / texel) * texel, w = _c.dot(_dir);
+    _c.copy(_r).multiplyScalar(a).addScaledVector(_u, b).addScaledVector(_dir, w);
+    sun.target.position.copy(_c);
+    sun.position.copy(_c).addScaledVector(_dir, sunDist);
     sun.target.updateMatrixWorld();
     sky.update(day, cx, cz, time, cam);
   };

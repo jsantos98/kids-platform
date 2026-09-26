@@ -918,7 +918,12 @@ const tick = (): void => {
   // the time of day (G10): the sun (or the moon) + shadow camera follow the
   // car, and the sky travels with it
   day = dayState(elapsed + dayShift, START_PHASE, MOON_BASE);
-  stage.applyDay(day, st.x, st.z, elapsed, camera.position);
+  // (from the air the view reaches far past the kid: the shadow box grows
+  // and sits ahead of the vehicle, so its edge isn't a line across the view)
+  const flying = V.fly;
+  const reach = flying ? 150 : 95;
+  stage.applyDay(day, st.x, st.z, elapsed, camera.position,
+    { x: st.x + fwd.x * reach * (flying ? 0.5 : 0.25), z: st.z + fwd.z * reach * (flying ? 0.5 : 0.25), span: reach });
   groundFollower.position.set(st.x, -0.85, st.z);
 
   // the archipelago is endless; stray into the sea and R brings you back
@@ -1032,7 +1037,7 @@ const tick = (): void => {
   {
     const top = V.kind === 'rail' ? 4.6 : vehicleTop();
     const size = Math.max(0.7, Math.min(3.2, camera.position.distanceTo(player.car.position) / 14));
-    guideArrow3d.update(dt, elapsed, player.car.position, top + 0.9 * size, bearing, size);
+    guideArrow3d.update(dt, elapsed, player.car.position, top + 0.9 * size, bearing, size, camera.position);
   }
   camera.getWorldDirection(camDir);
   const camYaw = Math.atan2(camDir.x, camDir.z);

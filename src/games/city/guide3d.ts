@@ -4,9 +4,9 @@
 // it can be spotted over the rooftops from anywhere on the island.
 //
 // The arrow is a chunky, rounded, glossy 3D piece: bevelled edges, a warm
-// gradient from an orange tail to a golden nose, a shine
-// that sweeps from tail to nose and a gentle breathing pulse. It lives in
-// its own little scene with its own lights, drawn after the world over a
+// gradient from an orange tail to a golden nose, a gentle breathing pulse,
+// and see-through enough that the street behind it shows. It lives in its
+// own little scene with its own lights, drawn after the world over a
 // cleared depth buffer (`drawOver`), so it is properly shaded yet never
 // hidden by the vehicle, its rotor or a roof — and looks the same by day
 // and night. It lies on a plane over the vehicle tipped toward the camera
@@ -89,30 +89,21 @@ export class GuideArrow {
   private tilt = new THREE.Group();
   /** turns the arrow in its plane */
   private spin = new THREE.Group();
-  private shine = { value: -1 };
   private glow = { value: 0 };
   private yaw = 0;
   /** the key light rides over the camera's shoulder, so the gloss always catches it */
   private key = new THREE.DirectionalLight(0xffffff, 1.7);
 
   constructor() {
-    // the body: glossy, its gradient lit by its own lights, with a shine
-    // band sweeping tail → nose and a soft breathing glow
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 60, specular: 0x4a4a4a, fog: false });
-    const along = `vAlong = (position.y / ${ARROW_SCALE.toFixed(3)} - (${TAIL_Y.toFixed(3)})) / ${(NOSE_Y - TAIL_Y).toFixed(3)};`;
+    // the body: glossy, its gradient lit by its own lights, with a soft
+    // breathing glow
+    // (see-through, but still writing depth, so its own far side stays hidden)
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 60, specular: 0x4a4a4a, fog: false, transparent: true, opacity: 0.72 });
     mat.onBeforeCompile = sh => {
-      sh.uniforms.uShine = this.shine;
       sh.uniforms.uGlow = this.glow;
-      sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying float vAlong;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + along);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vAlong;\nuniform float uShine;\nuniform float uGlow;')
-        .replace('#include <opaque_fragment>', [
-          'float band = smoothstep(0.16, 0.0, abs(vAlong - uShine));',
-          'outgoingLight += vec3(1.0, 0.95, 0.8) * band * 0.45 + diffuseColor.rgb * uGlow;',
-          '#include <opaque_fragment>',
-        ].join('\n'));
+        .replace('#include <common>', '#include <common>\nuniform float uGlow;')
+        .replace('#include <opaque_fragment>', 'outgoingLight += diffuseColor.rgb * uGlow;\n#include <opaque_fragment>');
     };
     const body = new THREE.Mesh(arrowSlab(0, 0.3, 0.14, f => TAIL.clone().lerp(NOSE, f)), mat);
     // (lay it flat: rotating +90 deg about x maps shape +y onto +z, the
@@ -164,8 +155,6 @@ export class GuideArrow {
     const breath = 0.5 + 0.5 * Math.sin(elapsed * 4);
     this.group.scale.setScalar(size * (1 + 0.05 * breath));
     this.glow.value = 0.04 + 0.1 * breath;
-    // the shine sweeps tail → nose every 1.6 s (then rests off the arrow)
-    this.shine.value = ((elapsed / 1.6) % 1) * 1.8 - 0.3;
     // the key light from over the camera's shoulder
     this.key.position.set(cam.x - dz * 0.3, cam.y + 30, cam.z + dx * 0.3);
     this.key.target.position.copy(this.group.position);

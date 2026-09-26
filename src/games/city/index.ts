@@ -341,12 +341,13 @@ function robberInSight(): Robber | null {
   return null;
 }
 /** where a point is from the kid: ahead, behind, on the left or the right
- * (+steer turns right and grows the heading, so a positive bearing is right) */
+ * (A / left gives +steer and grows the heading — facing +z the kid's left is
+ * +x — so a positive bearing is on the LEFT) */
 function sideOf(x: number, z: number): 'ahead' | 'behind' | 'left' | 'right' {
   const st = player.state;
   let d = Math.atan2(x - st.x, z - st.z) - st.heading;
   d = Math.atan2(Math.sin(d), Math.cos(d));
-  return Math.abs(d) < 0.6 ? 'ahead' : Math.abs(d) > 2.5 ? 'behind' : d > 0 ? 'right' : 'left';
+  return Math.abs(d) < 0.6 ? 'ahead' : Math.abs(d) > 2.5 ? 'behind' : d > 0 ? 'left' : 'right';
 }
 /** the chase: a getaway car coming into sight starts the chase tune and the
  * narrator says where it is ("it's over there on the left!") */

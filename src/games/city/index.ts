@@ -1170,6 +1170,7 @@ const tick = (): void => {
     promptFill.style.width = '0%';
   }
 
+  nightLights.fireflies(curCity, st.x, st.z, elapsed);
   nightLights.update(day.night);
   bakedNight.value = day.night;
   setGuideNight(day.night);

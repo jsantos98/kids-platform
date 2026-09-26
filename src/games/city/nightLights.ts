@@ -8,6 +8,8 @@
 // recompile and slow every shader in the city.
 import * as THREE from 'three';
 import { GLOW, type ChunkGlow } from '../../worlds/cityChunk.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
+import type { CityRef } from '../../worlds/cityGrid.js';
 
 /** a glow: where, its colour, halo size (m) and the pool it throws (m, 0 none) */
 export interface Glow {
@@ -166,6 +168,39 @@ export class NightLights {
       f.instanceColor!.needsUpdate = true;
     }
     this.frame.length = 0;
+  }
+
+  /** the island's green blocks (parks, woods, meadows), where fireflies dance */
+  private greens: { key: string; spots: Array<{ x: number; z: number; r: number }> } = { key: '', spots: [] };
+
+  /** fireflies over the green blocks near the kid (a dozen or so to a
+   * block, each drifting on its own loop and blinking now and then) */
+  fireflies(city: CityRef, px: number, pz: number, t: number): void {
+    const night = this.night.value;
+    if (night < 0.3) return;
+    if (this.greens.key !== city.key) {
+      const plan = cityPlanFor(city.bx, city.by);
+      this.greens = {
+        key: city.key,
+        spots: plan.blocks.filter(b => b.district === 'park' || b.district === 'forest' || b.district === 'meadow')
+          .map(b => ({ x: b.cx + city.ox, z: b.cz + city.oz, r: Math.min(40, Math.sqrt(b.area) / 3) })),
+      };
+    }
+    this.greens.spots.forEach((b, k) => {
+      if (Math.abs(b.x - px) > 160 || Math.abs(b.z - pz) > 160) return;
+      for (let i = 0; i < 22; i++) {
+        const ph = k * 7.13 + i * 2.39;
+        const blink = Math.max(0, Math.sin(t * (1.1 + (i % 5) * 0.23) + ph));
+        if (blink < 0.25) continue;
+        const a = t * (0.12 + (i % 3) * 0.05) + ph, rr = b.r * (0.3 + ((i * 0.618) % 0.7));
+        this.flash({
+          x: b.x + Math.cos(a) * rr + Math.sin(t * 0.7 + ph) * 1.5,
+          y: 0.9 + ((i * 0.37) % 1.6) + Math.sin(t * 1.3 + ph) * 0.3,
+          z: b.z + Math.sin(a * 1.3) * rr,
+          color: 0xe0ff66, size: 1.0, pool: 0, strength: 1.4 * Math.pow(blink, 2) * Math.min(1, (night - 0.3) * 2),
+        });
+      }
+    });
   }
 
   private put(m: THREE.InstancedMesh, k: number, g: Glow, size: number, y: number): void {

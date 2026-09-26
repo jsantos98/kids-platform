@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todos os sons</title>
+<style>
+  :root { --ink: #3d434b; --soft: #6b7480; --cream: #fffdf6; --line: #e3ddd0; --accent: #e25c5c; }
+  body { margin: 0; padding: 20px 24px 60px; background: #faf7ef; color: var(--ink); font: 15px/1.45 'Segoe UI', system-ui, sans-serif; }
+  h1 { margin: 0 0 6px; } h2 { margin: 28px 0 8px; display: flex; align-items: center; gap: 12px; }
+  p.note { color: var(--soft); margin: 0 0 14px; max-width: 900px; }
+  nav a { margin-right: 14px; color: var(--accent); font-weight: 600; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; max-width: 1200px; background: var(--cream); }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--soft); }
+  td.id { font-family: ui-monospace, Consolas, monospace; font-size: 13px; white-space: nowrap; }
+  td.meta { color: var(--soft); font-size: 13px; white-space: nowrap; }
+  audio { height: 34px; width: 260px; }
+  button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  tr.playing td { background: #fff1d6; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #eee6d6; color: var(--soft); }
+</style>
+</head>
+<body>
+<h1>🔊 Todos os sons do jogo</h1>
+<p class="note">Cada efeito e cada frase que o jogo toca, para ouvir se está tudo bem. Os loops (motores, sirenes, ambiente)
+tocam em repetição, para se ouvir a emenda; no jogo os motores mudam de tom com a velocidade. «Tocar todos» passa pela secção
+inteira, um de cada vez (os loops ouvem-se duas voltas).</p>
+<nav id="nav"></nav>
+<div id="out">a carregar…</div>
+<script>
+const GROUPS = [
+  ['Motores', id => id.startsWith('engine-')],
+  ['Carros de corrida', id => id.startsWith('race-')],
+  ['Sirenes', id => id.startsWith('siren-')],
+  ['Ambiente e outros loops', (id, d) => d.loop && !/^(engine|race|siren)-/.test(id)],
+  ['Momentos do jogo', (id, d) => !d.loop],
+];
+const MOOD = { excited: 'entusiasmado', cheer: 'alegre', warm: 'carinhoso', lively: 'animado' };
+let playing = null;
+function stopAll() { document.querySelectorAll('audio').forEach(a => { a.pause(); }); document.querySelectorAll('tr.playing').forEach(r => r.classList.remove('playing')); }
+async function playSection(btn, rows) {
+  if (btn.classList.contains('on')) { btn.classList.remove('on'); playing = null; stopAll(); return; }
+  stopAll(); document.querySelectorAll('button.on').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  const run = playing = {};
+  for (const tr of rows) {
+    if (playing !== run) return;
+    const a = tr.querySelector('audio');
+    tr.classList.add('playing'); tr.scrollIntoView({ block: 'nearest' });
+    a.currentTime = 0;
+    await new Promise(done => {
+      const laps = a.loop ? 2 : 1;
+      const stopAt = () => a.duration * laps * 1000;
+      a.play().catch(done);
+      if (a.loop) { const go = () => setTimeout(done, stopAt()); isNaN(a.duration) ? a.addEventListener('loadedmetadata', go, { once: true }) : go(); }
+      else a.addEventListener('ended', done, { once: true });
+      a.addEventListener('error', done, { once: true });
+    });
+    a.pause(); tr.classList.remove('playing');
+    await new Promise(r => setTimeout(r, 250));
+  }
+  btn.classList.remove('on'); playing = null;
+}
+function section(title, headers, rows) {
+  const h = document.createElement('h2');
+  const anchor = 's' + document.querySelectorAll('h2').length;
+  h.id = anchor;
+  h.textContent = `${title} (${rows.length})`;
+  const b = document.createElement('button'); b.textContent = '▶ Tocar todos';
+  h.appendChild(b);
+  const t = document.createElement('table');
+  t.innerHTML = '<tr>' + headers.map(x => `<th>${x}</th>`).join('') + '</tr>' + rows.join('');
+  const out = document.getElementById('out');
+  out.append(h, t);
+  b.onclick = () => playSection(b, [...t.querySelectorAll('tr')].slice(1));
+  const a = document.createElement('a'); a.href = '#' + anchor; a.textContent = title;
+  document.getElementById('nav').appendChild(a);
+}
+(async () => {
+  const [sfx, voice] = await Promise.all([
+    fetch('audio/sfx/manifest.json').then(r => r.json()),
+    fetch('audio/voice/manifest.json').then(r => r.json()),
+  ]);
+  document.getElementById('out').textContent = '';
+  const ids = Object.keys(sfx).filter(k => !k.startsWith('_'));
+  for (const [title, test] of GROUPS) {
+    const rows = ids.filter(id => test(id, sfx[id])).map(id => {
+      const d = sfx[id];
+      const made = d.tones ? 'construída' : 'ElevenLabs';
+      return `<tr><td class="id">${id}</td><td><audio controls preload="none" ${d.loop ? 'loop' : ''} src="audio/sfx/${id}.ogg"></audio></td>` +
+        `<td class="meta">${d.loop ? '<span class="tag">loop</span> ' : ''}${d.seconds}s · ${made}</td><td>${d.prompt}</td></tr>`;
+    });
+    if (rows.length) section(title, ['som', '', '', 'descrição'], rows);
+  }
+  for (const [lang, name] of [['pt', 'Vozes — português'], ['en', 'Vozes — inglês']]) {
+    const lines = voice[lang] || {};
+    const moods = voice.moods || {};
+    const rows = Object.entries(lines).map(([id, text]) =>
+      `<tr><td class="id">${id}</td><td><audio controls preload="none" src="audio/voice/${lang}/${id}.mp3"></audio></td>` +
+      `<td class="meta">${MOOD[moods[id]] ? '<span class="tag">' + MOOD[moods[id]] + '</span>' : ''}</td><td>${text}</td></tr>`);
+    section(`${name} · ${(voice.voices || {})[lang] || ''}`, ['frase', '', 'humor', 'texto'], rows);
+  }
+})();
+</script>
+</body>
+</html>

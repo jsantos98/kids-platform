@@ -135,6 +135,9 @@ The game page is `play/city.html`.
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |
 
+To hear every sound in the game — each effect (loops on repeat) and every spoken line in both
+languages, section by section — open `dev-sounds.html` (e.g. http://localhost:8321/dev-sounds.html).
+
 ## Run it
 
 You need [Node.js](https://nodejs.org) 20.19+ or 22.12+ (what Vite 7 requires).

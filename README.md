@@ -10,6 +10,8 @@ kits plus a procedural pastel model kit.
 
 ![The garage: pick a vehicle with the wheel](docs/screenshots/garage.jpg)
 
+📜 **[See how the game has grown — history with screenshots](docs/HISTORY.md)**
+
 ## What it is
 
 **Endless City** is an endless archipelago of island cities joined by
@@ -26,6 +28,12 @@ The world keeps running while you play:
   crossings;
 - trains run on a timetable from island to island;
 - boats sail under the causeways' raised spans.
+
+Time passes too: a 24-hour clock runs through dawn, day, dusk and a short
+night (a game day lasts 12 minutes). At night the city lights up — street
+lamps, windows, headlights, a lighthouse, fireflies — under the moon and the
+stars. Every vehicle sounds like itself, and a narrator gives each mission's
+briefing and cheers every success.
 
 Nobody can be run over, and a bump never ends the game: the vehicle flashes
 and carries on from a spot just behind.
@@ -49,6 +57,8 @@ and carries on from a spot just behind.
 | ![Fire truck](docs/screenshots/fire-truck.jpg) | ![Police chase](docs/screenshots/police.jpg) |
 | ![Rescue helicopter over downtown](docs/screenshots/helicopter.jpg) | ![The train](docs/screenshots/train.jpg) |
 | ![Kart race](docs/screenshots/race.jpg) | ![Hose scene](docs/screenshots/scene-fire.jpg) |
+| ![The city at night](docs/screenshots/night.jpg) | ![Sunset from the plane](docs/screenshots/sunset.jpg) |
+| ![The race at night](docs/screenshots/race-night.jpg) | |
 
 Reaching a call opens its **mission scene**. The wheel is the only input
 there: sweep the hose over the flames, slide the ladder to the cat, or hold
@@ -120,6 +130,7 @@ The game page is `play/city.html`.
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |
+| `?time=night\|dusk\|noon\|22` | start at a time of day (a name or an hour; every game starts at 8:00) |
 | `?scene=fire\|cat\|rescue\|patient\|caught` | open a mission scene straight away |
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |

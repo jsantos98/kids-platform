@@ -268,7 +268,17 @@ function enter(next: 'modes' | 'cars'): void {
   ready = false;
   say(next === 'cars' ? 'pick-car' : list[sel].sayId);
 }
-addEventListener('resize', () => layout(true));
+addEventListener('resize', () => { layout(true); placeHelp(); });
+/** the wheel hint beside the title where it fits, else below it */
+function placeHelp(): void {
+  const help = document.getElementById('help'), title = document.getElementById('title');
+  if (!help || !title) return;
+  help.classList.remove('below');
+  const h = help.getBoundingClientRect(), t = title.getBoundingClientRect();
+  help.classList.toggle('below', h.right > t.left - 12);
+}
+placeHelp();
+void document.fonts?.ready.then(placeHelp);
 
 // ---- the language: Português (the default) or English, for every page ----
 const langBox = document.getElementById('lang')!;
@@ -287,6 +297,7 @@ function pickLang(l: 'pt' | 'en'): void {
   if (l === getLang()) return;
   setLang(l);
   applyI18n('garage.pageTitle');
+  placeHelp();
   preloadVoice();
   drawLang();
   showName();

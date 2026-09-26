@@ -12,7 +12,7 @@ import { modeFromURL } from './modes.js';
 import { Course } from './course.js';
 import { Searchlight, Winch } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
-import { GuideArrow, pulseBeacon } from './guide3d.js';
+import { GuideArrow, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { createSea, boatLoop, waveAt } from './sea.js';
 import { CityScenery } from './scenery.js';
@@ -358,6 +358,8 @@ const boarding = new Boarding(scene,
 if (V.kind === 'rail') railway.addPlayer(START.bx, START.by, trainStart(START.bx, START.by).arc);
 /** the platform the kid's train last stopped at (the goal moves on) */
 let stationDone: { x: number; z: number } | null = null;
+const stationIcon = V.kind === 'rail' ? makeIconSprite(GOAL_ICON.station, 3.4) : null;
+if (stationIcon) { stationIcon.visible = false; scene.add(stationIcon); }
 const transit = new Transit(scene);
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
@@ -982,6 +984,11 @@ const tick = (): void => {
   // the course gate / station the mode is heading for (when it has one)
   const gate = course?.target ?? null;
   const station = V.kind === 'rail' ? nextStation() : null;
+  // (the next station floats its icon over the stop point)
+  if (stationIcon) {
+    stationIcon.visible = !!station && mode === 'drive';
+    if (station) stationIcon.position.set(station.x, 7 + Math.sin(elapsed * 2) * 0.4, station.z);
+  }
   const robber = nearestRobber(st.x, st.z);
   const goal = robber ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
     : near ? { x: near.pos.x, z: near.pos.z } : null;
@@ -1016,7 +1023,7 @@ const tick = (): void => {
   } else if (robber) {
     // ---- the chase: the nearest getaway car ----
     const rd = Math.hypot(robber.x - st.x, robber.z - st.z);
-    showGuide('🦹', rd, Math.round((5 * robber.caught) / CATCH_T));
+    showGuide(GOAL_ICON.robber, rd, Math.round((5 * robber.caught) / CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
     const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
     promptText.textContent = tr(robber.dashT > 0 ? 'chase.runs'
@@ -1044,7 +1051,7 @@ const tick = (): void => {
     promptText.textContent = say;
   } else if (course && gate) {
     // ---- checkpoint course: every glowing gate, in any order ----
-    showGuide(course.kind === 'gates' ? '🏁' : course.kind === 'rings' ? '⭕' : '🚩', goalD,
+    showGuide(GOAL_ICON[course.kind], goalD,
       Math.round((5 * course.passedCount) / course.gates.length));
     promptText.textContent = tr(course.kind === 'gates' ? 'course.gates'
       : course.kind === 'rings' ? 'course.rings' : 'course.buoys');
@@ -1060,7 +1067,7 @@ const tick = (): void => {
     // ---- the train: stop at the platform ----
     const pose = railway.playerPose()!;
     const gap = station.gap;
-    showGuide('🚉', goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
+    showGuide(GOAL_ICON.station, goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - gap / 300)))));
     promptFill.style.width = '0%';
     promptText.textContent = gap < 12 ? (pose.v < 0.5 ? tr('train.aboard', { people: '🧍'.repeat(Math.min(6, boarding.boardedKid)) }) : tr('train.board'))
       : gap < 70 ? tr('train.slow') : tr('train.station');

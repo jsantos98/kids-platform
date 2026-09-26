@@ -63,6 +63,10 @@ export class GuideArrow {
   }
 }
 
+/** each goal's icon — the HUD badge shows it and the goal floats it over
+ * itself (makeIconSprite), so the kid sees there is a goal and what it is */
+export const GOAL_ICON = { robber: '🦹', gates: '🏁', rings: '⭕', buoys: '🚩', station: '🚉' } as const;
+
 const iconTex = new Map<string, THREE.CanvasTexture>();
 
 /** the icon drawn on a soft white badge (one texture per icon) */

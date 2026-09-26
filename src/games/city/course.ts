@@ -12,7 +12,7 @@ import { graphFor, leaving, type SEdge } from '../../worlds/streetGraph.js';
 import { ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { boatLoop, hullObject } from './sea.js';
-import { makeBeacon, pulseBeacon } from './guide3d.js';
+import { makeBeacon, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { HELI_ALT } from './player.js';
 import type { CourseKind } from './modes.js';
 
@@ -162,6 +162,11 @@ export class Course {
       group.position.set(x, 0, z);
     }
     group.rotation.y = yaw;
+    // its icon floats over it — the flag over an arch, a ring over a ring, a
+    // flag over the buoys' gap — as the HUD badge shows it
+    const icon = makeIconSprite(GOAL_ICON[this.kind], this.kind === 'rings' ? 3.4 : 3);
+    icon.position.y = this.kind === 'rings' ? 7.5 : this.kind === 'gates' ? 9.5 : 4.2;
+    group.add(icon);
     this.scene.add(group);
     // the arches and buoys carry a tall beacon each (rings hang in the sky)
     let beacon: THREE.Mesh | null = null;

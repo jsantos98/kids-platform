@@ -17,6 +17,7 @@ import { rng, type Rng } from '../../engine/rng.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { graphFor, type StreetGraph, type SEdge } from '../../worlds/streetGraph.js';
 import { deckAt } from '../../worlds/causeway.js';
+import { makeIconSprite, GOAL_ICON } from './guide3d.js';
 
 export const CATCH_R = 9;
 export const CATCH_T = 4;
@@ -49,7 +50,7 @@ export class Robber {
   dashT = 0;
   private restT = 0;
   private litT = 0;
-  private marker: THREE.Mesh;
+  private marker: THREE.Sprite;
 
   constructor(private scene: THREE.Scene) {
     const stub = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.2, 4.2), new THREE.MeshLambertMaterial({ color: 0x3b3b46 }));
@@ -60,11 +61,8 @@ export class Robber {
       g.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) m.castShadow = true; });
       this.group.add(g);
     }).catch(() => {});
-    // a bobbing money-bag marker over the getaway car
-    this.marker = new THREE.Mesh(new THREE.SphereGeometry(0.7, 12, 10), new THREE.MeshLambertMaterial({ color: 0x9ad06b, emissive: 0x3a5a20 }));
-    const knot = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.5, 8), new THREE.MeshLambertMaterial({ color: 0x7fb453 }));
-    knot.position.y = 0.75;
-    this.marker.add(knot);
+    // the robber's icon (the HUD badge's) bobbing over the getaway car
+    this.marker = makeIconSprite(GOAL_ICON.robber, 2.6);
     this.group.add(this.marker);
     this.group.visible = false;
     scene.add(this.group);
@@ -158,8 +156,7 @@ export class Robber {
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     this.group.rotation.y += dt > 0 ? dh * Math.min(1, dt * 8) : dh;
-    this.marker.position.set(0, 3.6 + Math.sin(elapsed * 3) * 0.3, 0);
-    this.marker.rotation.y = elapsed * 1.5;
+    this.marker.position.set(0, 3.9 + Math.sin(elapsed * 3) * 0.3, 0);
   }
 
   /**

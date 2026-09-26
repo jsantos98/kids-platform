@@ -9,3 +9,4 @@ server.log
 
 # local secrets (API keys for tools/make-voice.py)
 .env.local
+__pycache__/

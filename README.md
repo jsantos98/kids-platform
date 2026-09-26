@@ -201,3 +201,7 @@ Voices: Portuguese by Microsoft's neural voice `pt-PT-RaquelNeural`
 [Piper](https://github.com/OHF-Voice/piper1-gpl) using
 [`en_GB-cori-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/medium)
 (LibriVox recordings, public domain).
+
+Sound effects: created with [ElevenLabs](https://elevenlabs.io) sound generation
+(`tools/make-sfx.py`, prompts in `src/engine/sfxList.ts`), free plan —
+non-commercial use, with attribution to ElevenLabs.

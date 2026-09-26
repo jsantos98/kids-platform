@@ -1,0 +1,51 @@
+// The game's recorded sound effects (G11): one list, read by the recorder
+// (tools/make-sfx.py — ElevenLabs' sound generation, from these prompts,
+// into public/audio/sfx/<id>.mp3, only what's new or changed) and by the
+// game (engine/audio.ts), which plays a recording where there is one and
+// its own synthesized sound where there isn't.
+
+export interface SfxDef {
+  /** what to ask for (English works best) */
+  prompt: string;
+  /** its length (s) — ElevenLabs charges per second */
+  seconds: number;
+  /** a seamless loop (engines, sirens, ambience), or a one-shot */
+  loop: boolean;
+}
+
+export const SFX = {
+  // the kid's vehicles (loops; the game changes their speed with the vehicle's)
+  'engine-car': { prompt: 'small city car engine idling then cruising gently, friendly, clean, seamless loop', seconds: 4, loop: true },
+  'engine-truck': { prompt: 'big fire truck diesel engine rumbling steadily at low revs, heard from outside, seamless loop', seconds: 4, loop: true },
+  'engine-kart': { prompt: 'small racing kart engine buzzing steadily at medium revs, bright and zippy, seamless loop', seconds: 4, loop: true },
+  'engine-heli': { prompt: 'helicopter rotor blades chopping steadily, medium distance, cartoonish but realistic, seamless loop', seconds: 4, loop: true },
+  'engine-plane': { prompt: 'small single propeller airplane flying steadily, propeller buzz, seamless loop', seconds: 4, loop: true },
+  'engine-boat': { prompt: 'small motor boat outboard engine putt-putt with water splashing along the hull, seamless loop', seconds: 4, loop: true },
+  'engine-train': { prompt: 'electric passenger train rolling on rails, gentle clickety-clack of the wheels over rail joints, steady, seamless loop', seconds: 4, loop: true },
+  // sirens (loops)
+  'siren-fire': { prompt: 'European fire truck siren, two-tone hi-lo "nee-naw", Portuguese style, steady, heard from inside the truck, seamless loop', seconds: 4, loop: true },
+  'siren-ambulance': { prompt: 'European ambulance siren, two-tone hi-lo, slightly faster and higher than a fire truck, steady, seamless loop', seconds: 4, loop: true },
+  'siren-police': { prompt: 'European police car siren, fast two-tone hi-lo, steady, seamless loop', seconds: 4, loop: true },
+  // the fire hose, a level crossing, the world around (loops)
+  'pump': { prompt: 'fire hose spraying a strong jet of water, steady hiss and splash, seamless loop', seconds: 4, loop: true },
+  'crossing-bell': { prompt: 'railway level crossing warning bell ringing, ding ding ding at a steady rhythm, seamless loop', seconds: 4, loop: true },
+  'amb-birds': { prompt: 'gentle daytime birdsong in a city park, a few small birds chirping, calm, seamless loop', seconds: 8, loop: true },
+  'amb-crickets': { prompt: 'soft crickets chirping on a warm summer night, calm, seamless loop', seconds: 8, loop: true },
+  'amb-waves': { prompt: 'gentle sea waves lapping on a sandy beach, calm and soft, seamless loop', seconds: 8, loop: true },
+  // the game's moments (one-shots)
+  'win-jingle': { prompt: 'cheerful short victory jingle for a kids video game, bright xylophone and bells, happy, triumphant', seconds: 2, loop: false },
+  'star': { prompt: 'magical sparkly twinkle chime, a star collected in a kids video game, bright and short', seconds: 1.5, loop: false },
+  'ding': { prompt: 'single clear bright bell ding, checkpoint passed in a kids video game, short', seconds: 1, loop: false },
+  'beep': { prompt: 'single short race countdown beep, retro game style, clean tone', seconds: 0.5, loop: false },
+  'beep-go': { prompt: 'single higher-pitched longer race start beep for GO, retro game style, clean tone', seconds: 0.8, loop: false },
+  'lap': { prompt: 'short happy two-note ascending chime, a lap completed in a racing game', seconds: 1, loop: false },
+  'boing': { prompt: 'cartoon boing bump sound, a soft funny bounce, for a kids game', seconds: 1, loop: false },
+  'thud': { prompt: 'soft muffled bump thud, a toy car gently bumping into something', seconds: 0.6, loop: false },
+  'station-bell': { prompt: 'railway station arrival chime, three pleasant bell tones ding dong ding', seconds: 2, loop: false },
+  'door-chime': { prompt: 'train doors opening chime, two soft descending notes, then a gentle pneumatic hiss', seconds: 1.5, loop: false },
+  'train-horn': { prompt: 'friendly passenger train horn, two-tone, short toot toot', seconds: 2, loop: false },
+  'car-horn': { prompt: 'small car horn, a short polite double beep beep', seconds: 1, loop: false },
+  'splash': { prompt: 'car driving through a shallow river, a big water splash', seconds: 1, loop: false },
+} satisfies Record<string, SfxDef>;
+
+export type SfxId = keyof typeof SFX;

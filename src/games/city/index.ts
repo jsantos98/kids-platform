@@ -294,7 +294,7 @@ const stuck = { t: 0, x: spawn.x, z: spawn.z, gas: true };
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
 camera.lookAt(spawn.x, 1.4, spawn.z);
 
-const audio = new GameAudio();
+const audio = new GameAudio('../');
 const sound = new Soundscape(audio);
 // the narrator's voice (its clips are loaded ahead; muted with the sound)
 const narrator = new Narrator('../');

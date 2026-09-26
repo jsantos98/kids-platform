@@ -1,11 +1,16 @@
-// Procedural Web Audio (G11): every sound is made here in code — no audio
-// files. A small mixer (master → mute, sfx and ambience buses, ducked while
-// a voice line plays), one engine voice for the kid's vehicle (road engine,
-// helicopter rotor, plane propeller, boat motor, train hum and clickety-
-// clack), the siren (a European two-tone, each vehicle its own), the pump,
-// one-shots (jingles, chimes, dings, beeps, a boing, horns, bells, splashes)
-// and a soft ambience (birds by day, crickets at night, waves by the sea).
-// Everything is built lazily on the first user gesture (autoplay rules).
+// The game's sound (G11). A small mixer (master → mute, sfx and ambience
+// buses, ducked while a voice line plays); one engine voice for the kid's
+// vehicle (road engine, helicopter rotor, plane propeller, boat motor, train
+// on its rails); the siren (a European two-tone, each vehicle its own); the
+// pump; one-shots (jingles, chimes, dings, beeps, a boing, horns, bells,
+// splashes); and a soft ambience (birds by day, crickets at night, waves by
+// the sea). Each plays its recording (sfxList.ts, recorded by
+// tools/make-sfx.py into public/audio/sfx/) — the loops at a speed that
+// follows the vehicle's — and, until a recording has loaded or where there
+// is none, a sound synthesized here in code. Everything is built lazily on
+// the first user gesture (autoplay rules).
+
+import { SFX, type SfxId } from './sfxList.js';
 
 export type EngineKind = 'car' | 'truck' | 'kart' | 'heli' | 'plane' | 'boat' | 'train';
 export type SirenStyle = 'fire' | 'ambulance' | 'police' | 'heli';
@@ -24,6 +29,25 @@ const SIREN: Record<SirenStyle, { lo: number; hi: number; tone: number; gain: nu
 
 interface EngineVoice { out: GainNode; set(speed: number, gas: number, t: number): void }
 
+/** a recorded engine loop's playback speed at rest and how much faster it
+ * runs flat out, and its level at rest and flat out */
+const ENGINE_REC: Record<EngineKind, { rate: number; up: number; g0: number; g1: number }> = {
+  car: { rate: 0.8, up: 0.75, g0: 0.35, g1: 0.75 },
+  truck: { rate: 0.85, up: 0.5, g0: 0.4, g1: 0.8 },
+  kart: { rate: 0.85, up: 0.9, g0: 0.3, g1: 0.75 },
+  heli: { rate: 0.95, up: 0.2, g0: 0.55, g1: 0.7 },
+  plane: { rate: 0.9, up: 0.35, g0: 0.5, g1: 0.75 },
+  boat: { rate: 0.85, up: 0.6, g0: 0.3, g1: 0.75 },
+  train: { rate: 0.7, up: 0.55, g0: 0.0, g1: 0.8 },
+};
+/** which recording each siren style plays, and how loud */
+const SIREN_REC: Record<SirenStyle, { id: SfxId; gain: number }> = {
+  fire: { id: 'siren-fire', gain: 0.55 },
+  ambulance: { id: 'siren-ambulance', gain: 0.55 },
+  police: { id: 'siren-police', gain: 0.55 },
+  heli: { id: 'siren-ambulance', gain: 0.35 },
+};
+
 export class GameAudio {
   private ac: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -41,9 +65,57 @@ export class GameAudio {
   private crossing: { gain: GainNode; pan: StereoPannerNode; next: number } | null = null;
   private ambience: { waves: GainNode; birdsAt: number; cricketsAt: number } | null = null;
   private muted = false;
+  /** the recordings, as they load */
+  private samples = new Map<SfxId, AudioBuffer>();
+  /** the recorded loops playing (each silent until asked for) */
+  private loops = new Map<SfxId, { src: AudioBufferSourceNode; gain: GainNode }>();
 
-  constructor() {
+  /** @param root the path from the page to the site root (the recordings) */
+  constructor(private root = '') {
     try { this.muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* no storage */ }
+  }
+
+  /** fetch and decode every recording (a missing one keeps its synth sound) */
+  private loadSamples(): void {
+    const ac = this.ac!;
+    for (const id of Object.keys(SFX) as SfxId[]) {
+      void fetch(`${this.root}audio/sfx/${id}.ogg`)
+        .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+        .then(b => ac.decodeAudioData(b))
+        .then(buf => { this.samples.set(id, buf); })
+        .catch(() => { /* synthesized instead */ });
+    }
+  }
+
+  /** a recorded loop, started silent once (null: not loaded) */
+  private loopOf(id: SfxId, dest?: AudioNode): { src: AudioBufferSourceNode; gain: GainNode } | null {
+    let l = this.loops.get(id);
+    if (l) return l;
+    const buf = this.samples.get(id);
+    if (!buf || !this.ac) return null;
+    const src = this.ac.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const gain = this.ac.createGain();
+    gain.gain.value = 0;
+    src.connect(gain); gain.connect(dest ?? this.sfx!);
+    src.start();
+    l = { src, gain };
+    this.loops.set(id, l);
+    return l;
+  }
+
+  /** play a recorded one-shot (false: not loaded — the caller synthesizes) */
+  private shot(id: SfxId, gain = 1, dest?: AudioNode): boolean {
+    const buf = this.samples.get(id);
+    if (!buf || !this.ac) return false;
+    const src = this.ac.createBufferSource();
+    src.buffer = buf;
+    const g = this.ac.createGain();
+    g.gain.value = gain;
+    src.connect(g); g.connect(dest ?? this.sfx!);
+    src.start();
+    return true;
   }
 
   /** Idempotent: the first call builds the mixer, later calls do nothing. */
@@ -89,6 +161,7 @@ export class GameAudio {
       this.pumpGain.gain.value = 0;
       src.connect(bp); bp.connect(this.pumpGain); this.pumpGain.connect(this.sfx);
       src.start();
+      this.loadSamples();
     } catch {
       this.ac = null;
     }
@@ -114,6 +187,14 @@ export class GameAudio {
   setSiren(active: boolean, style: SirenStyle = 'fire'): void {
     const ac = this.ac;
     if (!ac || !this.sirenGain || !this.sirenOsc || !this.sirenLfo || !this.sirenLfoGain) return;
+    // (the recording, where there is one: the synth stays silent)
+    const rec = SIREN_REC[style], lv = this.loopOf(rec.id);
+    if (lv) {
+      this.sirenGain.gain.setTargetAtTime(0, ac.currentTime, 0.05);
+      for (const r of Object.values(SIREN_REC)) if (r.id !== rec.id) this.loops.get(r.id)?.gain.gain.setTargetAtTime(0, ac.currentTime, 0.08);
+      lv.gain.gain.setTargetAtTime(active ? rec.gain : 0, ac.currentTime, 0.08);
+      return;
+    }
     const s = SIREN[style];
     if (style !== this.sirenStyle) {
       this.sirenStyle = style;
@@ -125,7 +206,14 @@ export class GameAudio {
   }
 
   setPump(active: boolean): void {
-    if (this.pumpGain && this.ac) this.pumpGain.gain.setTargetAtTime(active ? 0.12 : 0, this.ac.currentTime, 0.05);
+    if (!this.pumpGain || !this.ac) return;
+    const lv = this.loopOf('pump');
+    if (lv) {
+      this.pumpGain.gain.setTargetAtTime(0, this.ac.currentTime, 0.05);
+      lv.gain.gain.setTargetAtTime(active ? 0.5 : 0, this.ac.currentTime, 0.05);
+      return;
+    }
+    this.pumpGain.gain.setTargetAtTime(active ? 0.12 : 0, this.ac.currentTime, 0.05);
   }
 
   // ---- the kid's vehicle ----
@@ -136,10 +224,22 @@ export class GameAudio {
     const ac = this.ac;
     if (!ac) return;
     if (kind !== this.engineKind) {
-      if (this.engineKind) this.engines.get(this.engineKind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
+      if (this.engineKind) {
+        this.engines.get(this.engineKind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
+        this.loops.get(`engine-${this.engineKind}` as SfxId)?.gain.gain.setTargetAtTime(0, ac.currentTime, 0.2);
+      }
       this.engineKind = kind;
     }
     if (!kind) return;
+    // the recorded loop, sped up with the vehicle (the synth voice falls quiet)
+    const lv = this.loopOf(`engine-${kind}` as SfxId);
+    if (lv) {
+      const sp = Math.max(0, Math.min(1, speed)), g = Math.max(0, Math.min(1, gas)), e = ENGINE_REC[kind];
+      this.engines.get(kind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
+      lv.src.playbackRate.setTargetAtTime(e.rate + e.up * sp + 0.04 * g, ac.currentTime, 0.12);
+      lv.gain.gain.setTargetAtTime(e.g0 + (e.g1 - e.g0) * sp, ac.currentTime, 0.15);
+      return;
+    }
     let v = this.engines.get(kind);
     if (!v) { v = this.makeEngine(kind); this.engines.set(kind, v); }
     v.set(Math.max(0, Math.min(1, speed)), Math.max(0, Math.min(1, gas)), ac.currentTime);
@@ -305,13 +405,14 @@ export class GameAudio {
   }
 
   thud(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('thud', 0.8)) return;
     this.hiss(this.ac.currentTime, 0.18, 0.5, 'lowpass', 220);
   }
 
   /** a cartoon "boing" (a bump, a crash) */
   boing(): void {
     if (!this.ac) return;
+    if (this.shot('boing')) { this.shot('thud', 0.6); return; }
     const t = this.ac.currentTime;
     this.note(330, t, 0.35, 0.12, 'sine', undefined, 120);
     this.thud();
@@ -319,7 +420,7 @@ export class GameAudio {
 
   /** the mission-complete jingle: a bright arpeggio up */
   jingle(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('win-jingle')) return;
     const t = this.ac.currentTime;
     [523, 659, 784, 1047].forEach((f, i) => this.note(f, t + i * 0.11, 0.3, 0.12));
     this.note(1568, t + 0.44, 0.6, 0.06, 'sine');
@@ -327,14 +428,14 @@ export class GameAudio {
 
   /** a star earned: a twinkling chime */
   star(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('star', 0.8)) return;
     const t = this.ac.currentTime;
     [1319, 1760, 2093, 2637].forEach((f, i) => this.note(f, t + i * 0.07, 0.5, 0.06, 'sine'));
   }
 
   /** a gate, ring or buoy passed: a bell ding */
   ding(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('ding')) return;
     const t = this.ac.currentTime;
     this.note(1320, t, 0.7, 0.1, 'sine');
     this.note(2640, t, 0.4, 0.03, 'sine');
@@ -342,34 +443,34 @@ export class GameAudio {
 
   /** the race countdown: a beep, higher on GO */
   beep(go = false): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot(go ? 'beep-go' : 'beep')) return;
     this.note(go ? 988 : 659, this.ac.currentTime, go ? 0.5 : 0.22, 0.09, 'square');
   }
 
   /** a lap done: two notes up */
   lap(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('lap')) return;
     const t = this.ac.currentTime;
     this.note(784, t, 0.18, 0.09); this.note(1175, t + 0.14, 0.3, 0.09);
   }
 
   /** the station's bell (three dings) */
   stationBell(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('station-bell')) return;
     const t = this.ac.currentTime;
     for (let i = 0; i < 3; i++) { this.note(1047, t + i * 0.28, 0.5, 0.08, 'sine'); this.note(2094, t + i * 0.28, 0.25, 0.02, 'sine'); }
   }
 
   /** the train doors' chime: two notes down */
   doorChime(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('door-chime')) return;
     const t = this.ac.currentTime;
     this.note(880, t, 0.35, 0.08, 'sine'); this.note(659, t + 0.3, 0.5, 0.08, 'sine');
   }
 
   /** the train's horn */
   trainHorn(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('train-horn')) return;
     const t = this.ac.currentTime;
     for (const f of [311, 370]) this.note(f, t, 0.9, 0.05, 'sawtooth');
   }
@@ -378,12 +479,13 @@ export class GameAudio {
   honk(pan = 0, dist = 10): void {
     if (!this.ac) return;
     const t = this.ac.currentTime, dest = this.placed(pan, dist);
+    if (this.shot('car-horn', 1, dest)) return;
     for (const at of [0, 0.22]) for (const f of [415, 523]) this.note(f, t + at, 0.16, 0.05, 'sawtooth', dest);
   }
 
   /** a splash in the river */
   splash(): void {
-    if (!this.ac) return;
+    if (!this.ac || this.shot('splash', 0.7)) return;
     this.hiss(this.ac.currentTime, 0.45, 0.12, 'bandpass', 900);
   }
 
@@ -400,6 +502,8 @@ export class GameAudio {
     const c = this.crossing, t = ac.currentTime;
     c.gain.gain.setTargetAtTime(on ? 1 / (1 + dist / 20) : 0, t, 0.1);
     c.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
+    const lv = this.loopOf('crossing-bell', c.pan);
+    if (lv) { lv.gain.gain.setTargetAtTime(0.7, t, 0.05); return; }
     if (on && t >= c.next) {
       this.note(1480, t, 0.25, 0.06, 'square', c.pan);
       c.next = t + 0.5;
@@ -426,6 +530,14 @@ export class GameAudio {
       this.ambience = { waves, birdsAt: t + 2, cricketsAt: t + 1 };
     }
     const a = this.ambience;
+    const birds = this.loopOf('amb-birds', this.amb!), crickets = this.loopOf('amb-crickets', this.amb!), waves = this.loopOf('amb-waves', this.amb!);
+    if (birds && crickets && waves) {
+      a.waves.gain.setTargetAtTime(0, t, 0.5);
+      birds.gain.gain.setTargetAtTime(0.35 * (1 - night), t, 0.8);
+      crickets.gain.gain.setTargetAtTime(0.35 * night, t, 0.8);
+      waves.gain.gain.setTargetAtTime(0.6 * sea, t, 0.8);
+      return;
+    }
     a.waves.gain.setTargetAtTime(0.08 * sea, t, 0.5);
     // a bird's chirp now and then by day: two or three quick whistles
     if (night < 0.5 && t >= a.birdsAt) {

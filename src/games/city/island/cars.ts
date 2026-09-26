@@ -16,6 +16,7 @@ import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../
 import { lightState, greenLeft, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST, CROSSING_BOOM } from '../transit.js';
 import type { Threat } from './walkers.js';
+import { crosswalksFor } from '../../../worlds/crosswalks.js';
 import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
 
@@ -323,8 +324,19 @@ export class IslandCars {
    * anybody on the crosswalk ahead.
    */
   update(dt: number, elapsed: number, rail: Railway | null, player: THREE.Vector3 | null, draw: boolean,
-         walkers: Array<{ x: number; z: number }> | null = null, road: Threat | null = null): void {
+         walkers: Array<{ x: number; z: number; xing?: number; xingOn?: boolean }> | null = null, road: Threat | null = null): void {
     const g = this.graph;
+    // the crosswalks somebody is waiting at or crossing (the walkers say)
+    const cws = crosswalksFor(this.bx, this.by);
+    // (busy: somebody waiting at the kerb or out on it — a car that can still
+    // stop comfortably stops for either, so the walker can go; on: somebody
+    // out on the carriageway — all a car already turning, or just out of the
+    // junction, stops for: stopping it for a walker still at the kerb could
+    // hold the queue behind it over the stripes the walker waits to see clear)
+    const busyX = new Set<number>(), onX = new Set<number>();
+    if (walkers) for (const w of walkers) {
+      if (w.xing !== undefined && w.xing >= 0) { busyX.add(w.xing); if (w.xingOn) onX.add(w.xing); }
+    }
     // ---- who is where ----
     type Slot = { s: number; car: Car };
     const lanes = new Map<number, Slot[]>();
@@ -426,6 +438,16 @@ export class IslandCars {
         let vT = follow(gapAhead(c), c.speed * 0.8);
         vT = forWalkers(c, c.h, vT);
         vT = forPlayer(c, c.h, vT);
+        // turning into a street whose crosswalk somebody is on: stop at the
+        // end of the turn, the nose short of the stripes
+        {
+          const cwO = cws.at(c.round.node, c.round.next);
+          if (cwO && onX.has(cwO.id)) {
+            const endS = c.round.cum[c.round.cum.length - 1];
+            const dS = endS - c.len / 2 + (cwO.near - TURN_IN) - 0.4 - c.round.s;
+            if (dS > -0.5) vT = Math.min(vT, Math.sqrt(Math.max(0, 10 * dS)));
+          }
+        }
         c.v += Math.max(-8 * dt, Math.min(5 * dt, vT - c.v));
         c.round.s += c.v * dt;
         if (c.round.s >= c.round.cum[c.round.cum.length - 1]) {
@@ -511,6 +533,28 @@ export class IslandCars {
           if (busy) holdAt = e.len - TURN_IN - 0.05;
         }
         if (holdAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (holdAt - c.s) * 1.4));
+        // a crosswalk with somebody waiting at it or on it: stop with the nose
+        // 1.2 m short of the stripes — this street's at the junction ahead,
+        // and (not starting across the junction onto it) the one on the
+        // street it turns into; a car already too close to stop rolls on
+        // rather than stopping on the stripes
+        if (busyX.size) {
+          // (the one at the junction just left, too: short of it while the
+          // nose isn't over the stripes yet)
+          const cwS = cws.at(c.dir > 0 ? e.a : e.b, e.id);
+          if (cwS && onX.has(cwS.id)) {
+            const dS0 = cwS.near - 0.4 - c.len / 2 - c.s;
+            if (dS0 > -0.3) vTarget = Math.min(vTarget, Math.sqrt(Math.max(0, 10 * dS0)));
+          }
+          const cwIn = cws.at(end.id, e.id), cwOut = cws.at(end.id, c.next);
+          if ((cwIn && busyX.has(cwIn.id)) || (cwOut && busyX.has(cwOut.id))) {
+            const dS = e.len - (cwIn ? cwIn.far : 10.4) - 1.2 - c.len / 2 - c.s;
+            // (braking early enough to stop there at 5 m/s²: v² = 2·a·d — the
+            // gentler 1.4·d rule asked for more braking than a car has and
+            // ran onto the stripes)
+            if (dS > -0.5 && dS < 25) vTarget = Math.min(vTarget, Math.sqrt(Math.max(0, 10 * dS)));
+          }
+        }
         vTarget = forWalkers(c, c.h, vTarget);
         // the kid's road vehicle: queue behind it, ease aside when close
         vTarget = forPlayer(c, c.h, vTarget);

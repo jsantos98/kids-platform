@@ -20,8 +20,10 @@ suburbs, parks, forests and rail yards. Every tenth island in each direction
 is a small race island that is a whole kart circuit.
 
 The world keeps running while you play:
-- cars follow the streets and stop at red lights;
-- people and pets walk the sidewalks and cross at the corners;
+- cars follow the streets and stop at red lights, at level crossings (never
+  on them) and before zebra crossings when somebody wants to cross;
+- people and pets walk the sidewalks and cross the streets only on zebra
+  crossings;
 - trains run on a timetable from island to island;
 - boats sail under the causeways' raised spans.
 

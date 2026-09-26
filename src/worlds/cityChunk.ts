@@ -24,6 +24,7 @@ import { TILE } from './raceLoop.js';
 export const TRACK_TOP = 0.19;
 import { STRAIT } from './cityGrid.js';
 import { chunkRoadPieces, nodePiece, nodeReach, armDir, pieceOutline, trafficPoles } from './roadLayout.js';
+import { crosswalksFor, CW_HALF, CW_W } from './crosswalks.js';
 
 export { WORLD_CHUNKS }; // re-exported for the game layer
 
@@ -102,9 +103,7 @@ function kenneyTPL() {
       straight: bakedModel('road-straight'),
       pass: bakedModel('road-straight'),
       cross: bakedModel('road-crossroad'),
-      crossPath: bakedModel('road-crossroad-path'),
       tee: bakedModel('road-intersection'),
-      teePath: bakedModel('road-intersection-path'),
       bend: bakedModel('road-bend'),
       end: bakedModel('road-end'),
       round: bakedModel('road-roundabout'),
@@ -529,9 +528,9 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       continue;
     }
     if (hasRoadKit) {
-      const tpl = p.kind === 'cross' ? (p.crosswalks ? R.crossPath ?? R.cross : R.cross)
-        : p.kind === 'tee' ? (p.crosswalks ? R.teePath ?? R.tee : R.tee)
-          : R[p.kind];
+      // (plain pads: the crosswalks are painted below, where people cross —
+      // the kit's -path pads striped them inside the pad, beside it)
+      const tpl = p.kind === 'cross' ? R.cross : p.kind === 'tee' ? R.tee : R[p.kind];
       if (!tpl) continue;
       // native pieces are 1 unit per side (the roundabout 3): scale so the
       // placed piece spans exactly p.lx x p.lz
@@ -540,6 +539,19 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     } else {
       // no kit: a plain slab with kerbs
       flat(pieceOutline(p), ROAD_ASPHALT, PAD_Y);
+    }
+  }
+
+  // crosswalks (crosswalks.ts): white stripes along each arm, spread across
+  // the carriageway just beyond the junction's pad — each painted by the
+  // chunk holding its middle
+  for (const cw of crosswalksFor(bx, by).list) {
+    if (!inChunk(cw.x, cw.z)) continue;
+    const ry = Math.atan2(cw.lx, cw.lz), px = -cw.lz, pz = cw.lx;
+    const n = Math.floor((2 * CW_HALF) / 1.0);
+    for (let k = 0; k < n; k++) {
+      const lat = -CW_HALF + 0.5 + k * ((2 * CW_HALF - 1) / (n - 1));
+      B.box(0.5, 0.02, CW_W, 0xf4f1ea, cw.x + px * lat, ROAD_Y + 0.052, cw.z + pz * lat, 0, ry, 0);
     }
   }
 

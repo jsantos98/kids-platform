@@ -13,8 +13,7 @@ const road = (name: string): BakeDef => [`${ROADKIT}/${name}.glb`, `${ROADKIT}/T
 
 export const KITDEFS: Record<string, BakeDef> = {};
 for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`];
-for (const n of ['road-straight', 'road-crossroad', 'road-crossroad-path', 'road-intersection',
-  'road-intersection-path', 'road-bend', 'road-end', 'road-roundabout', 'light-curved', 'traffic-light']) {
+for (const n of ['road-straight', 'road-crossroad', 'road-intersection', 'road-bend', 'road-end', 'road-roundabout', 'light-curved', 'traffic-light']) {
   KITDEFS[n] = road(n);
 }
 Object.assign(KITDEFS, {

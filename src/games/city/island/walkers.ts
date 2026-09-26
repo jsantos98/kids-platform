@@ -18,7 +18,8 @@ import { occupancyFor, LOT, PLAZA, SEA, RIVER, RAIL, ROAD, type Occupancy } from
 import { coastFor, type Coast } from '../../../worlds/coast.js';
 import { ROUNDABOUT_REACH } from '../../../worlds/cityPlan.js';
 import { lightState } from '../lights.js';
-import { graphFor, leaving, type StreetGraph } from '../../../worlds/streetGraph.js';
+import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
+import { crosswalksFor, type Crosswalk, type Crosswalks } from '../../../worlds/crosswalks.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
 import type { Railway } from '../railway.js';
 import { deckAt } from '../../../worlds/causeway.js';
@@ -55,8 +56,16 @@ interface Walker {
   /** how far the walker has scurried off the path (world metres), eases back */
   fx: number;
   fz: number;
-  /** how long it has been waiting at a corner (s) */
-  waitT: number;
+  /** the way on at the junction ahead (decided as it comes up) */
+  plan: Plan | null;
+  /** walking over a crosswalk */
+  path: CrossPath | null;
+  /** the crosswalk it's heading for on this street (after turning onto it) */
+  cross: Crosswalk | null;
+  /** the crosswalk it is waiting at or crossing (-1: none) — the cars stop for
+   * it — and whether it's out on the carriageway (not just at the kerb) */
+  xing: number;
+  xingOn: boolean;
   /** where the walker is this frame (world) */
   x: number;
   z: number;
@@ -67,6 +76,25 @@ interface Walker {
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
 
+/** where a walker's sidewalk leads at the junction ahead: straight on (the
+ * street carries on, on its side), round the corner onto the next street
+ * (and, sometimes, over that street on its crosswalk), or back */
+type Plan =
+  | { node: number; kind: 'back'; at: number }
+  | { node: number; kind: 'straight'; edge: number }
+  | { node: number; kind: 'turn'; at: number; edge: number; dir: 1 | -1; mu: number; side: number; cross: Crosswalk | null };
+/** walking over a crosswalk: from one sidewalk straight over the stripes to
+ * the other (city-local) */
+interface CrossPath {
+  to: { x: number; z: number };
+  x: number;
+  z: number;
+  /** allowed across (green / clear), and how long it has waited at the kerb */
+  go: boolean;
+  waited: number;
+  cw: Crosswalk;
+  walkPhase: 'ew' | 'ns';
+}
 export class IslandWalkers {
   readonly walkers: Walker[] = [];
   private graph: StreetGraph;
@@ -102,12 +130,12 @@ export class IslandWalkers {
         const side = (r() < 0.5 ? -1 : 1) * (8.2 + r() * 1.4);
         const s = 12 + r() * (e.len - 24);
         const p = g.sample(e, s, side);
-        if (occ.claims(p.x, p.z, 0.5, LOT) || occ.claims(p.x, p.z, 1.5, PLAZA | SEA)) continue;
+        if (occ.claims(p.x, p.z, 0.5, LOT | ROAD) || occ.claims(p.x, p.z, 1.5, PLAZA | SEA)) continue;
         const body = pet ? people.length + (k - nPeople) % pets.length : k % people.length;
         const size = pet ? 0.9 + r() * 0.3 : 1;
         this.walkers.push({
           edge: e.id, dir: r() < 0.5 ? -1 : 1, s, side, speed: (pet ? 1.2 : 0.8) + r() * 0.6,
-          phase: r() * 10, pet, fx: 0, fz: 0, waitT: 0, x: this.ox + p.x, z: this.oz + p.z, r, body, size,
+          phase: r() * 10, pet, fx: 0, fz: 0, plan: null, path: null, cross: null, xing: -1, xingOn: false, x: this.ox + p.x, z: this.oz + p.z, r, body, size,
         });
         placed = true;
       }
@@ -135,6 +163,55 @@ export class IslandWalkers {
     return !(this.occ.bits(here.x, here.z) & ROAD) && (this.occ.bits(ahead.x, ahead.z) & ROAD) !== 0;
   }
 
+  /**
+   * The way on at node N for a walker coming up edge e. The walker keeps to
+   * its side of the pavement (sig: +1 right of its way): the first street
+   * round from its own on that side bounds its corner — it turns the corner
+   * onto it, or (3+ arms, sometimes) crosses it on its crosswalk into the
+   * next corner; with no street on its side before straight on, it carries
+   * straight on; round the outside of a bend it follows the corner round.
+   */
+  private planAt(w: Walker, e: SEdge, N: SNode, cws: Crosswalks): Plan {
+    const g = this.graph;
+    const tx = e.ux * w.dir, tz = e.uz * w.dir;
+    const sig: 1 | -1 = w.side * w.dir >= 0 ? 1 : -1, d = Math.abs(w.side);
+    // toward the walker's side of its way
+    const sx = -tz * sig, sz = tx * sig;
+    const arms = N.edges.filter(id => id !== e.id).map(id => {
+      const o = g.edges[id], l = leaving(g, o, N.id);
+      let phi = Math.atan2(l.x * sx + l.z * sz, -(l.x * tx + l.z * tz));
+      if (phi <= 1e-6) phi += Math.PI * 2;
+      return { o, l, phi };
+    }).sort((a, b) => a.phi - b.phi);
+    const back: Plan = { node: N.id, kind: 'back', at: 12 };
+    if (!arms.length) return back;
+    const first = arms[0];
+    if (first.phi < Math.PI - 0.15) {
+      const tp = this.turnPlan(N, tx, tz, first, sig, d);
+      if (!tp) return back;
+      // (3+ arms, sometimes: over the street it turns onto, on its crosswalk
+      // — when the corner meets that street's sidewalk short of the stripes)
+      const cw = arms.length >= 2 ? cws.at(N.id, first.o.id) : undefined;
+      if (cw && tp.kind === 'turn' && tp.mu <= cw.far - 0.5 && w.r() < 0.6) tp.cross = cw;
+      return tp;
+    }
+    if (Math.abs(first.phi - Math.PI) < 0.15) return { node: N.id, kind: 'straight', edge: first.o.id };
+    return this.turnPlan(N, tx, tz, first, sig, d) ?? back;
+  }
+
+  /** round the corner onto arm a: where the walker's sidewalk line (offset d
+   * on side sig) meets a's, the same side of its new way */
+  private turnPlan(N: SNode, tx: number, tz: number, a: { o: SEdge; l: { x: number; z: number } }, sig: 1 | -1, d: number): Plan | null {
+    const lx = a.l.x, lz = a.l.z;
+    const rx = sig * d * (-lz) - sig * d * (-tz), rz = sig * d * lx - sig * d * tx;
+    const det = tx * lz - lx * tz;
+    if (Math.abs(det) < 0.15) return null;
+    const lam = (-rx * lz + lx * rz) / det, mu = (-tx * rz + rx * tz) / det;
+    if (Math.abs(lam) > 30 || Math.abs(mu) > 30) return null;
+    const dir: 1 | -1 = a.o.a === N.id ? 1 : -1;
+    return { node: N.id, kind: 'turn', at: lam, edge: a.o.id, dir, mu, side: sig * d * dir, cross: null };
+  }
+
   /** may a dodging walker stand at world (x, z)? */
   private free(x: number, z: number): boolean {
     const lx = x - this.ox, lz = z - this.oz;
@@ -145,77 +222,142 @@ export class IslandWalkers {
    * out of the way of (or null), `rail` the trains they wait for at level
    * crossings (null: none), `viewer` decides who is drawn */
   update(dt: number, t: number, rail: Railway | null, threat: Threat | null, viewer: THREE.Vector3 | null, draw: boolean,
-         cars: Array<{ x: number; z: number }> | null = null): void {
+         cars: Array<{ x: number; z: number; v?: number }> | null = null): void {
     const g = this.graph;
     const used = this.meshes.map(() => 0);
+    const cws = crosswalksFor(this.bx, this.by);
     for (const w of this.walkers) {
       let e = g.edges[w.edge];
-      // walk along the edge
-      const end = g.nodes[w.dir > 0 ? e.b : e.a];
-      const toEnd = w.dir > 0 ? e.len - w.s : w.s;
-      const tx = e.ux * w.dir, tz = e.uz * w.dir;
-      /** the street the sidewalk carries straight on into, across the corner */
-      const straightOn = (): typeof e | undefined => end.edges.map(id => g.edges[id]).find(o => {
-        if (o.id === e.id) return false;
-        const l = leaving(g, o, end.id);
-        return l.x * tx + l.z * tz > 0.9;
-      });
-      let atCorner = false, kerb = false;
-      if (end.plaza && toEnd < ROUNDABOUT_REACH + 1) {
-        w.dir = -w.dir as 1 | -1;
-      } else if (toEnd < 26 && end.edges.length >= 3 && !end.mouth && this.stepsOntoRoad(e, w)) {
-        // a corner: the next step is off the kerb, across the side street —
-        // cross on the walker's own green (the side street's traffic
-        // stopped), or where there are no lights once no car is close; no
-        // sidewalk beyond: back the way they came. (Waiting on the kerb, never
-        // in the road: at an oblique corner the sidewalk line cuts through
-        // the other street's lanes.)
-        kerb = true;
-        if (!straightOn()) w.dir = -w.dir as 1 | -1;
-        else if (end.signalized) atCorner = lightState(end.x, end.z, t) !== g.phaseOf(end, e);
-        else if (cars) {
-          const nx = this.ox + end.x, nz = this.oz + end.z;
-          // (after a while at a busy corner, only a car right there holds them)
-          const r = w.waitT > 10 ? 7 : 16;
-          // (after 20 s they step out anyway: the cars stop for anybody on their crossing)
-          atCorner = w.waitT < 20 && cars.some(c => (c.x - nx) ** 2 + (c.z - nz) ** 2 < r * r);
+      let p: { x: number; z: number };
+      // (which way the walker faces: along its street, or along its route)
+      let fhx = e.ux * w.dir, fhz = e.uz * w.dir;
+      let pace = 1, waiting = false;
+      w.xing = -1;
+      w.xingOn = false;
+      const reverse = (): void => { w.dir = -w.dir as 1 | -1; w.plan = null; w.cross = null; };
+      if (w.path) {
+        // ---- over a crosswalk: from the kerb straight across the stripes ----
+        const P = w.path;
+        if (!P.go) {
+          // at the kerb: the walker's own green where there are lights; at a
+          // zebra, once no car is too near to stop (after 20 s, anyway — the
+          // cars stop for anybody waiting there)
+          // — and never while a car is on the stripes, or still coming at
+          // them (a car that has stopped short of them has stopped for the
+          // walker: waiting on it too left both standing for good)
+          const N = g.nodes[P.cw.node];
+          const cx = this.ox + P.cw.x, cz = this.oz + P.cw.z, cw = P.cw;
+          const blocks = (r: number): boolean => !!cars && cars.some(c => {
+            const dx = c.x - cx, dz = c.z - cz;
+            if (dx * dx + dz * dz > r * r) return false;
+            const along = Math.abs(dx * cw.lx + dz * cw.lz), lat = Math.abs(dx * -cw.lz + dz * cw.lx);
+            const onStripes = along < 1.5 + 2.6 && lat < 7.5;
+            return onStripes || (c.v ?? 1) > 1;
+          });
+          if (N.signalized) P.go = lightState(N.x, N.z, t) === P.walkPhase && !blocks(12);
+          else {
+            P.go = P.waited > 20 ? !blocks(6) : !blocks(11);
+            w.xing = P.cw.id;
+          }
+          P.waited += dt;
+          waiting = !P.go;
         }
-      } else if (toEnd <= 0) {
-        const cont = straightOn();
-        if (cont) {
-          // same sidewalk line on the next edge: keep the world-side offset
-          const flip = cont.ux * e.ux + cont.uz * e.uz < 0;
-          w.side = flip ? -w.side : w.side;
-          w.dir = cont.a === end.id ? 1 : -1;
-          w.s = w.dir > 0 ? 0 : cont.len;
-          w.edge = cont.id;
-          e = cont;
-        } else {
+        const dx = P.to.x - P.x, dz = P.to.z - P.z, dist = Math.hypot(dx, dz);
+        if (P.go) {
+          // (brisk over the stripes; the cars wait while they're on the
+          // carriageway — not for the last steps on the far pavement)
+          const lat = Math.abs((P.x - P.cw.x) * -P.cw.lz + (P.z - P.cw.z) * P.cw.lx);
+          if (lat < 7.6) { w.xing = P.cw.id; w.xingOn = true; }
+          const step = w.speed * dt * 1.7;
+          if (step >= dist) { P.x = P.to.x; P.z = P.to.z; } else { P.x += (dx / dist) * step; P.z += (dz / dist) * step; }
+        }
+        if (dist > 1e-3) { fhx = dx / dist; fhz = dz / dist; }
+        p = { x: P.x, z: P.z };
+        if (P.go && dist <= w.speed * dt * 1.7) {
+          // over: on the far sidewalk, walking back toward the junction (it
+          // turns the next corner there and carries on its way)
+          w.side = -w.side;
           w.dir = -w.dir as 1 | -1;
+          w.path = null; w.plan = null; w.cross = null;
+        }
+      } else {
+        const end = g.nodes[w.dir > 0 ? e.b : e.a];
+        const toEnd = w.dir > 0 ? e.len - w.s : w.s;
+        if (end.plaza && toEnd < ROUNDABOUT_REACH + 1) {
+          reverse();
+        } else {
+          // the way on at the next junction, decided as it comes up
+          if ((!w.plan || w.plan.node !== end.id) && toEnd < 45) w.plan = this.planAt(w, e, end, cws);
+          const pl = w.plan && w.plan.node === end.id ? w.plan : null;
+          if (pl?.kind === 'back') {
+            if (toEnd <= pl.at) reverse();
+          } else if (pl?.kind === 'turn') {
+            // round the corner: onto the next street's sidewalk, where the
+            // two sidewalk lines meet (so the step is seamless) — and, when it
+            // means to cross that street, on toward its crosswalk
+            if (toEnd <= pl.at) {
+              const o = g.edges[pl.edge];
+              w.edge = o.id; w.dir = pl.dir; w.s = pl.dir > 0 ? pl.mu : o.len - pl.mu; w.side = pl.side;
+              w.plan = null;
+              w.cross = pl.cross;
+              e = o;
+            }
+          } else if (toEnd <= 0) {
+            // straight on, the sidewalk carrying on along the next street
+            const cont = pl?.kind === 'straight' ? g.edges[pl.edge] : undefined;
+            if (cont) {
+              const flip = cont.ux * e.ux + cont.uz * e.uz < 0;
+              w.side = flip ? -w.side : w.side;
+              w.dir = cont.a === end.id ? 1 : -1;
+              w.s = w.dir > 0 ? 0 : cont.len;
+              w.edge = cont.id;
+              w.plan = null;
+              e = cont;
+            } else reverse();
+          }
+          // at the stripes of the crosswalk it's heading for: over it, square
+          // across the street to the same spot on the far sidewalk
+          if (w.cross && w.cross.edge === e.id && !w.path) {
+            const cw = w.cross, mid = (cw.near + cw.far) / 2;
+            const sMid = cw.node === e.a ? mid : e.len - mid;
+            const from = cw.node === e.a ? w.s : e.len - w.s; // (metres out from the junction)
+            const away = cw.node === e.a ? w.dir > 0 : w.dir < 0;
+            if (away && from >= mid - 0.2) {
+              w.s = sMid;
+              const here = g.sample(e, sMid, w.side), there = g.sample(e, sMid, -w.side);
+              const N = g.nodes[cw.node];
+              w.path = { to: there, x: here.x, z: here.z, go: false, waited: 0, cw,
+                walkPhase: g.phaseOf(N, e) === 'ew' ? 'ns' : 'ew' };
+            }
+          }
+          // never off the kerb but on a crosswalk: a step onto a carriageway
+          // turns them back
+          if (!w.path && this.stepsOntoRoad(e, w)) reverse();
+        }
+        // the sidewalk ends at the shore: a causeway corridor runs on out to
+        // sea, its walkers turn back at the beach
+        if (!w.path) {
+          const ahead = g.sample(e, w.s + w.dir * 1.5, w.side);
+          if (!this.coast.inLand(ahead.x, ahead.z, 2)) reverse();
+        }
+        // a level crossing: wait short of it while a train is near, hurry off
+        // it if the warning caught them on it
+        if (rail && !w.path) {
+          for (const cr of e.crossings) {
+            const ahead = (cr.s - w.s) * w.dir;
+            if (ahead < -5 || ahead > 10) continue;
+            if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, t) >= WALK_WARN) continue;
+            if (ahead > 5) waiting = true;
+            else pace = 3;
+          }
+        }
+        if (w.path) p = { x: w.path.x, z: w.path.z };
+        else {
+          if (!waiting) w.s += w.dir * w.speed * pace * dt;
+          p = g.sample(e, w.s, w.side);
+          fhx = e.ux * w.dir; fhz = e.uz * w.dir;
         }
       }
-      // the sidewalk ends at the shore: a causeway corridor runs on out to
-      // sea, its walkers turn back at the beach
-      {
-        const ahead = g.sample(e, w.s + w.dir * 1.5, w.side);
-        if (!this.coast.inLand(ahead.x, ahead.z, 2)) w.dir = -w.dir as 1 | -1;
-      }
-      // a level crossing: wait short of it while a train is near, hurry off
-      // it if the warning caught them on it
-      // (the time at the kerb keeps counting while they step out)
-      w.waitT = kerb ? w.waitT + dt : 0;
-      let pace = 1, waiting = atCorner;
-      if (rail) {
-        for (const cr of e.crossings) {
-          const ahead = (cr.s - w.s) * w.dir;
-          if (ahead < -5 || ahead > 10) continue;
-          if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, t) >= WALK_WARN) continue;
-          if (ahead > 5) waiting = true;
-          else pace = 3;
-        }
-      }
-      if (!waiting) w.s += w.dir * w.speed * pace * dt;
-      const p = g.sample(e, w.s, w.side);
       let x = this.ox + p.x + w.fx, z = this.oz + p.z + w.fz;
       let running = false;
       if (threat) {
@@ -276,7 +418,7 @@ export class IslandWalkers {
       const y0 = dk && dk.kind === 'road' ? dk.y : 0;
       _p.set(x, y0 + 0.1 + Math.abs(Math.sin(w.phase)) * (running ? 0.16 : w.pet ? 0.06 : 0.04), z);
       _e.set(running ? (w.pet ? 0.1 : 0.18) : 0,
-        running && threat ? Math.atan2(x - threat.x, z - threat.z) : Math.atan2(e.ux * w.dir, e.uz * w.dir), 0);
+        running && threat ? Math.atan2(x - threat.x, z - threat.z) : Math.atan2(fhx, fhz), 0);
       im.setMatrixAt(used[w.body]++, _m.compose(_p, _q.setFromEuler(_e), _s.setScalar(w.size)));
     }
     if (draw) this.meshes.forEach((im, bi) => {

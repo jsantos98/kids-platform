@@ -3,3 +3,6 @@ dist/
 server.log
 *.log
 .DS_Store
+
+# Piper voice models (tools/make-voice.py downloads them)
+.voices/

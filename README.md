@@ -74,10 +74,17 @@ The game is in **Portuguese (Portugal)** by default. To switch to English
 the garage, or press **L**. The choice is remembered for every page. For one
 visit only, add `?lang=en` or `?lang=pt` to the address.
 
-The names are spoken in the chosen language. For a Portugal accent the
-computer needs a Portuguese (Portugal) voice, for example Windows'
-"Microsoft Helia" (Settings → Time & language → Speech → Add voices).
-Without one, the browser uses any Portuguese voice it has.
+The names are spoken in the chosen language by recorded voices (a
+Portugal Portuguese one and a British English one), so every computer
+sounds the same, whatever voices it has installed. The clips are in
+`public/audio/voice/`.
+
+To re-record them after changing a text, you need Python 3.10+,
+`pip install piper-tts` and ffmpeg. Then run `python tools/make-voice.py`.
+It downloads the two [Piper](https://github.com/OHF-Voice/piper1-gpl)
+voices (~63 MB each) into `.voices/` once, and records only the lines that
+changed. `npx tsx tools/check-i18n.ts` fails if a clip is missing or out of
+date.
 
 ### Controls
 
@@ -167,3 +174,10 @@ npx tsx tools/plan-hash.ts            # for refactors: the cities must not chang
 Industrial, Suburban, Roads), Nature Kit, Mini Forest, Survival Kit, Cube
 Pets, Mini Characters, Train Kit, Watercraft Kit, Toy Car Kit and Racing
 Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).
+
+Voices: recorded with [Piper](https://github.com/OHF-Voice/piper1-gpl) using
+[`pt_PT-tugão-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/pt/pt_PT/tug%C3%A3o/medium)
+(dataset CC0; fine-tuned from Piper's US-English "lessac" voice, whose
+recordings are licensed for non-commercial use) and
+[`en_GB-cori-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/medium)
+(LibriVox recordings, public domain).

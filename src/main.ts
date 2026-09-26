@@ -10,9 +10,11 @@ import { makeHelicopter, makePlane, makeTree, makeConifer, makeCloud } from './k
 import { rng } from './engine/rng.js';
 import { GAMES, type GameEntry } from './games/registry.js';
 import { loadTotals } from './games/city/state.js';
-import { t as tr, applyI18n, getLang, setLang, speechVoice, LANGS } from './i18n/index.js';
+import { applyI18n, getLang, setLang, LANGS } from './i18n/index.js';
+import { speak, preloadVoice } from './i18n/voice.js';
 
 applyI18n('garage.pageTitle');
+preloadVoice();
 
 const PICK_KEY = 'garage.pick';
 let sel = Math.max(0, GAMES.findIndex(g => g.id === (localStorage.getItem(PICK_KEY) ?? '')));
@@ -141,27 +143,15 @@ function showName(): void {
   document.documentElement.style.setProperty('--sel', e.color);
   ringMat.color.set(e.color);
 }
-function say(text: string): void {
-  try {
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    // (in the chosen language: Portugal's voice when the system has one)
-    const { lang, voice } = speechVoice();
-    u.lang = lang;
-    if (voice) u.voice = voice;
-    u.rate = 0.95; u.pitch = 1.15;
-    synth.speak(u);
-  } catch { /* no voice: fine */ }
-}
+/** say a line in the chosen language: its recorded clip (src/i18n/voice.ts) */
+function say(id: string): Promise<void> { return speak(id); }
 function choose(i: number): void {
   const n = GAMES.length;
   sel = ((i % n) + n) % n;
   try { localStorage.setItem(PICK_KEY, GAMES[sel].id); } catch { /* private mode */ }
   layout();
   showName();
-  say(GAMES[sel].title);
+  say(`mode-${GAMES[sel].id}`);
 }
 addEventListener('resize', layout);
 layout();
@@ -184,9 +174,10 @@ function pickLang(l: 'pt' | 'en'): void {
   if (l === getLang()) return;
   setLang(l);
   applyI18n('garage.pageTitle');
+  preloadVoice();
   drawLang();
   showName();
-  say(GAMES[sel].title);
+  say(`mode-${GAMES[sel].id}`);
 }
 drawLang();
 
@@ -201,11 +192,14 @@ let going = false;
 function go(): void {
   if (going) return;
   going = true;
-  say(tr('garage.letsGo', { title: GAMES[sel].title }));
+  const said = say(`go-${GAMES[sel].id}`);
   const wipe = document.getElementById('wipe')!;
   wipe.textContent = GAMES[sel].icon;
   wipe.classList.add('on');
-  setTimeout(() => { location.href = GAMES[sel].url; }, 650);
+  // (off to the game once the wipe is in and the line has been said — 3 s at most)
+  const wiped = new Promise(r => setTimeout(r, 650));
+  const most = new Promise(r => setTimeout(r, 3000));
+  void Promise.race([Promise.all([wiped, said]), most]).then(() => { location.href = GAMES[sel].url; });
 }
 document.getElementById('go')!.addEventListener('click', go);
 renderer.domElement.addEventListener('click', go);

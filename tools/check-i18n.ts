@@ -6,12 +6,16 @@
 //  - the pages (index.html, play/city.html, diorama/*.html): no letters in
 //    the body's text outside <script>/<style> (texts come from data-i18n*);
 //  - the scripts that draw the UI: no string literal that reads like a
-//    shouted prompt (two capitalised words, or a word plus "!"/"…").
+//    shouted prompt (two capitalised words, or a word plus "!"/"…");
+//  - the recorded voice: a clip for every spoken line, recorded from the
+//    dictionaries' current text (tools/make-voice.py).
 // Run: npx tsx tools/check-i18n.ts
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { EN } from '../src/i18n/en.js';
 import { PT } from '../src/i18n/pt.js';
+import { setLang, LANGS } from '../src/i18n/index.js';
+import { voiceLines } from '../src/i18n/voice.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const fails: string[] = [];
@@ -49,6 +53,20 @@ for (const f of scripts) {
     if (/^\s*(\*|\/\*)/.test(line) || ALLOW.test(code)) return;
     if (SHOUT.test(code) || SENTENCE.test(code)) fails.push(`${f}:${i + 1}: hard-coded text: ${line.trim().slice(0, 90)}`);
   });
+}
+
+// ---- the recorded voice: a clip for every spoken line, saying today's text ----
+{
+  const dir = path.join(ROOT, 'public/audio/voice');
+  let manifest: Record<string, Record<string, string>> = {};
+  try { manifest = JSON.parse(readFileSync(path.join(dir, 'manifest.json'), 'utf8')); } catch { fails.push('public/audio/voice/manifest.json is missing (run tools/make-voice.py)'); }
+  for (const l of LANGS) {
+    setLang(l.id);
+    for (const [id, text] of Object.entries(voiceLines())) {
+      if (!existsSync(path.join(dir, l.id, `${id}.mp3`))) fails.push(`voice: ${l.id}/${id}.mp3 is missing (run tools/make-voice.py)`);
+      else if (manifest[l.id]?.[id] !== text) fails.push(`voice: ${l.id}/${id}.mp3 says "${manifest[l.id]?.[id]}", the text is now "${text}" (run tools/make-voice.py)`);
+    }
+  }
 }
 
 for (const f of fails) console.log('FAIL', f);

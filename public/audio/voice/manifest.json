@@ -1,0 +1,46 @@
+{
+  "voices": {
+    "pt": "pt_PT-tugão-medium",
+    "en": "en_GB-cori-medium"
+  },
+  "pt": {
+    "mode-truck": "Camião dos Bombeiros",
+    "go-truck": "Camião dos Bombeiros. Vamos lá!",
+    "mode-police": "Carro da Polícia",
+    "go-police": "Carro da Polícia. Vamos lá!",
+    "mode-ambulance": "Ambulância",
+    "go-ambulance": "Ambulância. Vamos lá!",
+    "mode-heliMedical": "Helicóptero de Salvamento",
+    "go-heliMedical": "Helicóptero de Salvamento. Vamos lá!",
+    "mode-heliPolice": "Helicóptero da Polícia",
+    "go-heliPolice": "Helicóptero da Polícia. Vamos lá!",
+    "mode-plane": "Avião",
+    "go-plane": "Avião. Vamos lá!",
+    "mode-boat": "Barco",
+    "go-boat": "Barco. Vamos lá!",
+    "mode-train": "Comboio",
+    "go-train": "Comboio. Vamos lá!",
+    "mode-race": "Corrida de Karts",
+    "go-race": "Corrida de Karts. Vamos lá!"
+  },
+  "en": {
+    "mode-truck": "Fire Truck",
+    "go-truck": "Fire Truck. Let's go!",
+    "mode-police": "Police Car",
+    "go-police": "Police Car. Let's go!",
+    "mode-ambulance": "Ambulance",
+    "go-ambulance": "Ambulance. Let's go!",
+    "mode-heliMedical": "Rescue Helicopter",
+    "go-heliMedical": "Rescue Helicopter. Let's go!",
+    "mode-heliPolice": "Police Helicopter",
+    "go-heliPolice": "Police Helicopter. Let's go!",
+    "mode-plane": "Plane",
+    "go-plane": "Plane. Let's go!",
+    "mode-boat": "Boat",
+    "go-boat": "Boat. Let's go!",
+    "mode-train": "Train",
+    "go-train": "Train. Let's go!",
+    "mode-race": "Kart Race",
+    "go-race": "Kart Race. Let's go!"
+  }
+}

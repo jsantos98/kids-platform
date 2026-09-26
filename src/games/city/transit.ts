@@ -361,6 +361,20 @@ export class Transit {
   night: NightLights | null = null;
   private _p = new THREE.Vector3();
 
+  /** the nearest crossing to (px, pz) that is warning a train, within 150 m
+   * (world; its bells ring, G11), or null */
+  nearestWarning(px: number, pz: number, rail: Railway): { x: number; z: number; d: number } | null {
+    let best: { x: number; z: number; d: number } | null = null;
+    for (const inst of this.cities.values()) {
+      for (const sig of inst.signals) {
+        const x = sig.c.x + inst.ox, z = sig.c.z + inst.oz, d = Math.hypot(x - px, z - pz);
+        if (d > 150 || (best && d >= best.d) || !this.blocked(inst, sig.c, rail)) continue;
+        best = { x, z, d };
+      }
+    }
+    return best;
+  }
+
   /** the lamps + booms of every built city follow the world's trains */
   update(dt: number, elapsed: number, rail: Railway): void {
     for (const inst of this.cities.values()) {

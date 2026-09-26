@@ -67,6 +67,7 @@ export const PT: Record<Key, string> = {
   'city.pageTitle': 'Cidade Sem Fim',
   'city.loadingPanel': 'a carregar…',
   'city.clock': 'a hora do dia',
+  'city.mute': 'som ligado / desligado',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',
   'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · chamadas de desenho {calls} · triângulos {tris}',

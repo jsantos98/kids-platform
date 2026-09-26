@@ -6,7 +6,8 @@ import { bakedNight } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
-import { GameAudio } from '../../engine/audio.js';
+import { GameAudio, type EngineKind, type SirenStyle } from '../../engine/audio.js';
+import { Soundscape } from './soundscape.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
 import { createPlayer, physicsStep, startCrash, heliSirenLamps, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
@@ -292,6 +293,18 @@ camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
 camera.lookAt(spawn.x, 1.4, spawn.z);
 
 const audio = new GameAudio();
+const sound = new Soundscape(audio);
+// sound on / off (remembered), beside the home button (G11)
+const muteBtn = document.getElementById('muteBtn')!;
+const showMute = (): void => { muteBtn.textContent = audio.isMuted ? '🔇' : '🔊'; };
+showMute();
+muteBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMuted(!audio.isMuted); showMute(); });
+/** the kid's engine sound, by vehicle */
+const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
+  : V.kind === 'rail' ? 'train' : MODE.id === 'truck' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
+/** its siren's two tones */
+const SIREN_STYLE: SirenStyle = V.kind === 'heli' ? 'heli' : MODE.id === 'truck' ? 'fire' : MODE.id === 'police' ? 'police' : 'ambulance';
+let seaNear = 0, seaCheck = 0, lastCount = -1;
 /** back to the garage (the launcher) */
 function goHome(): void { location.href = new URL('../index.html', location.href).href; }
 document.getElementById('homeBtn')!.addEventListener('click', goHome);
@@ -299,7 +312,7 @@ initInput(code => {
   if (code === 'Escape') { goHome(); return; }
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
-  if (code === 'KeyE') setSiren(!sirenOn);
+  if (code === 'KeyE') { if (V.kind === 'rail') sound.event('horn'); else setSiren(!sirenOn); }
   if (code === 'KeyR' && V.kind !== 'rail') {
     Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: V.kind === 'plane' ? 11 : 0 });
     crumbs.clear();
@@ -457,6 +470,8 @@ if (q.get('debugsea') === '1') {
     /** the time of day now (G10) */
     day: () => day,
     causeways,
+    get audio() { return audio; },
+    get sound() { return sound; },
     stage,
     /** jump the day clock to a time of day (0 = dawn … 1) */
     setPhase: (p: number) => {
@@ -632,6 +647,7 @@ function updateMissionPanel(): void {
 /** a finished task outside the fire truck's fires/cats */
 function earnStar(msg: string, at: THREE.Vector3): void {
   particles.burstConfetti(at);
+  sound.event('star');
   runStars++;
   totals.stars++;
   saveTotals(totals);
@@ -700,6 +716,7 @@ function openCall(o: Objective): void {
     saveTotals(totals);
     updateMissionPanel();
     particles.burstConfetti(player.car.position);
+    sound.event('missionDone');
     missions.cooldown = 3;
     activeCall = null;
     mode = 'drive';
@@ -863,13 +880,13 @@ const tick = (): void => {
     // and carry on from a crumb clear of the track (G1)
     if (!wasCrashing && trainBoxes.some(b => inBox(b, st.x, st.z, V.radius))) {
       startCrash(player);
-      audio.thud();
+      sound.event('crash');
       Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
     }
     const ring = course?.aim(st.x, st.z, st.heading);
     const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
-      audio.thud();
+      sound.event('crash');
       toast = '';
       // (road vehicles resume on a breadcrumb; the helicopter picked its
       // spot itself, just back along its path)
@@ -883,6 +900,7 @@ const tick = (): void => {
       if (stuck.t >= 3) {
         if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
           startCrash(player);
+          sound.event('crash');
           Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
         }
         Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
@@ -904,11 +922,12 @@ const tick = (): void => {
     if (wall) { st.x += wall.dx; st.z += wall.dz; st.v *= 1 - Math.min(0.5, dt * 2); }
     const ev = race.update(dt, st.x, st.z);
     const at = new THREE.Vector3(st.x, 2, st.z);
-    if (ev.go) { raceMsg = tr('race.go'); raceMsgT = 1.5; particles.burstConfetti(at); }
-    if (ev.lap) { raceMsg = ev.lap === LAPS ? tr('race.lastLap') : tr('race.lapN', { n: ev.lap }); raceMsgT = 2; }
+    if (ev.go) { raceMsg = tr('race.go'); raceMsgT = 1.5; particles.burstConfetti(at); sound.event('go'); }
+    if (ev.lap) { raceMsg = ev.lap === LAPS ? tr('race.lastLap') : tr('race.lapN', { n: ev.lap }); raceMsgT = 2; sound.event('lap'); }
     raceMsgT -= dt;
     if (ev.finished) {
       const place = ev.finished;
+      sound.event('finish');
       earnStar(place === 1 ? tr('race.wonRace') : tr('race.placeRace', { place: ordinal(place) }), at);
       raceCheer = 0;
     }
@@ -1055,6 +1074,7 @@ const tick = (): void => {
     const push = islands.bump(st.x, st.z, V.radius + 0.3);
     if (push) {
       st.x += push.dx; st.z += push.dz;
+      if (Math.abs(st.v) > 2) sound.event('bumpCar');
       st.v *= 1 - Math.min(0.5, dt * 3);
       player.car.position.x = st.x; player.car.position.z = st.z;
     }
@@ -1065,7 +1085,7 @@ const tick = (): void => {
       if (!hit) continue;
       st.x += hit.dx; st.z += hit.dz;
       player.car.position.x = st.x; player.car.position.z = st.z;
-      if (hit.dashed) { st.v *= 0.5; audio.thud(); }
+      if (hit.dashed) { st.v *= 0.5; audio.thud(); sound.event('bumpCar'); }
       else st.v *= 1 - Math.min(0.5, dt * 3);
     }
   }
@@ -1081,6 +1101,7 @@ const tick = (): void => {
     if (Math.abs(st.v) > 1.5 && splashTimer <= 0) {
       splashTimer = 0.1;
       particles.splash(new THREE.Vector3(st.x, 0.25, st.z));
+      if (Math.random() < 0.08) sound.event('splash');
     }
   }
 
@@ -1201,6 +1222,9 @@ const tick = (): void => {
     guideWait.textContent = '';
     // (the lap and place are on the guide badge: the prompt only speaks
     // for the countdown, the cheers and the finish)
+    // (a beep for each number of the countdown; GO beeps higher, on ev.go)
+    if (rv.phase === 'countdown' && rv.count > 0 && rv.count !== lastCount) sound.event('countdown');
+    lastCount = rv.phase === 'countdown' ? rv.count : -1;
     const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : tr('race.go'))
       : rv.phase === 'finished' ? (rv.finalPlace === 1 ? tr('race.won') : tr('race.place', { place: ordinal(rv.finalPlace) }))
       : raceMsgT > 0 ? raceMsg : '';
@@ -1215,7 +1239,7 @@ const tick = (): void => {
       : course.kind === 'rings' ? 'course.rings' : 'course.buoys');
     promptFill.style.width = `${(100 * course.passedCount) / course.gates.length}%`;
     const res = course.update(elapsed, st.x, st.alt + 2, st.z);
-    if (res === 'passed') particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z));
+    if (res === 'passed') { particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z)); sound.event('gate'); }
     if (res === 'finished') {
       earnStar(tr(course.kind === 'gates' ? 'course.gatesDone' : course.kind === 'rings' ? 'course.ringsDone' : 'course.buoysDone'),
         new THREE.Vector3(st.x, st.alt + 2, st.z));
@@ -1230,6 +1254,7 @@ const tick = (): void => {
     promptText.textContent = gap < 12 ? (pose.v < 0.5 ? tr('train.aboard', { people: '🧍'.repeat(Math.min(6, boarding.boardedKid)) }) : tr('train.board'))
       : gap < 70 ? tr('train.slow') : tr('train.station');
     if (gap < 12 && pose.v < 0.5) {
+      sound.event('station');
       earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
       stationDone = { x: station.x, z: station.z };
     }
@@ -1257,8 +1282,20 @@ const tick = (): void => {
     updateMissionPanel();
   }
 
-  audio.setSiren(sirenOn);
-  audio.setPump(director.pumping);
+  // the frame's sound (G11): engine, siren, pump, crossing bells, horns, ambience
+  seaCheck -= dt;
+  if (seaCheck <= 0) {
+    seaCheck = 0.5;
+    const cst = coastFor(curCity.bx, curCity.by), lx = st.x - curCity.ox, lz = st.z - curCity.oz;
+    seaNear = !cst.inLand(lx, lz, 15) ? 1 : !cst.inLand(lx, lz, 45) ? 0.6 : !cst.inLand(lx, lz, 90) ? 0.25 : 0;
+  }
+  const trainV = V.kind === 'rail' ? Math.abs(railway.playerPose()?.v ?? 0) : Math.abs(st.v);
+  sound.frame(dt, {
+    engine: view.scene ? null : ENGINE, speed: trainV / V.maxF, gas: input.gas,
+    siren: sirenOn, sirenStyle: SIREN_STYLE, pump: director.pumping,
+    x: st.x, z: st.z, heading: st.heading, night: day.night, sea: seaNear,
+    crossing: view.scene ? null : transit.nearestWarning(st.x, st.z, railway),
+  });
   {
     // the vehicle's own roof lamps flash when its model has them (the police
     // car, the ambulance, the fire truck); otherwise the game's light bar

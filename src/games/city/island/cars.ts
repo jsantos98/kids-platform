@@ -71,7 +71,16 @@ interface Car {
   z: number;
   h: number;
   ry: number;
+  /** held right behind the kid's vehicle this step; for how long (s); and
+   * whether it has honked about it yet (sound only — G11) */
+  kid?: boolean;
+  held?: number;
+  honked?: boolean;
 }
+
+/** where a car honked since the game last looked (the game drains it and
+ * plays the horns, G11; capped, since the node tools never drain it) */
+export const honks: Array<{ x: number; z: number }> = [];
 
 /**
  * Each car model as ONE geometry (its meshes merged in the model's own
@@ -379,6 +388,7 @@ export class IslandCars {
       const ahead = dx * fx + dz * fz, side = dx * fz - dz * fx;
       if (ahead <= 0 || ahead > 40 || Math.abs(side) > road.halfW + 1.8) return v;
       const room = ahead - road.halfL - c.len / 2 - 2.5;
+      if (room < 5) c.kid = true;
       // (v² = 2·a·d: from here, stopping in `room` at a gentle 4 m/s²)
       return Math.min(v, Math.sqrt(Math.max(0, 8 * room)));
     };
@@ -537,6 +547,16 @@ export class IslandCars {
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
       c.ry += Math.abs(dh) > 2.5 ? dh : dh * Math.min(1, dt * 10);
+      // stuck waiting behind the kid for 3 s: one honk (then patience)
+      if (c.kid && c.v < 0.4) {
+        c.held = (c.held ?? 0) + dt;
+        if (c.held > 3 && !c.honked) {
+          c.honked = true;
+          honks.push({ x: c.x, z: c.z });
+          if (honks.length > 20) honks.shift();
+        }
+      } else if (!c.kid) { c.held = 0; c.honked = false; }
+      c.kid = false;
     }
     if (!draw) return;
     // ---- draw: the cars near the player, packed into their model's mesh ----

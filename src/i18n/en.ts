@@ -66,6 +66,7 @@ export const EN = {
   'city.pageTitle': 'Endless City',
   'city.loadingPanel': 'loading…',
   'city.clock': 'the time of day',
+  'city.mute': 'sound on / off',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
   'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · draw calls {calls} · triangles {tris}',

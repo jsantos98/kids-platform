@@ -124,6 +124,14 @@
   }
   #homeBtn span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: var(--cream); }
   body.in-scene #homeBtn { display: none; }
+  /* sound on / off, beside the home button (G11) */
+  #muteBtn {
+    position: fixed; top: 14px; left: 82px; z-index: 12;
+    width: 52px; height: 52px; border-radius: 50%; cursor: pointer;
+    display: grid; place-items: center; font-size: 24px; line-height: 1;
+    background: var(--cream); border: 3px solid #fffdf8; box-shadow: 0 4px 0 rgba(74, 80, 88, .18);
+    touch-action: manipulation;
+  }
   /* the loading card: what's happening, a bar with the vehicle driving
      along it, and about how long is left */
   #loading {
@@ -211,6 +219,7 @@
 <button id="sirenBtn" type="button"><span class="ic">🚨</span><span data-i18n="city.siren"></span></button>
 <canvas id="minimap" width="256" height="256"></canvas>
 <button id="homeBtn" type="button" data-i18n-title="city.home"><span>🏠</span></button>
+<button id="muteBtn" type="button" data-i18n-title="city.mute">🔊</button>
 <div id="islandPill"><span class="t"></span><span class="mini"><div></div></span></div>
 <div id="loading">
   <div class="isle">🏝️</div>

@@ -7,6 +7,7 @@ export const PT: Record<Key, string> = {
   'garage.pageTitle': 'A Minha Garagem',
   'garage.title': 'A Minha Garagem',
   'garage.help': 'roda o volante para escolher · carrega no pedal para ir',
+  'garage.keys': 'no jogo: &nbsp;<b>ESPAÇO / A</b> água · salvar &nbsp; <b>E</b> sirene &nbsp; <b>C</b> câmara &nbsp; <b>R</b> recomeçar &nbsp; <b>ESC</b> garagem',
   'garage.go': 'VAMOS!',
   'garage.letsGo': '{title}. Vamos lá!',
   'garage.language': 'Língua',
@@ -33,7 +34,6 @@ export const PT: Record<Key, string> = {
 
   // ---- a página do jogo ----
   'city.pageTitle': 'Cidade Sem Fim',
-  'city.hint': '<b>W / ↑</b> acelerar &nbsp; <b>S / ↓</b> travar &nbsp; <b>A D / ← →</b> virar &nbsp; <b>ESPAÇO / A</b> água / salvar &nbsp; <b>E</b> sirene &nbsp; <b>C</b> câmara (atrás · alto · cabine) &nbsp; <b>R</b> recomeçar<br>Volante USB: o volante e os pedais funcionam logo',
   'city.loadingPanel': 'a carregar…',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',

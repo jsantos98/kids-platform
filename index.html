@@ -80,6 +80,16 @@
   }
   #lang button.on { background: var(--sel, #e25c5c); color: #fffdf8; }
   #wheel { width: clamp(38px, 6vh, 58px); height: clamp(38px, 6vh, 58px); transition: transform .08s linear; }
+
+  /* ---- the game's keys, for the grown-up setting things up ---- */
+  #keys {
+    position: fixed; bottom: 0.9vh; left: 50%; transform: translateX(-50%); z-index: 6;
+    white-space: nowrap; pointer-events: none;
+    padding: 6px 20px; border-radius: 999px; background: var(--cream);
+    box-shadow: 0 3px 0 rgba(74, 80, 88, .12);
+    font-weight: 700; font-size: clamp(12px, 1.8vh, 16px); color: var(--ink-soft);
+  }
+  #keys b { color: var(--ink); }
   #go {
     position: fixed; right: 3vw; top: 42vh; z-index: 6; cursor: pointer;
     display: flex; align-items: center; gap: 12px; border: 4px solid #fffdf8; border-radius: 999px;
@@ -116,6 +126,7 @@
 </div>
 <div id="lang" role="group" data-i18n-title="garage.language"></div>
 <button id="go" type="button"><span data-i18n="garage.go"></span><span class="pedal">🦶</span></button>
+<div id="keys" data-i18n-html="garage.keys"></div>
 <div id="wipe"></div>
 <script type="module" src="/src/main.ts"></script>
 </body>

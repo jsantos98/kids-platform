@@ -6,6 +6,7 @@ export const EN = {
   'garage.pageTitle': 'My Little Garage',
   'garage.title': 'My Little Garage',
   'garage.help': 'turn the wheel to choose · press the pedal to go',
+  'garage.keys': 'in the game: &nbsp;<b>SPACE / A</b> spray · rescue &nbsp; <b>E</b> siren &nbsp; <b>C</b> camera &nbsp; <b>R</b> reset &nbsp; <b>ESC</b> garage',
   'garage.go': 'GO!',
   'garage.letsGo': "{title}. Let's go!",
   'garage.language': 'Language',
@@ -32,7 +33,6 @@ export const EN = {
 
   // ---- the game page ----
   'city.pageTitle': 'Endless City',
-  'city.hint': '<b>W / ↑</b> gas &nbsp; <b>S / ↓</b> brake &nbsp; <b>A D / ← →</b> steer &nbsp; <b>SPACE / A</b> spray / rescue &nbsp; <b>E</b> siren &nbsp; <b>C</b> camera (chase · high · cab) &nbsp; <b>R</b> reset<br>USB wheel: steering axis + triggers work automatically',
   'city.loadingPanel': 'loading…',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',

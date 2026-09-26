@@ -7,14 +7,6 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #fdf4e3; }
   canvas { display: block; }
   :root { --ink: #4a5058; --ink-soft: #5a6472; --cream: rgba(255, 252, 244, .92); --teal: #63b0a8; }
-  #hint {
-    position: fixed; top: 12px; left: 84px; z-index: 9;
-    padding: 10px 18px; border-radius: 999px;
-    background: var(--cream); color: var(--ink-soft);
-    font: 600 13px/1.5 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; pointer-events: none;
-    box-shadow: 0 3px 0 rgba(74, 80, 88, .14);
-  }
-  #hint b { color: var(--ink); }
   #mission {
     position: fixed; top: 12px; right: 12px; z-index: 9;
     padding: 12px 20px; border-radius: 22px; min-width: 220px; text-align: right;
@@ -78,12 +70,12 @@
     box-shadow: 0 3px 0 rgba(74, 80, 88, .14);
   }
   /* mission scenes: a soft cream fade between the world and the scene; the
-     map, siren and key hints step aside while a scene plays */
+     map and the siren step aside while a scene plays */
   #fade {
     position: fixed; inset: 0; z-index: 7; background: #fdf4e3;
     opacity: 0; pointer-events: none;
   }
-  body.in-scene #minimap, body.in-scene #sirenBtn, body.in-scene #hint { display: none; }
+  body.in-scene #minimap, body.in-scene #sirenBtn { display: none; }
   #minimap {
     position: fixed; right: 12px; bottom: 12px; z-index: 9;
     width: clamp(110px, 17vh, 150px); height: clamp(110px, 17vh, 150px);
@@ -162,7 +154,6 @@
 </style>
 </head>
 <body>
-<div id="hint" data-i18n-html="city.hint"></div>
 <div id="mission" data-i18n="city.loadingPanel"></div>
 <div id="guide">
   <div id="guideBadge"><span id="guideIcon"></span>

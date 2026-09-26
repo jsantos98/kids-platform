@@ -96,7 +96,10 @@ export class Minimap {
     // the kid: a big arrow in the middle, the way it's heading
     ctx.save();
     ctx.translate(s / 2, s / 2);
-    ctx.rotate(heading);
+    // (the arrow is drawn pointing up the map, -z; a heading h faces
+    // (sin h, cos h) with +z drawn downwards: rotate by π − h — by h it
+    // pointed back the way the kid came)
+    ctx.rotate(Math.PI - heading);
     ctx.fillStyle = '#e25c5c';
     ctx.strokeStyle = '#fffdf8';
     ctx.lineWidth = 5;

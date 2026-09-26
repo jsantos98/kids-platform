@@ -37,7 +37,8 @@ export interface Activity {
  * confetti, and a camera */
 export function makeSet(roadZ = 6): { scene: THREE.Scene; camera: THREE.PerspectiveCamera; particles: Particles } {
   const scene = new THREE.Scene();
-  makeSceneDressing(scene, { sunPos: [-25, 40, 30], shadowSpan: 26, fogNear: 60, fogFar: 180, groundR: 160 });
+  // (the game lights the scene for the world's time of day: userData.dressing)
+  scene.userData.dressing = makeSceneDressing(scene, { sunPos: [-25, 40, 30], shadowSpan: 26, fogNear: 60, fogFar: 180, groundR: 160 });
   const road = new THREE.Mesh(new THREE.PlaneGeometry(90, 9), new THREE.MeshLambertMaterial({ color: C.road }));
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0.02, roadZ);

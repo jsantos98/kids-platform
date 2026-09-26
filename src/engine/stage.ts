@@ -1,6 +1,8 @@
-// Stage factory: renderer, gradient sky, lights, camera, HUD stats chip.
+// Stage factory: renderer, sky, lights, camera, HUD stats chip.
 import * as THREE from 'three';
 import { C } from './palette.js';
+import { Sky } from './sky.js';
+import { dayState, NOON, type DayState } from './daylight.js';
 
 export { C };
 
@@ -75,6 +77,8 @@ export interface StageOptions {
   groundColor?: number;
   showSun?: boolean;
   ground?: boolean;
+  /** drifting clouds overhead */
+  clouds?: boolean;
 }
 
 export interface Stage {
@@ -82,22 +86,31 @@ export interface Stage {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   sun: THREE.DirectionalLight;
+  sky: Sky;
   /** the sky dome + sun disc follow the player across the infinite city */
   followSky(x: number, z: number): void;
+  /** the lights and the sky for a time of day, round a centre (G10) */
+  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3): void;
 }
 
 export interface Dressing {
   sun: THREE.DirectionalLight;
+  hemi: THREE.HemisphereLight;
+  sky: Sky;
   /** the sky dome + sun disc follow a point (the player) */
   followSky(x: number, z: number): void;
+  /** the lights, fog and sky for a time of day round centre (cx, cz): the
+   * shadow-casting light becomes the moon at night (G10) */
+  applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3): void;
 }
 
-/** Sky dome, fog, hemisphere fill, the warm shadow-casting sun, optional sun
- * disc and ground — everything a pastel scene needs besides its content.
- * Shared by the world stage and the mission scenes (same renderer). */
+/** Sky (sky.ts), fog, hemisphere fill, the warm shadow-casting sun, optional
+ * sun disc and ground — everything a pastel scene needs besides its content.
+ * Shared by the world stage and the mission scenes (same renderer). A scene
+ * that never calls applyDay keeps the day's look with the sun at sunPos. */
 export function makeSceneDressing(scene: THREE.Scene, {
-  skyTop = C.skyTop,
-  skyBottom = C.skyBottom,
+  skyTop,
+  skyBottom,
   fogNear = 70,
   fogFar = 240,
   sunPos = [60, 80, 40],
@@ -106,30 +119,22 @@ export function makeSceneDressing(scene: THREE.Scene, {
   groundColor = C.grass,
   showSun = true,
   ground = true,
+  clouds = false,
 }: StageOptions = {}): Dressing {
-  scene.fog = new THREE.Fog(skyBottom, fogNear, fogFar);
-
-  // Gradient sky dome
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(480, 20, 12),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      fog: false,
-      uniforms: {
-        top: { value: new THREE.Color(skyTop) },
-        bottom: { value: new THREE.Color(skyBottom) },
-      },
-      vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `uniform vec3 top; uniform vec3 bottom; varying vec3 vP;
-        void main(){ float h = normalize(vP + vec3(0.0,60.0,0.0)).y; gl_FragColor = vec4(mix(bottom, top, pow(max(h,0.0),0.85)), 1.0); }`,
-    }),
-  );
-  scene.add(sky);
+  // the day's look, the sun where the scene put it
+  const noon = dayState(0, NOON);
+  const l = Math.hypot(...sunPos);
+  const dir: [number, number, number] = [sunPos[0] / l, sunPos[1] / l, sunPos[2] / l];
+  const still: DayState = {
+    ...noon, skyTop: skyTop ?? noon.skyTop, skyBottom: skyBottom ?? noon.skyBottom, sunDir: dir, lightDir: dir,
+  };
+  scene.fog = new THREE.Fog(still.skyBottom, fogNear, fogFar);
+  const sky = new Sky(scene, { showSun, clouds });
 
   // Lights: strong soft fill, gentle warm sun — pastel scenes read flat and clean
-  scene.add(new THREE.HemisphereLight(0xeef7fb, 0xd9d0bd, 1.9));
-  const sun = new THREE.DirectionalLight(0xfff1d8, 2.9);
+  const hemi = new THREE.HemisphereLight(still.hemiSky, still.hemiGround, still.hemiI);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(still.lightColor, still.lightI);
   sun.position.set(...sunPos);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -139,17 +144,7 @@ export function makeSceneDressing(scene: THREE.Scene, {
   sun.shadow.normalBias = 0.04;
   scene.add(sun);
   scene.add(sun.target);
-
-  let disc: THREE.Mesh | null = null;
-  const sunDiscOffset = new THREE.Vector3().copy(sun.position).normalize().multiplyScalar(420);
-  if (showSun) {
-    disc = new THREE.Mesh(
-      new THREE.SphereGeometry(14, 16, 12),
-      new THREE.MeshBasicMaterial({ color: C.sun, fog: false }),
-    );
-    disc.position.copy(sun.position).normalize().multiplyScalar(420);
-    scene.add(disc);
-  }
+  sky.update(still, 0, 0, 0);
 
   // Ground
   if (ground) {
@@ -159,12 +154,22 @@ export function makeSceneDressing(scene: THREE.Scene, {
     scene.add(groundMesh);
   }
 
-  // keep the sky dome and the sun disc centred on the player
-  const followSky = (x: number, z: number) => {
-    sky.position.set(x, 0, z);
-    disc?.position.set(x + sunDiscOffset.x, sunDiscOffset.y, z + sunDiscOffset.z);
+  // keep the sky centred on the player (the day's look)
+  const followSky = (x: number, z: number) => sky.update(still, x, z, 0);
+  const sunDist = Math.min(110, l);
+  const applyDay = (day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3) => {
+    (scene.fog as THREE.Fog).color.setHex(day.skyBottom);
+    hemi.color.setHex(day.hemiSky);
+    hemi.groundColor.setHex(day.hemiGround);
+    hemi.intensity = day.hemiI;
+    sun.color.setHex(day.lightColor);
+    sun.intensity = day.lightI;
+    sun.position.set(cx + day.lightDir[0] * sunDist, day.lightDir[1] * sunDist, cz + day.lightDir[2] * sunDist);
+    sun.target.position.set(cx, 0, cz);
+    sun.target.updateMatrixWorld();
+    sky.update(day, cx, cz, time, cam);
   };
-  return { sun, followSky };
+  return { sun, hemi, sky, followSky, applyDay };
 }
 
 export function createStage(opts: StageOptions = {}): Stage {
@@ -178,7 +183,7 @@ export function createStage(opts: StageOptions = {}): Stage {
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const { sun, followSky } = makeSceneDressing(scene, opts);
+  const { sun, sky, followSky, applyDay } = makeSceneDressing(scene, opts);
 
   const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1200);
   addEventListener('resize', () => {
@@ -187,7 +192,7 @@ export function createStage(opts: StageOptions = {}): Stage {
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  return { renderer, scene, camera, sun, followSky };
+  return { renderer, scene, camera, sun, sky, followSky, applyDay };
 }
 
 // HUD stats chip (proves the real-time cost of each scene)

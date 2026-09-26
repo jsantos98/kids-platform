@@ -1,7 +1,8 @@
 // The Endless City: boot, frame loop and play-mode orchestration (fire truck,
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
-import { createStage, makeHUD } from '../../engine/stage.js';
+import { createStage, makeHUD, type Dressing } from '../../engine/stage.js';
+import { dayState, startPhase, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
@@ -73,6 +74,12 @@ if (seedParam === null) {
   history.replaceState(null, '', u.toString());
 }
 setCityBase(P.seed);
+// the time of day (G10): every game starts in the morning (?time= jumps);
+// the moon's phase on the first night is the world's own
+const START_PHASE = startPhase(q.get('time'));
+const MOON_BASE = ((P.seed % MOON_PHASES) + MOON_PHASES) % MOON_PHASES;
+/** (a debug shift of the day clock: __dbg.setPhase) */
+let dayShift = 0;
 
 /** a starting lane spot that suits THIS city: on a street near the centre,
  * clear of the river, the railway, level crossings and roundabouts
@@ -141,9 +148,9 @@ function modeSpawn(bx: number, by: number): { x: number; z: number; heading: num
 // ---- stage & world dressing ----
 const stage = createStage({
   sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: 70, fogFar: 260,
-  ground: false, groundColor: 0xa9c88b,
+  ground: false, groundColor: 0xa9c88b, clouds: true,
 });
-const { scene, camera, renderer, sun, followSky } = stage;
+const { scene, camera, renderer } = stage;
 
 // ground follower — deep backdrop below the sea, hides the world's edge
 const groundFollower = new THREE.Mesh(
@@ -372,6 +379,14 @@ const transit = new Transit(scene);
 if (q.get('debugsea') === '1') {
   const v = new THREE.Vector3();
   (window as unknown as { __dbg: unknown }).__dbg = {
+    /** the time of day now (G10) */
+    day: () => day,
+    stage,
+    /** jump the day clock to a time of day (0 = dawn … 1) */
+    setPhase: (p: number) => {
+      const cur = dayState(elapsed + dayShift, START_PHASE, MOON_BASE);
+      dayShift += ((((p - cur.phase) % 1) + 1) % 1) * DAY_LEN;
+    },
     sea,
     scene,
     camera,
@@ -550,6 +565,7 @@ const totals = loadTotals();
 updateMissionPanel();
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
+let day = dayState(0, START_PHASE, MOON_BASE);
 
 /** the scene for a call: hose (fires), ladders (cats, burning buildings),
  * stretcher (ambulance) or winch (medical helicopter) */
@@ -899,12 +915,11 @@ const tick = (): void => {
   }
   camera.position.y = Math.max(camera.position.y, 1.2);
 
-  // sun + shadow camera follow the car, and the sky dome travels with it
-  sun.position.set(st.x - 40, 90, st.z - 55);
-  sun.target.position.set(st.x, 0, st.z);
-  sun.target.updateMatrixWorld();
+  // the time of day (G10): the sun (or the moon) + shadow camera follow the
+  // car, and the sky travels with it
+  day = dayState(elapsed + dayShift, START_PHASE, MOON_BASE);
+  stage.applyDay(day, st.x, st.z, elapsed, camera.position);
   groundFollower.position.set(st.x, -0.85, st.z);
-  followSky(st.x, st.z);
 
   // the archipelago is endless; stray into the sea and R brings you back
   // (one chunk a frame: a bake is 20-35 ms, and a new row of the view only
@@ -1143,8 +1158,12 @@ const tick = (): void => {
     promptFill.style.width = '0%';
   }
 
-  if (view.scene && view.camera) renderer.render(view.scene, view.camera);
-  else renderer.render(scene, camera);
+  renderer.toneMappingExposure = day.exposure;
+  if (view.scene && view.camera) {
+    // a mission scene plays at the world's time of day
+    (view.scene.userData.dressing as Dressing | undefined)?.applyDay(day, 0, 0, elapsed, view.camera.position);
+    renderer.render(view.scene, view.camera);
+  } else renderer.render(scene, camera);
   if (elapsed - statTime > 0.4) {
     statTime = elapsed;
     const i = renderer.info.render;

@@ -145,10 +145,25 @@ const FLEET: Array<{ tpl: string; len: number; speed: number; dir: 1 | -1; fb: (
 export class Fleet {
   private boats: Boat[] = [];
   private loop: Array<{ x: number; z: number }>;
+  /** the loop's cumulative length at each point (closed: the last entry is
+   * the whole way round), and the speed scale — boats move by distance, not
+   * by points: point by point a boat sped up and slowed down with the
+   * spacing, and one going the other way round jumped two points at each */
+  private cum: number[] = [0];
+  private total = 0;
+  private perM = 1;
 
   constructor(private scene: THREE.Scene, private ox: number, private oz: number, seed: number, bx: number, by: number) {
     this.loop = boatLoop(bx, by);
     const LOOP = this.loop;
+    for (let k = 0; k < LOOP.length; k++) {
+      const a = LOOP[k], b = LOOP[(k + 1) % LOOP.length];
+      this.cum.push(this.cum[k] + Math.hypot(b.x - a.x, b.z - a.z));
+    }
+    this.total = this.cum[LOOP.length];
+    // (the old speeds were `speed / 3` points a second: the same pace on
+    // average, now steady)
+    this.perM = this.total / LOOP.length / 3;
     // (six boats round an 896 m island; more round a bigger one's longer lane)
     const count = Math.round(FLEET.length * SCALE);
     for (let i = 0; i < count; i++) {
@@ -166,7 +181,7 @@ export class Fleet {
       g.rotation.order = 'YXZ';
       scene.add(g);
       // each island's fleet starts at its own seeded spots on the loop
-      const off = ((i / count) + ((seed >>> (i * 3)) & 7) / 64) * LOOP.length;
+      const off = ((i / count) + ((seed >>> (i * 3)) & 7) / 64) * this.total;
       this.boats.push({ mesh: g, offset: off, speed: d.speed, dir: d.dir, phase: i * 1.7 });
     }
   }
@@ -175,20 +190,30 @@ export class Fleet {
 
   dispose(): void { for (const b of this.boats) this.scene.remove(b.mesh); }
 
+  /** the point `s` metres round the loop (city-local) */
+  private at(s: number): { x: number; z: number } {
+    const L = this.loop, cum = this.cum;
+    s = mod(s, this.total);
+    let lo = 0, hi = L.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cum[m] <= s) lo = m; else hi = m - 1; }
+    const a = L[lo], b = L[(lo + 1) % L.length];
+    const f = (s - cum[lo]) / ((cum[lo + 1] - cum[lo]) || 1);
+    return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
+  }
+
   update(elapsed: number): void {
-    const LOOP = this.loop;
-    const total = LOOP.length;
+    if (!this.total) return;
     for (const b of this.boats) {
       b.mesh.visible = true;
-      const f = mod(b.offset + elapsed * (b.speed / 3) * b.dir, total);
-      const i0 = Math.floor(f) % total;
-      const i1 = mod(i0 + b.dir, total);
-      const fr = f - Math.floor(f);
-      const a = LOOP[i0], c = LOOP[i1];
-      const x = this.ox + a.x + (c.x - a.x) * fr;
-      const z = this.oz + a.z + (c.z - a.z) * fr;
+      // a steady pace by distance, either way round
+      const sM = b.offset + elapsed * b.speed * this.perM * b.dir;
+      const p = this.at(sM);
+      const x = this.ox + p.x, z = this.oz + p.z;
       b.mesh.position.set(x, waveAt(x, z, elapsed) * 1.6 + 0.05, z);
-      b.mesh.rotation.y = Math.atan2(c.x - a.x, c.z - a.z);
+      // (heading along the loop a few metres either side, so it swings
+      // round a bend instead of snapping at each point)
+      const ahead = this.at(sM + b.dir * 7), behind = this.at(sM - b.dir * 3);
+      b.mesh.rotation.y = Math.atan2(ahead.x - behind.x, ahead.z - behind.z);
       b.mesh.rotation.x = Math.sin(elapsed * 0.7 + b.phase) * 0.035;
       b.mesh.rotation.z = Math.sin(elapsed * 0.9 + b.phase) * 0.05;
     }

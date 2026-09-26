@@ -211,7 +211,7 @@ const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
 const crumbs = new Breadcrumbs(V.radius);
-const guideArrow3d = new GuideArrow(scene);
+const guideArrow3d = new GuideArrow();
 const _topBox = new THREE.Box3();
 /** how far the player's vehicle reaches above its origin (m) */
 function vehicleTop(): number {
@@ -1168,7 +1168,10 @@ const tick = (): void => {
     // a mission scene plays at the world's time of day
     (view.scene.userData.dressing as Dressing | undefined)?.applyDay(day, 0, 0, elapsed, view.camera.position);
     renderer.render(view.scene, view.camera);
-  } else renderer.render(scene, camera);
+  } else {
+    renderer.render(scene, camera);
+    guideArrow3d.drawOver(renderer, camera);
+  }
   if (elapsed - statTime > 0.4) {
     statTime = elapsed;
     const i = renderer.info.render;

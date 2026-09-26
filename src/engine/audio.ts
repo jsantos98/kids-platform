@@ -11,6 +11,9 @@ export type EngineKind = 'car' | 'truck' | 'kart' | 'heli' | 'plane' | 'boat' | 
 export type SirenStyle = 'fire' | 'ambulance' | 'police' | 'heli';
 
 const MUTE_KEY = 'game.mute';
+/** the effects' and the ambience's levels — well under the narrator's voice
+ * (which plays on its own at full level) — and how far a voice line ducks them */
+const SFX_LEVEL = 0.5, AMB_LEVEL = 0.45, DUCK = 0.45;
 /** the siren's two tones (Hz) and how long each lasts (s) */
 const SIREN: Record<SirenStyle, { lo: number; hi: number; tone: number; gain: number }> = {
   fire: { lo: 660, hi: 880, tone: 0.55, gain: 0.05 },
@@ -53,9 +56,10 @@ export class GameAudio {
       this.master.gain.value = this.muted ? 0 : 1;
       this.master.connect(ac.destination);
       this.sfx = ac.createGain();
+      this.sfx.gain.value = SFX_LEVEL;
       this.sfx.connect(this.master);
       this.amb = ac.createGain();
-      this.amb.gain.value = 0.8;
+      this.amb.gain.value = AMB_LEVEL;
       this.amb.connect(this.master);
       // white noise, shared by every noisy sound
       const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
@@ -102,8 +106,8 @@ export class GameAudio {
   duck(on: boolean): void {
     if (!this.ac || !this.sfx || !this.amb) return;
     const t = this.ac.currentTime;
-    this.sfx.gain.setTargetAtTime(on ? 0.45 : 1, t, 0.12);
-    this.amb.gain.setTargetAtTime(on ? 0.3 : 0.8, t, 0.12);
+    this.sfx.gain.setTargetAtTime(SFX_LEVEL * (on ? DUCK : 1), t, 0.12);
+    this.amb.gain.setTargetAtTime(AMB_LEVEL * (on ? DUCK : 1), t, 0.12);
   }
 
   /** the siren on / off in the vehicle's own two tones */

@@ -200,7 +200,7 @@ export const PT: Record<Key, string> = {
   'say.course.done': 'Conseguiste! Todos! Viva!',
   'say.caught.1': 'Apanhámos o ladrão! Viva!',
   'say.caught.2': 'Apanhaste um! Super polícia!',
-  'say.oops.1': 'Ups! Não faz mal, vamos outra vez!',
+  'say.oops.1': 'Opa! Não faz mal, vamos outra vez!',
   'say.oops.2': 'Ai! Continua, estás a ir muito bem!',
   'say.oops.3': 'Não há problema, vamos de novo!',
   'say.race.count': 'Três... dois... um... PARTIDA!',

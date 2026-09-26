@@ -6,3 +6,6 @@ server.log
 
 # Piper voice models (tools/make-voice.py downloads them)
 .voices/
+
+# local secrets (API keys for tools/make-voice.py)
+.env.local

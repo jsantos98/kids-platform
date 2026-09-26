@@ -74,17 +74,22 @@ The game is in **Portuguese (Portugal)** by default. To switch to English
 the garage, or press **L**. The choice is remembered for every page. For one
 visit only, add `?lang=en` or `?lang=pt` to the address.
 
-The names are spoken in the chosen language by recorded voices (a
-Portugal Portuguese one and a British English one), so every computer
-sounds the same, whatever voices it has installed. The clips are in
-`public/audio/voice/`.
+The names are spoken in the chosen language by recorded voices, so every
+computer sounds the same, whatever voices it has installed: Microsoft's
+Raquel for Portuguese (Portugal) and Piper's cori for British English. The
+clips are in `public/audio/voice/`.
 
-To re-record them after changing a text, you need Python 3.10+,
-`pip install piper-tts` and ffmpeg. Then run `python tools/make-voice.py`.
-It downloads the two [Piper](https://github.com/OHF-Voice/piper1-gpl)
-voices (~63 MB each) into `.voices/` once, and records only the lines that
-changed. `npx tsx tools/check-i18n.ts` fails if a clip is missing or out of
-date.
+To re-record them after changing a text, you need Python 3.10+, ffmpeg,
+`pip install piper-tts edge-tts`, and Node. Then run
+`python tools/make-voice.py`. It records only the lines that changed, and
+downloads the English [Piper](https://github.com/OHF-Voice/piper1-gpl) voice
+(~63 MB) into `.voices/` once. Portuguese comes from Microsoft: with an
+[Azure AI Speech](https://azure.microsoft.com/products/ai-services/ai-speech)
+key in `AZURE_SPEECH_KEY` (and its region in `AZURE_SPEECH_REGION`,
+default `westeurope`) the script uses Azure, whose free tier covers these
+few lines. Without a key it uses edge-tts, the same voice through Microsoft
+Edge's read-aloud service. `npx tsx tools/check-i18n.ts` fails if a clip is
+missing or out of date.
 
 ### Controls
 
@@ -175,9 +180,8 @@ Industrial, Suburban, Roads), Nature Kit, Mini Forest, Survival Kit, Cube
 Pets, Mini Characters, Train Kit, Watercraft Kit, Toy Car Kit and Racing
 Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).
 
-Voices: recorded with [Piper](https://github.com/OHF-Voice/piper1-gpl) using
-[`pt_PT-tugão-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/pt/pt_PT/tug%C3%A3o/medium)
-(dataset CC0; fine-tuned from Piper's US-English "lessac" voice, whose
-recordings are licensed for non-commercial use) and
+Voices: Portuguese by Microsoft's neural voice `pt-PT-RaquelNeural`
+(Azure AI Speech); English recorded with
+[Piper](https://github.com/OHF-Voice/piper1-gpl) using
 [`en_GB-cori-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/medium)
 (LibriVox recordings, public domain).

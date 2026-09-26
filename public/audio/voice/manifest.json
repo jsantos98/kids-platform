@@ -1,7 +1,7 @@
 {
   "voices": {
-    "pt": "pt_PT-tugão-medium",
-    "en": "en_GB-cori-medium"
+    "pt": "pt-PT-RaquelNeural (edge-tts)",
+    "en": "en_GB-cori-medium (piper)"
   },
   "pt": {
     "mode-truck": "Camião dos Bombeiros",

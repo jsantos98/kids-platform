@@ -196,9 +196,10 @@ function go(): void {
   const wipe = document.getElementById('wipe')!;
   wipe.textContent = GAMES[sel].icon;
   wipe.classList.add('on');
-  // (off to the game once the wipe is in and the line has been said — 3 s at most)
+  // (off to the game once the wipe is in and the line has been said — 5 s at most;
+  // the longest line, Raquel's "Helicóptero de Salvamento. Vamos lá!", is 4.3 s)
   const wiped = new Promise(r => setTimeout(r, 650));
-  const most = new Promise(r => setTimeout(r, 3000));
+  const most = new Promise(r => setTimeout(r, 5000));
   void Promise.race([Promise.all([wiped, said]), most]).then(() => { location.href = GAMES[sel].url; });
 }
 document.getElementById('go')!.addEventListener('click', go);

@@ -14,6 +14,10 @@ in .env.local (git-ignored) — a key allowed Sound Effects. Sound effects work
 on ElevenLabs' free plan (non-commercial, crediting ElevenLabs).
 Run from the repository root:  python tools/make-sfx.py  [--all] [id ...]
   (--refinish: make loops recorded before the seamless step seamless, no credits)
+An engine marked `steady` (the race cars) is measured take by take — pitch
+spread, loudness range, crackle (tools/seamless.py steadiness) — and recorded
+again, up to STEADY_TRIES takes, until one holds its note; the measures go in
+the manifest's '_steady', which tools/check-sfx.ts holds to the same limits.
 """
 import json
 import shutil
@@ -26,12 +30,14 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from seamless import make_seamless, fix_seam, level  # noqa: E402
+from seamless import make_seamless, fix_seam, level, steadiness, is_steady  # noqa: E402
 from siren import build as build_siren  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / 'public' / 'audio' / 'sfx'
 API = 'https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128'
+#: how many takes an engine that must hold its note gets
+STEADY_TRIES = 4
 
 
 def api_key() -> str:
@@ -81,6 +87,12 @@ def finish(d: dict, raw: Path, ogg: Path) -> None:
                     '-c:a', 'libvorbis', '-q:a', '5', str(ogg)], check=True)
 
 
+def decode(ogg: Path) -> np.ndarray:
+    raw = subprocess.run(['ffmpeg', '-loglevel', 'error', '-i', str(ogg), '-f', 'f32le', '-ac', '1', '-ar', '44100', '-'],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32)
+
+
 def encode_loop(f32: Path, ogg: Path) -> None:
     """a loop's samples (44.1 kHz mono float) as OGG, untouched otherwise —
     no filter that isn't loop-aware may run over a loop"""
@@ -121,6 +133,7 @@ def main() -> None:
     key = None
     manifest = {}
     seam = set(old.get('_seamless', []))
+    steady = dict(old.get('_steady', {}))
     for sid, d in want.items():
         ogg = OUT / f'{sid}.ogg'
         manifest[sid] = d
@@ -143,6 +156,28 @@ def main() -> None:
             seam.add(sid)
             continue
         key = key or api_key()
+        if d.get('steady'):
+            # (an engine that must hold its note: takes until one does, the
+            # steadiest kept — at most STEADY_TRIES)
+            best = None
+            with tempfile.TemporaryDirectory() as tmp:
+                for k in range(STEADY_TRIES):
+                    raw, cand = Path(tmp) / f'raw{k}.mp3', Path(tmp) / f'take{k}.ogg'
+                    generate(key, d, raw)
+                    finish(d, raw, cand)
+                    m = steadiness(decode(cand), 44100)
+                    print(f"  take {k + 1}: pitch ±{m['pitch']} st, level {m['level']} dB, crackle {m['crackle']}", flush=True)
+                    score = m['pitch'] + m['level'] / 6 + m['crackle'] * 0.2
+                    if best is None or score < best[0]:
+                        best = (score, cand, m)
+                    if is_steady(m):
+                        break
+                shutil.copy(best[1], ogg)
+            steady[sid] = best[2]
+            print(f"{sid}.ogg  {d['seconds']}s loop, {k + 1} take(s)  ({int(d['seconds'] * 40 * (k + 1))} credits)"
+                  f"{'' if is_steady(best[2]) else '  WARNING: no take held steady — listen to it'}", flush=True)
+            seam.add(sid)
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / 'raw.mp3'
             generate(key, d, raw)
@@ -155,6 +190,7 @@ def main() -> None:
             f.unlink()
             print(f'removed {f.name}')
     manifest['_seamless'] = sorted(seam & set(want))
+    manifest['_steady'] = {k: v for k, v in steady.items() if want.get(k, {}).get('steady')}
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', 'utf-8')
     print(f'manifest: {manifest_path.relative_to(ROOT)}')
 

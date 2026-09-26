@@ -304,6 +304,10 @@ preloadVoice('../', 'say-');
 setVoiceMuted(audio.isMuted);
 wakeVoice();
 let saidStart = false, wasNight = false, wasTalking = false;
+/** the race's places as the narrator last knew them */
+let raceT = 0, racePlace = 0, leadT = 0;
+/** "almost there!" said in this mission's scene */
+let saidAlmost = false;
 // sound on / off (remembered), beside the home button (G11)
 const muteBtn = document.getElementById('muteBtn')!;
 const showMute = (): void => { muteBtn.textContent = audio.isMuted ? '🔇' : '🔊'; };
@@ -324,24 +328,43 @@ const SIGHT_GROUND = 130, SIGHT_AIR = 190;
  * out of sight — round a corner and back isn't a change of music */
 const CHASE_HOLD = 10;
 let chaseHold = 0, sightCheck = 0;
-/** is a getaway car in sight: near enough, and no building standing between
- * the kid's eye and it (from the helicopter, over the low roofs)? */
-function robberInSight(): boolean {
+/** the nearest getaway car in sight: near enough, and no building standing
+ * between the kid's eye and it (from the helicopter, over the low roofs) */
+function robberInSight(): Robber | null {
   const st = player.state, eye = (V.fly ? st.alt : 0) + 1.8, range = V.fly ? SIGHT_AIR : SIGHT_GROUND;
-  for (const r of robbers) {
-    if (!r.active || Math.hypot(r.x - st.x, r.z - st.z) > range) continue;
+  const near = robbers.filter(r => r.active && Math.hypot(r.x - st.x, r.z - st.z) <= range)
+    .sort((a, b) => Math.hypot(a.x - st.x, a.z - st.z) - Math.hypot(b.x - st.x, b.z - st.z));
+  for (const r of near) {
     const boxes = new Set([...chunks.boxesNear(st.x, st.z), ...chunks.boxesNear((st.x + r.x) / 2, (st.z + r.z) / 2), ...chunks.boxesNear(r.x, r.z)]);
-    if (lineOfSight(st.x, st.z, eye, r.x, r.z, 1.2, [...boxes])) return true;
+    if (lineOfSight(st.x, st.z, eye, r.x, r.z, 1.2, [...boxes])) return r;
   }
-  return false;
+  return null;
+}
+/** where a point is from the kid: ahead, behind, on the left or the right
+ * (+steer turns right and grows the heading, so a positive bearing is right) */
+function sideOf(x: number, z: number): 'ahead' | 'behind' | 'left' | 'right' {
+  const st = player.state;
+  let d = Math.atan2(x - st.x, z - st.z) - st.heading;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return Math.abs(d) < 0.6 ? 'ahead' : Math.abs(d) > 2.5 ? 'behind' : d > 0 ? 'right' : 'left';
+}
+/** the chase: a getaway car coming into sight starts the chase tune and the
+ * narrator says where it is ("it's over there on the left!") */
+function watchRobbers(dt: number): void {
+  chaseHold = Math.max(0, chaseHold - dt);
+  sightCheck -= dt;
+  if (sightCheck > 0) return;
+  sightCheck = 0.25;
+  const seen = robberInSight();
+  if (!seen) return;
+  if (chaseHold <= 0 && mode === 'drive') narrator.say('spotted', sideOf(seen.x, seen.z));
+  chaseHold = CHASE_HOLD;
 }
 function musicNow(night: number, inScene: boolean, dt: number): MusicId {
   if (inScene) return 'scene';
   if (MODE.id === 'race') return 'race';
   if (MODE.chase) {
-    chaseHold = Math.max(0, chaseHold - dt);
-    sightCheck -= dt;
-    if (sightCheck <= 0) { sightCheck = 0.25; if (robberInSight()) chaseHold = CHASE_HOLD; }
+    watchRobbers(dt);
     if (chaseHold > 0) return 'chase';
   }
   if (night > 0.6) musicNight = true;
@@ -768,11 +791,13 @@ function openCall(o: Objective): void {
     saveTotals(totals);
     updateMissionPanel();
     particles.burstConfetti(player.car.position);
-    sound.event('missionDone');
-    narrator.say('praise');
     missions.cooldown = 3;
     activeCall = null;
     mode = 'drive';
+  }, () => {
+    // (won: the jingle and the cheering now, over the scene's celebration)
+    sound.event('missionDone');
+    narrator.say('praise');
   });
 }
 
@@ -1009,20 +1034,23 @@ const tick = (): void => {
         ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * SPOT_AHEAD), rb.z - (st.z + Math.cos(st.heading) * SPOT_AHEAD)) < SPOT_R + SPOT_GRACE
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
       // (no catching while it dashes: that's it shaking the police off)
-      if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0) rb.caught += dt;
+      if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0) {
+        // (halfway to caught: "almost! don't let him get away!")
+        if (rb.caught < CATCH_T / 2 && rb.caught + dt >= CATCH_T / 2) narrator.say('closing');
+        rb.caught += dt;
+      }
       // (caught in the searchlight, the getaway car bolts — as a bump by the
       // police car sets it off, G7)
-      if (V.kind === 'heli') rb.spotted(lit && mode === 'drive', dt);
+      if (V.kind === 'heli' && rb.spotted(lit && mode === 'drive', dt)) narrator.say('dashed');
       if (rb.caught >= CATCH_T && mode === 'drive') {
         rb.hide();
         mode = 'activity';
         const seed = robberCount + k;
         director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
           earnStar(tr('chase.caught'), player.car.position.clone());
-          narrator.say('caught');
           mode = 'drive';
           robberWait[k] = 3;
-        });
+        }, () => narrator.say('caught'));
       }
     } else if (!director.busy) {
       robberWait[k] -= dt;
@@ -1140,7 +1168,7 @@ const tick = (): void => {
       if (!hit) continue;
       st.x += hit.dx; st.z += hit.dz;
       player.car.position.x = st.x; player.car.position.z = st.z;
-      if (hit.dashed) { st.v *= 0.5; audio.thud(); sound.event('bumpCar'); }
+      if (hit.dashed) { st.v *= 0.5; audio.thud(); sound.event('bumpCar'); narrator.say('dashed'); }
       else st.v *= 1 - Math.min(0.5, dt * 3);
     }
   }
@@ -1174,6 +1202,9 @@ const tick = (): void => {
   if (gp && Math.abs(gp.axes[0]) > 0.08) aimIn = gp.axes[0];
   if (aimIn === 0 && Math.abs(pointerX()) > 0.05) aimIn = pointerX();
   const view = director.update(dt, elapsed, { steer: Math.max(-1, Math.min(1, aimIn)) });
+  // (halfway through a mission's scene: "almost there!")
+  if (!view.scene) saidAlmost = false;
+  else if (activeCall && director.playing && !saidAlmost && view.progress >= 0.55 && view.progress < 0.95) { saidAlmost = true; narrator.say('almost'); }
   document.body.classList.toggle('in-scene', !!view.scene);
 
   // a finished course is followed by a fresh one after a short cheer
@@ -1285,6 +1316,14 @@ const tick = (): void => {
       if (lastCount < 0) narrator.say('raceCount');
     }
     lastCount = rv.phase === 'countdown' ? rv.count : -1;
+    // (the narrator on the places — not in the scramble just after GO)
+    if (rv.phase === 'racing') {
+      raceT += dt;
+      if (raceT > 5 && racePlace > 0 && rv.place !== racePlace) narrator.say(rv.place < racePlace ? 'raceUp' : 'raceDown', rv.place);
+      leadT = rv.place === 1 ? leadT + dt : 0;
+      if (leadT > 30) { narrator.say('raceLead'); leadT = 0; }
+      racePlace = rv.place;
+    } else { raceT = 0; racePlace = 0; leadT = 0; }
     const say = rv.phase === 'countdown' ? (rv.count > 0 ? `${rv.count}…` : tr('race.go'))
       : rv.phase === 'finished' ? (rv.finalPlace === 1 ? tr('race.won') : tr('race.place', { place: ordinal(rv.finalPlace) }))
       : raceMsgT > 0 ? raceMsg : '';
@@ -1299,7 +1338,12 @@ const tick = (): void => {
       : course.kind === 'rings' ? 'course.rings' : 'course.buoys');
     promptFill.style.width = `${(100 * course.passedCount) / course.gates.length}%`;
     const res = course.update(elapsed, st.x, st.alt + 2, st.z);
-    if (res === 'passed') { particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z)); sound.event('gate'); narrator.say('gate'); }
+    if (res === 'passed') {
+      particles.burstConfetti(new THREE.Vector3(st.x, st.alt + 2, st.z));
+      sound.event('gate');
+      const left = course.gates.length - course.passedCount;
+      narrator.say(left === 1 ? 'gateLast' : left === 2 ? 'gateTwo' : 'gate');
+    }
     if (res === 'finished') {
       narrator.say('courseDone');
       earnStar(tr(course.kind === 'gates' ? 'course.gatesDone' : course.kind === 'rings' ? 'course.ringsDone' : 'course.buoysDone'),

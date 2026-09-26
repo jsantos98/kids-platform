@@ -18,6 +18,7 @@ Needs ELEVENLABS_API_KEY in .env.local (a paid plan for a library voice).
 """
 import json
 import subprocess
+from html import escape
 import sys
 import tempfile
 import urllib.request
@@ -96,9 +97,18 @@ def main() -> None:
     k = key()
     # (what text each line's takes were recorded from: a take outlives no text change)
     index = json.loads((out / 'takes.json').read_text('utf-8')) if (out / 'takes.json').exists() else {}
+    picks_path = ROOT / 'tools' / f'voice-picks-{name}.json'
+    picks = json.loads(picks_path.read_text('utf-8')) if picks_path.exists() else {}
     for cid, text in lines.items():
         if only and cid not in only:
             continue
+        # (a line whose text changed: its old takes and its pick go — they
+        # say something else)
+        if cid in index and index[cid] != text:
+            for f in out.glob(f'{cid}-?.mp3'):
+                f.unlink()
+            picks.pop(cid, None)
+            print('  text changed:', cid, flush=True)
         todo = takes_for(text, moods.get(cid, 'lively'))
         if more:
             todo.update(more_takes(text, moods.get(cid, 'lively')))
@@ -110,6 +120,7 @@ def main() -> None:
         index[cid] = text
         print('ok', cid, flush=True)
     (out / 'takes.json').write_text(json.dumps(index, ensure_ascii=False, indent=1) + '\n', 'utf-8')
+    picks_path.write_text(json.dumps(picks, ensure_ascii=False, indent=1) + '\n', 'utf-8')
     # the picking page
     rows = []
     for cid, text in lines.items():
@@ -117,9 +128,10 @@ def main() -> None:
         cells = ''.join(
             f'<label><input type="radio" name="{cid}" value="{t}"><audio controls preload="none" src="{cid}-{t}.mp3"></audio>'
             f'<small>{t} · {LABEL[t]}</small></label>' for t in have)
-        rows.append(f'<tr data-id="{cid}"><td class="t"><b>{text}</b><br><small>{cid} · {moods.get(cid, "lively")}</small></td>'
+        rows.append(f'<tr data-id="{cid}" data-text="{escape(text)}"><td class="t"><b>{text}</b><br><small>{cid} · {moods.get(cid, "lively")}</small></td>'
                     f'<td><audio controls preload="none" src="/audio/voice/pt/{cid}.mp3"></audio><small>atual</small></td><td class="c">{cells}</td></tr>')
-    (out / 'index.html').write_text(PAGE.replace('%NAME%', name).replace('%ROWS%', '\n'.join(rows)), 'utf-8')
+    (out / 'index.html').write_text(PAGE.replace('%NAME%', name).replace('%ROWS%', '\n'.join(rows))
+                                    .replace('%PICKS%', json.dumps(picks)), 'utf-8')
     print('page:', out / 'index.html')
 
 
@@ -131,15 +143,23 @@ label:has(input:checked){border-color:#e25c5c;background:#fff5f2}audio{width:210
 #bar{position:fixed;left:0;right:0;bottom:0;padding:12px 20px;background:#fffdf6;border-top:1px solid #e3ddd0;display:flex;gap:16px;align-items:center}
 button{font:inherit;padding:8px 18px;border-radius:999px;border:0;background:#e25c5c;color:#fff;cursor:pointer}tr.done td.t{background:#f3fbf1}body.only tr.done{display:none}</style>
 <h1>Escolher as falas — %NAME%</h1>
-<p>Para cada frase, ouve as 4 versões e escolhe a melhor (a que soa mesmo a português de Portugal). A e B: modelo v2 com contexto
+<p>Para cada frase, ouve as versões e escolhe a melhor (a que soa mesmo a português de Portugal). A e B: modelo v2 com contexto
 português; C e D: modelo v3 (mais expressivo) com indicação de sotaque português neutro. As escolhas ficam guardadas neste browser; no fim carrega
 em «Guardar escolhas». Se nenhuma versão servir, deixa a frase por escolher e diz-me qual é.</p>
 <table>%ROWS%</table>
 <div id="bar"><button id="save">Guardar escolhas</button><button id="only" style="background:#6b7480">Só as que faltam</button><span id="count"></span><span id="msg"></span></div>
 <script>
 const KEY = 'picks-%NAME%';
-const picks = JSON.parse(localStorage.getItem(KEY) || '{}');
+const BASE = %PICKS%;
+const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
 const rows = [...document.querySelectorAll('tr[data-id]')];
+const picks = {};
+for (const tr of rows) {
+  const s = saved[tr.dataset.id];
+  if (s && s.x === tr.dataset.text) picks[tr.dataset.id] = s.t;
+  else if (BASE[tr.dataset.id]) picks[tr.dataset.id] = BASE[tr.dataset.id];
+}
+const store = () => localStorage.setItem(KEY, JSON.stringify(Object.fromEntries(rows.filter(tr => picks[tr.dataset.id]).map(tr => [tr.dataset.id, { t: picks[tr.dataset.id], x: tr.dataset.text }]))));
 const show = () => {
   for (const tr of rows) tr.classList.toggle('done', !!picks[tr.dataset.id]);
   document.getElementById('count').textContent = `${Object.keys(picks).length} de ${rows.length} escolhidas`;
@@ -148,7 +168,7 @@ for (const tr of rows) {
   const id = tr.dataset.id;
   for (const r of tr.querySelectorAll('input')) {
     if (picks[id] === r.value) r.checked = true;
-    r.onchange = () => { picks[id] = r.value; localStorage.setItem(KEY, JSON.stringify(picks)); show(); };
+    r.onchange = () => { picks[id] = r.value; store(); show(); };
   }
 }
 // (one clip at a time)

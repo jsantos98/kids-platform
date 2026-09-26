@@ -95,6 +95,39 @@ def level(y: np.ndarray, rms_db: float = -20.0, peak: float = 0.89) -> np.ndarra
     return (y * g).astype(np.float32)
 
 
+#: a steady engine: its pitch within this spread (semitones, the standard
+#: deviation of the spectral centroid smoothed over 0.5 s), its loudness
+#: within this range (dB, over 0.5 s), and no crackle (a sample-to-sample
+#: jump over 0.5)
+STEADY_PITCH, STEADY_LEVEL = 0.8, 6.0
+
+
+def steadiness(y: np.ndarray, sr: int) -> dict:
+    """how steadily a loop holds its note: pitch spread (semitones), loudness
+    range (dB) and crackles"""
+    w = 8192
+    f = np.fft.rfftfreq(w, 1 / sr)
+    band = (f > 60) & (f < 4000)
+    h = int(0.1 * sr)
+    rms = np.array([20 * np.log10(np.sqrt(np.mean(y[i:i + h] ** 2)) + 1e-9) for i in range(0, len(y) - h, h)])
+    cent = []
+    for i in range(0, len(y) - w, int(0.125 * sr)):
+        s = np.abs(np.fft.rfft(y[i:i + w] * np.hanning(w)))
+        cent.append(np.sum(f[band] * s[band]) / (np.sum(s[band]) + 1e-9))
+    # (smoothed over half a second: a rumble's quick flutter is its sound, a
+    # slow drift — a gear change, revving, a pass-by — is what breaks a loop)
+    k = 4
+    cent = np.convolve(np.array(cent), np.ones(k) / k, 'valid')
+    rms = np.convolve(rms, np.ones(5) / 5, 'valid')
+    semis = 12 * np.log2(cent / np.median(cent))
+    return {'pitch': round(float(np.std(semis)), 2), 'level': round(float(rms.max() - rms.min()), 1),
+            'crackle': int((np.abs(np.diff(y)) > 0.5).sum())}
+
+
+def is_steady(m: dict) -> bool:
+    return m['pitch'] <= STEADY_PITCH and m['level'] <= STEADY_LEVEL and m['crackle'] == 0
+
+
 def resample_loop(y: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
     """resample a loop circularly (in the frequency domain), so its seam stays one"""
     n_out = int(round(len(y) * sr_out / sr_in))

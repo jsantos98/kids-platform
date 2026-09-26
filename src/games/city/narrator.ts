@@ -1,20 +1,29 @@
 // The narrator (G9, G11): a friendly voice in the game — a briefing for the
 // mode when the game starts, the kind of each new call, arriving, praise
 // when something is done, encouragement after a bump, the race's countdown,
-// last lap and finish, the station, night falling and the morning. Every
+// last lap and finish, the station, night falling and the morning; in the
+// chase where a getaway car was spotted (left, right, ahead, behind), nearly
+// catching it and it dashing off; on a course praise at every gate and the
+// last two counted down; in the race every overtake, being overtaken and
+// holding the lead; halfway through a mission's scene. Every
 // line is a recorded clip (make-voice.py, say.* keys); most moments have a
 // few variants, never the same one twice in a row, so it doesn't repeat
 // itself. It is never chatty: a small line waits its turn or is dropped
 // while another is being said, and each kind of moment has a cooldown.
 import { speak, speaking } from '../../i18n/voice.js';
 
-type Moment = 'start' | 'call' | 'arrive' | 'praise' | 'gate' | 'courseDone' | 'caught' | 'oops'
-  | 'raceCount' | 'lastLap' | 'place' | 'station' | 'night' | 'morning';
+type Moment = 'start' | 'call' | 'arrive' | 'praise' | 'gate' | 'gateTwo' | 'gateLast' | 'courseDone'
+  | 'caught' | 'spotted' | 'closing' | 'dashed' | 'oops'
+  | 'raceCount' | 'lastLap' | 'place' | 'raceUp' | 'raceDown' | 'raceLead' | 'almost' | 'station' | 'night' | 'morning';
 
 /** how many variants each moment has (say.<moment>.<n>) */
-const VARIANTS: Partial<Record<Moment, number>> = { arrive: 3, praise: 5, gate: 3, caught: 2, oops: 3, station: 2 };
+const VARIANTS: Partial<Record<Moment, number>> = {
+  arrive: 3, praise: 5, gate: 5, caught: 2, closing: 2, dashed: 2, oops: 3, station: 2, raceDown: 2, raceLead: 2, almost: 2,
+};
 /** the fewest seconds between two lines of the same kind of moment */
-const COOLDOWN: Partial<Record<Moment, number>> = { arrive: 8, gate: 6, oops: 10, call: 6, praise: 3 };
+const COOLDOWN: Partial<Record<Moment, number>> = {
+  arrive: 8, gate: 6, oops: 10, call: 6, praise: 3, spotted: 15, closing: 8, dashed: 6, raceUp: 3, raceDown: 12, raceLead: 25,
+};
 /** moments that cut in over whatever is being said */
 const URGENT = new Set<Moment>(['start', 'raceCount', 'place', 'lastLap']);
 
@@ -50,6 +59,12 @@ export class Narrator {
       case 'raceCount': return 'say-race-count';
       case 'lastLap': return 'say-race-lastLap';
       case 'place': return `say-race-place${Math.min(4, Math.max(1, Number(detail) || 4))}`;
+      case 'spotted': return this.variant(`say-spotted-${detail}`, 2);
+      case 'gateTwo': return 'say-gate-two';
+      case 'gateLast': return 'say-gate-last';
+      case 'raceUp': return detail === 1 ? this.variant('say-race-up1', 2) : detail === 2 || detail === 3 ? `say-race-up${detail}` : null;
+      case 'raceDown': return this.variant('say-race-down', 2);
+      case 'raceLead': return this.variant('say-race-lead', 2);
       case 'night': return 'say-night';
       case 'morning': return 'say-morning';
       default: return this.variant(`say-${m}`, VARIANTS[m] ?? 1);

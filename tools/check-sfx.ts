@@ -2,7 +2,8 @@
 // its recording in public/audio/sfx/, recorded from the prompt, length and
 // loop the list gives now (tools/make-sfx.py records what's missing or
 // changed) — a missing recording would silently fall back to the synth — and
-// every loop is 44.1 kHz and wraps without a click. And the music (G12):
+// every loop is 44.1 kHz and wraps without a click, and every engine that
+// must hold its note (a race car's) was measured to. And the music (G12):
 // every track of every moment in src/engine/musicList.ts has its loop in public/audio/music/,
 // cut from a take recorded from the prompt the list gives now
 // (tools/make-music.py), 44.1 kHz stereo, a whole number of bars, wrapping
@@ -17,10 +18,20 @@ let fails = 0;
 const fail = (m: string): void => { fails++; console.log('  FAIL ' + m); };
 const dir = 'public/audio/sfx';
 const manifest = existsSync(`${dir}/manifest.json`) ? JSON.parse(readFileSync(`${dir}/manifest.json`, 'utf-8')) as Record<string, unknown> : {};
+/** how steadily each engine that must hold its note does (make-sfx measures
+ * it: tools/seamless.py steadiness — the same limits here) */
+const steadyOf = (manifest._steady ?? {}) as Record<string, { pitch: number; level: number; crackle: number }>;
+const STEADY_PITCH = 0.8, STEADY_LEVEL = 6;
 for (const [id, d] of Object.entries(SFX)) {
   if (!existsSync(`${dir}/${id}.ogg`)) { fail(`${id}.ogg is missing (python tools/make-sfx.py)`); continue; }
   if (JSON.stringify(manifest[id]) !== JSON.stringify(d)) fail(`${id}.ogg was recorded from an older prompt (python tools/make-sfx.py)`);
   if (!d.loop) continue;
+  if ('steady' in d && d.steady) {
+    const m = steadyOf[id];
+    if (!m) fail(`${id}.ogg was never measured for steadiness (python tools/make-sfx.py ${id})`);
+    else if (m.pitch > STEADY_PITCH || m.level > STEADY_LEVEL || m.crackle > 0)
+      fail(`${id}.ogg doesn't hold its note (pitch ±${m.pitch} st, level ${m.level} dB, crackle ${m.crackle}) — record it again`);
+  }
   if (clicks(`${dir}/${id}.ogg`, 1)) fail(`${id}.ogg clicks where it loops`);
 }
 const sfxFails = fails;

@@ -27,6 +27,7 @@ export class Director {
   private act: Activity | null = null;
   private make: (() => Activity) | null = null;
   private onDone: (() => void) | null = null;
+  private onWin: (() => void) | null = null;
   private last = { prompt: '', progress: 0 };
   /** the wheel as it was when the activity finished: held there during the
    * celebration so nothing slides away (a moved ladder would scare the cat) */
@@ -42,15 +43,20 @@ export class Director {
 
   get busy(): boolean { return this.phase !== 'idle'; }
 
+  /** the scene is being played (not fading, not celebrating) */
+  get playing(): boolean { return this.phase === 'play'; }
+
   /** the pump is running in the current scene */
   get pumping(): boolean { return this.phase === 'play' && !!this.act?.pumping; }
 
-  /** fade out of the world into a new activity; `done` fires once the
-   * player is back in the world */
-  start(make: () => Activity, done: () => void): void {
+  /** fade out of the world into a new activity; `win` fires the moment it is
+   * won (the cheering belongs there, over the scene's own celebration, not
+   * after the fade back), `done` once the player is back in the world */
+  start(make: () => Activity, done: () => void, win?: () => void): void {
     if (this.busy) return;
     this.make = make;
     this.onDone = done;
+    this.onWin = win ?? null;
     this.phase = 'out';
     this.t = 0;
   }
@@ -80,6 +86,8 @@ export class Director {
         if (this.step(dt, elapsed, inp)) {
           this.frozen = { ...inp };
           this.act!.celebrate();
+          this.onWin?.();
+          this.onWin = null;
           this.last.prompt = tr('scene.wellDone');
           this.last.progress = 1;
           this.phase = 'reward';

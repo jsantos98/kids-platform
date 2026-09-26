@@ -15,6 +15,11 @@ export interface SfxDef {
    * and high tone (Hz), each tone's length (s) and the cycles in the loop —
    * ElevenLabs' sirens came out as irregular warbles that never looped */
   tones?: { lo: number; hi: number; tone: number; cycles: number };
+  /** an engine that must hold one note (a race car's): the recorder measures
+   * every take and records again until one does — a generated engine now and
+   * then changes gear, revs or passes by, and looped every 5 s that sounded
+   * broken */
+  steady?: boolean;
 }
 
 export const SFX = {
@@ -28,19 +33,19 @@ export const SFX = {
   'engine-train': { prompt: 'electric passenger train rolling on rails, gentle clickety-clack of the wheels over rail joints, steady, seamless loop', seconds: 4, loop: true },
   // the race cars: each its own engine (the kid's, and the rivals' from where
   // they are) — raceCars.ts names the one each car plays
-  'race-f1': { prompt: 'Formula 1 race car engine at high revs, high-pitched screaming V10 whine, steady, heard from just behind, seamless loop', seconds: 5, loop: true },
-  'race-future': { prompt: 'futuristic electric race car, smooth rising sci-fi turbine whine with a soft electric hum, steady, seamless loop', seconds: 5, loop: true },
-  'race-kartPurple': { prompt: 'small go-kart two-stroke engine buzzing brightly at medium revs, zippy, steady, seamless loop', seconds: 5, loop: true },
-  'race-kartPink': { prompt: 'cute little go-kart engine with a bubbly four-stroke putter, happy and light, steady, seamless loop', seconds: 5, loop: true },
-  'race-kartYellow': { prompt: 'electric go-kart, a light whirring electric motor with a gentle whine, steady, seamless loop', seconds: 5, loop: true },
-  'race-kartGreen': { prompt: 'go-kart engine with a raspy lawnmower-like buzz at medium revs, steady, seamless loop', seconds: 5, loop: true },
-  'race-kartBrown': { prompt: 'go-kart with a deeper chunky single-cylinder engine thump at medium revs, steady, seamless loop', seconds: 5, loop: true },
-  'race-racer': { prompt: 'sporty race car engine, smooth confident growl at medium-high revs, steady, seamless loop', seconds: 5, loop: true },
-  'race-speedster': { prompt: 'fast sports car engine, a sharp raspy high-revving roar, steady, seamless loop', seconds: 5, loop: true },
-  'race-racerLow': { prompt: 'low sleek race car, a deep smooth burbling engine at high speed, steady, seamless loop', seconds: 5, loop: true },
-  'race-vintage': { prompt: '1950s vintage race car engine, a rattly old-fashioned straight-six drone, steady, seamless loop', seconds: 5, loop: true },
-  'race-drag': { prompt: 'drag racing car, a huge loud supercharged V8 rumble at high revs, steady, seamless loop', seconds: 5, loop: true },
-  'race-monster': { prompt: 'monster truck, a big deep V8 rumbling and roaring at medium revs, steady, seamless loop', seconds: 5, loop: true },
+  'race-f1': { prompt: 'Formula 1 race car engine at high revs, high-pitched screaming V10 whine, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-future': { prompt: 'futuristic electric race car, smooth sci-fi turbine whine with a soft electric hum, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-kartPurple': { prompt: 'small go-kart two-stroke engine buzzing brightly at medium revs, zippy, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-kartPink': { prompt: 'cute little go-kart engine with a bubbly four-stroke putter, happy and light, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-kartYellow': { prompt: 'electric go-kart, a light whirring electric motor with a gentle whine, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-kartGreen': { prompt: 'go-kart engine with a raspy lawnmower-like buzz at medium revs, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-kartBrown': { prompt: 'go-kart with a deeper chunky single-cylinder engine thump at medium revs, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-racer': { prompt: 'sporty race car engine, smooth confident growl at medium-high revs, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-speedster': { prompt: 'fast sports car engine, a sharp raspy high-revving roar, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-racerLow': { prompt: 'low sleek race car, a deep smooth burbling engine at high speed, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-vintage': { prompt: '1950s vintage race car engine, a rattly old-fashioned straight-six drone, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-drag': { prompt: 'drag racing car waiting on the start line, a huge loud supercharged V8 burbling at a steady fast idle, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
+  'race-monster': { prompt: 'monster truck, a big deep V8 rumbling at a steady fast idle, held at one constant engine speed and pitch, no gear changes, no revving up or down, no pass-by, no doppler, heard from a fixed spot just behind the car, seamless loop', seconds: 5, loop: true, steady: true },
   // sirens (loops, built — tools/siren.py)
   'siren-fire': { prompt: 'fire truck two-tone hi-lo siren (built: tools/siren.py)', seconds: 4.8, loop: true, tones: { lo: 435, hi: 580, tone: 0.6, cycles: 4 } },
   'siren-ambulance': { prompt: 'ambulance two-tone hi-lo siren (built: tools/siren.py)', seconds: 4.5, loop: true, tones: { lo: 520, hi: 695, tone: 0.45, cycles: 5 } },

@@ -177,10 +177,14 @@ def elevenlabs(cid: str, text: str, mood: str, v: dict, mp3: Path) -> None:
     picks = json.loads(v['picks'].read_text('utf-8')) if v['picks'].exists() else {}
     index_path = v['takes'] / 'takes.json'
     index = json.loads(index_path.read_text('utf-8')) if index_path.exists() else {}
-    tag = picks.get(cid)
-    take = v['takes'] / f'{cid}-{tag}.mp3' if tag else None
-    if take and take.exists() and index.get(cid) == text:
+    # (the pick; until there is one, take A — recorded with the others by
+    # tools/voice-takes.py — to be listened to and picked)
+    tag = picks.get(cid) or 'A'
+    take = v['takes'] / f'{cid}-{tag}.mp3'
+    if take.exists() and index.get(cid) == text:
         clip(take, mp3)
+        if cid not in picks:
+            print(f'  NOTE: {cid} plays take A until one is picked on the takes page')
         return
     vt = takes_tool()
     v['takes'].mkdir(parents=True, exist_ok=True)

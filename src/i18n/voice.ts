@@ -1,5 +1,6 @@
-// The spoken lines: recorded ahead of time with Piper voices (a Portugal
-// Portuguese one and a British English one — tools/make-voice.py) into
+// The spoken lines: recorded ahead of time (Portuguese: ElevenLabs' Benedita,
+// the best of several takes picked by ear; English: Piper's cori —
+// tools/make-voice.py) into
 // public/audio/voice/<lang>/<id>.mp3, so every computer hears the same
 // voice whatever voices it has installed. A line without its clip (or a
 // browser that won't play it) falls back to the system's speech voice.

@@ -9,22 +9,30 @@ that no longer matches its dictionary text). Only new or changed lines are
 recorded; a language whose voice changed is recorded again in full.
 
 Voices:
-  pt  Microsoft's pt-PT-RaquelNeural (Portuguese, Portugal), through
-        - Azure AI Speech when AZURE_SPEECH_KEY (and AZURE_SPEECH_REGION,
-          default westeurope) are set: the licensed route, whose audio is
-          yours to publish (the free F0 tier covers these few lines), or
-        - edge-tts otherwise (`pip install edge-tts`): the same voice through
-          Microsoft Edge's read-aloud service, no account needed.
+  pt  ElevenLabs' "Benedita" (a Portugal-Portuguese voice from its library).
+      Every line was recorded in several takes (tools/voice-takes.py — two
+      models, since ElevenLabs drifts Brazilian on some lines) and a person
+      picked the best of each by ear; the picks live in
+      tools/voice-picks-pt-benedita.json and the takes in
+      .voices/takes/pt-benedita/ (git-ignored). This installs the picked take
+      of each line; a new or changed line gets a fresh default take (v2 with a
+      European-Portuguese context) and a warning to listen to it and pick —
+      `python tools/voice-takes.py <voice> pt-benedita <id> [--more]`, then
+      the page's picks copied over the JSON. Needs ELEVENLABS_API_KEY in
+      .env.local (a paid plan: a library voice).
+      (Before: Microsoft's pt-PT-RaquelNeural via Azure / edge-tts — the
+      'microsoft' engine is kept.)
   en  Piper's en_GB-cori-medium (British English; LibriVox recordings, public
       domain), offline: downloaded once into .voices/ (git-ignored, ~63 MB).
 
 Needs: Python 3.10+, ffmpeg on the PATH, Node (npx), `pip install piper-tts`
-(English), and edge-tts or an Azure key (Portuguese).
+(English), and an ElevenLabs key (Portuguese).
 Run from the repository root:  python tools/make-voice.py  [--all]
 """
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,7 +48,8 @@ OUT = ROOT / 'public' / 'audio' / 'voice'
 PIPER_BASE = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/'
 # each language's voice: its engine and name (a Piper voice also its folder)
 VOICES = {
-    'pt': {'engine': 'microsoft', 'name': 'pt-PT-RaquelNeural', 'lang': 'pt-PT'},
+    'pt': {'engine': 'elevenlabs', 'name': 'Benedita', 'voice_id': 'NkpT2jezTenCDRKHkWiX',
+           'takes': ROOT / '.voices' / 'takes' / 'pt-benedita', 'picks': ROOT / 'tools' / 'voice-picks-pt-benedita.json'},
     'en': {'engine': 'piper', 'name': 'en_GB-cori-medium', 'folder': 'en/en_GB/cori/medium'},
 }
 # how each mood is said (src/i18n/voice.ts voiceMood): neither voice can act
@@ -135,7 +144,57 @@ def record(text: str, v: dict, mp3: Path, mood: str) -> None:
                         '-ac', '1', '-ar', '24000', '-b:a', '48k', str(mp3)], check=True)
 
 
+# ---- ElevenLabs: the take a person picked by ear ----
+_vt = None
+
+
+def takes_tool():
+    global _vt
+    if _vt is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('voice_takes', ROOT / 'tools' / 'voice-takes.py')
+        _vt = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_vt)
+    return _vt
+
+
+# (v3's trailing [long pause] leaves a faint hiss the takes' -45 dB trim keeps —
+# up to 6 s of it after the words, sometimes ending in a click; -40 dB takes it
+# off, both ends, stopping only at 60 ms of sound)
+CLIP_TRIM = ('silenceremove=start_periods=1:start_threshold=-40dB:start_duration=0.06:start_silence=0.08,areverse,'
+             'silenceremove=start_periods=1:start_threshold=-40dB:start_duration=0.06:start_silence=0.15,areverse')
+
+
+def clip(take: Path, mp3: Path) -> None:
+    """a take, as the game's clip: its silent ends off"""
+    subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', str(take), '-af', CLIP_TRIM,
+                    '-ac', '1', '-ar', '24000', '-b:a', '48k', '-map_metadata', '-1', str(mp3)], check=True)
+
+
+def elevenlabs(cid: str, text: str, mood: str, v: dict, mp3: Path) -> None:
+    """the picked take of this line, if it was recorded from this text; else a
+    fresh default take, to be listened to and picked"""
+    picks = json.loads(v['picks'].read_text('utf-8')) if v['picks'].exists() else {}
+    index_path = v['takes'] / 'takes.json'
+    index = json.loads(index_path.read_text('utf-8')) if index_path.exists() else {}
+    tag = picks.get(cid)
+    take = v['takes'] / f'{cid}-{tag}.mp3' if tag else None
+    if take and take.exists() and index.get(cid) == text:
+        clip(take, mp3)
+        return
+    vt = takes_tool()
+    v['takes'].mkdir(parents=True, exist_ok=True)
+    fresh = v['takes'] / f'{cid}-A.mp3'
+    vt.tts(vt.key(), v['voice_id'], vt.takes_for(text, mood)['A'], fresh)
+    index[cid] = text
+    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1) + '\n', 'utf-8')
+    clip(fresh, mp3)
+    print(f'  NOTE: {cid} got a fresh default take — listen and pick: python tools/voice-takes.py {v["voice_id"]} pt-benedita {cid}')
+
+
 def voice_label(v: dict) -> str:
+    if v['engine'] == 'elevenlabs':
+        return f"{v['name']} (ElevenLabs, picked takes)"
     return f"{v['name']} ({microsoft_route()})" if v['engine'] == 'microsoft' else f"{v['name']} (piper)"
 
 
@@ -165,9 +224,16 @@ def main() -> None:
             manifest[lang][cid] = text
             mood = moods.get(cid, 'lively')
             # (a line whose text or mood changed is recorded again)
-            if not redo and done.get(cid) == text and old_moods.get(cid, 'lively') == mood and mp3.exists():
-                continue
-            record(text, v, mp3, mood)
+            if v['engine'] == 'elevenlabs':
+                # (always: a pick changed on the takes page is installed too)
+                before = mp3.read_bytes() if mp3.exists() else b''
+                elevenlabs(cid, text, mood, v, mp3)
+                if mp3.read_bytes() == before:
+                    continue
+            else:
+                if not redo and done.get(cid) == text and old_moods.get(cid, 'lively') == mood and mp3.exists():
+                    continue
+                record(text, v, mp3, mood)
             print(f'{lang}/{cid}.mp3  [{mood}] "{text}"')
         # clips of lines that are gone
         for f in (OUT / lang).glob('*.mp3'):
@@ -175,7 +241,7 @@ def main() -> None:
                 f.unlink()
                 print(f'removed {lang}/{f.name}')
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', 'utf-8')
-    print(f"manifest: {manifest_path.relative_to(ROOT)}  (Portuguese via {microsoft_route()})")
+    print(f"manifest: {manifest_path.relative_to(ROOT)}  (Portuguese: {manifest['voices']['pt']})")
 
 
 if __name__ == '__main__':

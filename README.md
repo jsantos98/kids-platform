@@ -87,20 +87,25 @@ the garage, or press **L**. The choice is remembered for every page. For one
 visit only, add `?lang=en` or `?lang=pt` to the address.
 
 The names are spoken in the chosen language by recorded voices, so every
-computer sounds the same, whatever voices it has installed: Microsoft's
-Raquel for Portuguese (Portugal) and Piper's cori for British English. The
+computer sounds the same, whatever voices it has installed: ElevenLabs'
+Benedita for Portuguese (Portugal) and Piper's cori for British English. The
 clips are in `public/audio/voice/`.
 
 To re-record them after changing a text, you need Python 3.10+, ffmpeg,
-`pip install piper-tts edge-tts`, and Node. Then run
-`python tools/make-voice.py`. It records only the lines that changed, and
-downloads the English [Piper](https://github.com/OHF-Voice/piper1-gpl) voice
-(~63 MB) into `.voices/` once. Portuguese comes from Microsoft: with an
-[Azure AI Speech](https://azure.microsoft.com/products/ai-services/ai-speech)
-key in `AZURE_SPEECH_KEY` (and its region in `AZURE_SPEECH_REGION`,
-default `westeurope`) the script uses Azure, whose free tier covers these
-few lines. Without a key it uses edge-tts, the same voice through Microsoft
-Edge's read-aloud service. `npx tsx tools/check-i18n.ts` fails if a clip is
+`pip install piper-tts`, Node, and an [ElevenLabs](https://elevenlabs.io)
+key (a paid plan: Benedita is a library voice) as `ELEVENLABS_API_KEY=` in
+`.env.local`. Then run `python tools/make-voice.py`. It records only the
+lines that changed, and downloads the English
+[Piper](https://github.com/OHF-Voice/piper1-gpl) voice (~63 MB) into
+`.voices/` once.
+
+ElevenLabs drifts into a Brazilian accent on some Portuguese lines, so each
+line was recorded in several takes (`python tools/voice-takes.py <voice id>
+pt-benedita [ids] [--more]`, into `.voices/takes/pt-benedita/`, with a page
+there to listen and pick) and the best one picked by ear; the picks are in
+`tools/voice-picks-pt-benedita.json`. `make-voice.py` installs the picked take
+of each line; a new or changed line gets a default take and a note to listen
+to its takes and pick. `npx tsx tools/check-i18n.ts` fails if a clip is
 missing or out of date.
 
 ### Controls
@@ -199,12 +204,13 @@ Industrial, Suburban, Roads), Nature Kit, Mini Forest, Survival Kit, Cube
 Pets, Mini Characters, Train Kit, Watercraft Kit, Toy Car Kit and Racing
 Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).
 
-Voices: Portuguese by Microsoft's neural voice `pt-PT-RaquelNeural`
-(Azure AI Speech); English recorded with
+Voices: Portuguese by ElevenLabs' voice "Benedita"
+([ElevenLabs](https://elevenlabs.io) text to speech, Creator plan); English recorded with
 [Piper](https://github.com/OHF-Voice/piper1-gpl) using
 [`en_GB-cori-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/medium)
 (LibriVox recordings, public domain).
 
 Sound effects: created with [ElevenLabs](https://elevenlabs.io) sound generation
-(`tools/make-sfx.py`, prompts in `src/engine/sfxList.ts`), free plan —
-non-commercial use, with attribution to ElevenLabs.
+(`tools/make-sfx.py`, prompts in `src/engine/sfxList.ts`), the first ones on
+the free plan (non-commercial use, with attribution to ElevenLabs), the rest
+on the Creator plan.

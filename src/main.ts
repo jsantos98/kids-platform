@@ -326,7 +326,7 @@ function go(): void {
   wipe.classList.add('on');
   const url = stage === 'cars' ? `${RACE.url}&car=${e.id}` : GAMES[sel].url;
   // (off to the game once the wipe is in and the line has been said — 5 s at most;
-  // the longest line, Raquel's "Helicóptero de Salvamento. Vamos lá!", is 4.3 s)
+  // the longest line, Cori's English one; Benedita's are ≤2.2 s)
   const wiped = new Promise(r => setTimeout(r, 650));
   const most = new Promise(r => setTimeout(r, 5000));
   void Promise.race([Promise.all([wiped, said]), most]).then(() => { location.href = url; });

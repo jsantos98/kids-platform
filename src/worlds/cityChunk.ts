@@ -57,7 +57,7 @@ export interface CityChunkResult {
 }
 
 /** what lights up at night (G10) */
-export const GLOW = { lamp: 0 } as const;
+export const GLOW = { lamp: 0, flood: 1, floodPool: 2 } as const;
 /** a light the chunk bakes (city-local): the game draws its glow at night */
 export interface ChunkGlow { x: number; y: number; z: number; kind: number }
 
@@ -684,6 +684,32 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       if (!tpl) continue;
       bakeModel(B, tpl, d.x, 0.1, d.z, d.ry, 1, [UNIT, SY, UNIT]);
       boxes.push(obbBox(d.x, d.z, TILE / 2 - 3, TILE / 2 - 3, d.ry));
+    }
+    // floodlight towers round the circuit (G10): every ~60 m of the loop,
+    // 12 m off the centreline — outside the karts' soft walls (9.2 m) —, on
+    // the side clear of the infield tiles, another stretch and anything
+    // built; a pole, a lamp bank tilted down at the track, and at night the
+    // bank's glow and a pool of light on the track
+    for (let s = T.startS + 30; s < T.startS + 30 + T.length - 20; s += 60) {
+      const p = T.sample(s);
+      const rx = Math.cos(p.h), rz = -Math.sin(p.h);
+      for (const side of [1, -1]) {
+        const x = p.x + rx * side * 12, z = p.z + rz * side * 12;
+        if (!T.inZone(x, z, -2) || T.nearest(x, z).d < 11) continue;
+        if (T.decor.some(d => Math.hypot(d.x - x, d.z - z) < TILE * 0.62)) continue;
+        if (occ.claims(x, z, 1, STRUCTURED)) continue;
+        if (inChunk(x, z)) {
+          const yaw = Math.atan2(p.x - x, p.z - z);
+          B.cyl(0.22, 0.32, 12, 8, 0x8d939e, x, 6, z);
+          B.box(0.6, 0.6, 0.6, 0x5a6472, x, 0.3, z);
+          // the lamp bank faces the track, tilted down
+          B.box(3, 1.1, 0.35, 0x3c4450, x + Math.sin(yaw) * 0.3, 12.2, z + Math.cos(yaw) * 0.3, -0.45, yaw, 0);
+          boxes.push({ x1: x - 0.45, x2: x + 0.45, z1: z - 0.45, z2: z + 0.45, small: 1 });
+          glows.push({ x: x + Math.sin(yaw) * 0.6, y: 12.1, z: z + Math.cos(yaw) * 0.6, kind: GLOW.flood });
+          glows.push({ x: p.x + rx * side * 2, y: 0, z: p.z + rz * side * 2, kind: GLOW.floodPool });
+        }
+        break;
+      }
     }
     // trees on the apron, clear of the track and the infield tiles
     const trees = [TPL.track.tree, TPL.track.pine].filter((t): t is BakedTemplate => !!t);

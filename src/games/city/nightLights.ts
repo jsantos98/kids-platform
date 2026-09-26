@@ -23,6 +23,9 @@ export interface Glow {
 /** how each baked kind glows */
 const KIND: Record<number, { color: number; size: number; pool: number }> = {
   [GLOW.lamp]: { color: 0xffc98a, size: 2.6, pool: 7.5 },
+  // the race circuit's floodlights: a big white bank, and its pool on the track
+  [GLOW.flood]: { color: 0xfff4e0, size: 6, pool: 0 },
+  [GLOW.floodPool]: { color: 0xfff0d8, size: 0, pool: 15 },
 };
 
 const HALO_VS = /* glsl */`
@@ -192,7 +195,7 @@ export class NightLights {
       let h = 0, p = 0;
       for (const list of this.chunks.values()) {
         for (const g of list) {
-          if (h < MAX_STATIC) this.put(this.halos, h++, g, g.size, g.y);
+          if (g.size > 0 && h < MAX_STATIC) this.put(this.halos, h++, g, g.size, g.y);
           if (g.pool > 0 && p < MAX_STATIC) this.put(this.pools, p++, g, g.pool, 0.3);
         }
       }

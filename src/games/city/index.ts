@@ -2,6 +2,7 @@
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
 import { createStage, makeHUD, type Dressing } from '../../engine/stage.js';
+import { bakedNight } from '../../engine/baked.js';
 import { dayState, startPhase, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
@@ -13,7 +14,8 @@ import { modeFromURL } from './modes.js';
 import { Course } from './course.js';
 import { Searchlight, Winch } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
-import { GuideArrow, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
+import { NightLights } from './nightLights.js';
+import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { createSea, boatLoop, waveAt } from './sea.js';
 import { CityScenery } from './scenery.js';
@@ -276,6 +278,9 @@ if (q.get('debugbake') === '1') {
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
 const chunks = new ChunkManager(scene, 64, 4);
+// the city's lights at night: lamp glows, pools, lit signals (G10)
+const nightLights = new NightLights(scene, camera.position);
+chunks.night = nightLights;
 let river = riverFor(START.bx, START.by);
 // the streets in view, a few a frame so the loading bar keeps moving
 {
@@ -321,6 +326,7 @@ if (q.get('buildall') === '1') {
 // per-city scenery: foam ring, pier, dinghies, buoys, the picnic causeway) ----
 const sea = await createSea(scene);
 const scenery = new CityScenery(scene);
+scenery.night = nightLights;
 
 // ---- mission scenes: arriving at a call fades into its own little scene ----
 const director = new Director(document.getElementById('fade')!);
@@ -374,6 +380,7 @@ let stationDone: { x: number; z: number } | null = null;
 const stationIcon = V.kind === 'rail' ? makeIconSprite(GOAL_ICON.station, 3.4) : null;
 if (stationIcon) { stationIcon.visible = false; scene.add(stationIcon); }
 const transit = new Transit(scene);
+transit.night = nightLights;
 
 // dev probe: ?debugsea=1 exposes scene handles for verification
 if (q.get('debugsea') === '1') {
@@ -962,7 +969,7 @@ const tick = (): void => {
   boarding.update(dt, elapsed, railway, curCity.bx, curCity.by);
   transit.update(dt, elapsed, railway);
   sea.update(elapsed);
-  scenery.update(elapsed);
+  scenery.update(elapsed, day.night);
   patrol?.update(dt, elapsed, st.x, st.z);
   if (V.kind === 'ground' && st.alt < 0.3 && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);
@@ -976,7 +983,7 @@ const tick = (): void => {
   // ambient life
   particles.updateDrift(dt, mode === 'drive', st.v, input.steer, player.car);
   particles.update(dt);
-  chunks.updateLights(elapsed);
+  chunks.updateLights(elapsed, st.x, st.z);
   minimap.update(st.x, st.z, st.heading);
   // mission-scene steering: +1 = right on screen — the wheel (turned right),
   // D / right arrow, or the mouse's x when nothing else is pressed
@@ -1163,6 +1170,9 @@ const tick = (): void => {
     promptFill.style.width = '0%';
   }
 
+  nightLights.update(day.night);
+  bakedNight.value = day.night;
+  setGuideNight(day.night);
   renderer.toneMappingExposure = day.exposure;
   if (view.scene && view.camera) {
     // a mission scene plays at the world's time of day

@@ -12,7 +12,11 @@ export const ROADKIT = '/assets/kenney/city-roads';
 const road = (name: string): BakeDef => [`${ROADKIT}/${name}.glb`, `${ROADKIT}/Textures/colormap.png`];
 
 export const KITDEFS: Record<string, BakeDef> = {};
-for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`];
+/** window glass on the City Kit palettes (commercial / suburban share the
+ * cell; industrial keeps its own) — lit at night (G10) */
+const GLASS: [number, number, number, number] = [0.6875, 0.75, 0.375, 0.5];
+const IND_GLASS: [number, number, number, number] = [0.5625, 0.625, 0.75, 1];
+for (const b of 'abcdefghijklmn') KITDEFS['bldg-' + b] = [`${KIT}/building-${b}.glb`, `${KIT}/cmap-commercial.png`, { windows: [GLASS] }];
 for (const n of ['road-straight', 'road-crossroad', 'road-intersection', 'road-bend', 'road-end', 'road-roundabout', 'light-curved', 'traffic-light']) {
   KITDEFS[n] = road(n);
 }
@@ -53,7 +57,7 @@ for (const s of 'abcdef') {
 // City Kit Industrial: works buildings + yard dressing
 const INDUSKIT = '/assets/kenney/industrial';
 const ind = (f: string): BakeDef => [`${INDUSKIT}/${f}.glb`, `${INDUSKIT}/Textures/colormap.png`];
-for (const b of 'abcdefghijklmnopqrst') KITDEFS[`ind-${b}`] = ind(`building-${b}`);
+for (const b of 'abcdefghijklmnopqrst') KITDEFS[`ind-${b}`] = [`${INDUSKIT}/building-${b}.glb`, `${INDUSKIT}/Textures/colormap.png`, { windows: [IND_GLASS] }];
 Object.assign(KITDEFS, {
   'ind-chimney': ind('chimney-basic'),
   'ind-chimney-m': ind('chimney-medium'),
@@ -75,7 +79,7 @@ const SURVKIT = '/assets/kenney/survival';
 const sub = (f: string): BakeDef => [`${SUBKIT}/${f}.glb`, `${SUBKIT}/Textures/colormap.png`];
 const forest = (f: string): BakeDef => [`${FORKIT}/${f}.glb`, `${FORKIT}/Textures/colormap.png`];
 const surv = (f: string): BakeDef => [`${SURVKIT}/${f}.glb`, `${SURVKIT}/Textures/colormap.png`];
-for (const b of 'abcdefghijklmnopqrstu') KITDEFS[`house-${b}`] = sub(`building-type-${b}`);
+for (const b of 'abcdefghijklmnopqrstu') KITDEFS[`house-${b}`] = [`${SUBKIT}/building-type-${b}.glb`, `${SUBKIT}/Textures/colormap.png`, { windows: [GLASS] }];
 for (const f of ['tree-large', 'tree-small', 'planter', 'fence-1x3', 'fence-1x4', 'fence', 'driveway-short', 'path-long']) KITDEFS[`sub-${f}`] = sub(f);
 for (const f of ['tree', 'tree-high', 'rocks-low', 'stones', 'tent', 'plant', 'fence', 'flag']) KITDEFS[`for-${f}`] = forest(f);
 for (const f of ['barrel', 'barrel-open', 'box', 'box-large', 'box-large-open', 'chest', 'workbench', 'workbench-anvil',

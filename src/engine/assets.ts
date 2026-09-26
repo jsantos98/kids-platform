@@ -96,6 +96,10 @@ export interface BakeOptions {
   /** sample the palette with a flipped V — some kit exports store UVs
    * bottom-up against the baker's top-left convention */
   flipUvY?: boolean;
+  /** palette cells that are window glass ([u0, u1, v0, v1]): their faces
+   * get a `glow` value, one per window (the two triangles of a pane share
+   * it), which the chunk material lights at night (G10) */
+  windows?: Array<[number, number, number, number]>;
 }
 
 async function bakeTemplate(url: string, cmapUrl: string | null, opts: BakeOptions = {}): Promise<BakedTemplate> {
@@ -157,6 +161,7 @@ async function bakeTemplate(url: string, cmapUrl: string | null, opts: BakeOptio
       }
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    if (opts.windows && uv) geo.setAttribute('glow', new THREE.BufferAttribute(windowGlow(pos, uv, opts), 1));
     geo.applyMatrix4(node.matrixWorld);
     geos.push(geo);
     bbox.expandByObject(node);
@@ -166,6 +171,28 @@ async function bakeTemplate(url: string, cmapUrl: string | null, opts: BakeOptio
   bbox.getSize(size);
   bbox.getCenter(center);
   return { geos, size: { x: size.x, y: size.y, z: size.z }, center: { x: center.x, z: center.z } };
+}
+
+/** a window pane's glow per vertex: 0 off the glass, else a value in
+ * (0, 1] shared by the pane's triangles (a triangle sharing two corners
+ * with the one before is the same pane) */
+function windowGlow(pos: THREE.BufferAttribute, uv: THREE.BufferAttribute, opts: BakeOptions): Float32Array {
+  const out = new Float32Array(pos.count);
+  let pane = 0, value = 0, prev = -1;
+  const same = (a: number, b: number): boolean =>
+    Math.abs(pos.getX(a) - pos.getX(b)) < 1e-5 && Math.abs(pos.getY(a) - pos.getY(b)) < 1e-5 && Math.abs(pos.getZ(a) - pos.getZ(b)) < 1e-5;
+  for (let f = 0; f < pos.count; f += 3) {
+    let u = (uv.getX(f) + uv.getX(f + 1) + uv.getX(f + 2)) / 3;
+    let v = (uv.getY(f) + uv.getY(f + 1) + uv.getY(f + 2)) / 3;
+    if (opts.flipUvY) v = 1 - v;
+    if (!opts.windows!.some(([u0, u1, v0, v1]) => u >= u0 && u < u1 && v >= v0 && v < v1)) { prev = -1; continue; }
+    let shared = 0;
+    if (prev >= 0) for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (same(f + i, prev + j)) shared++;
+    if (shared < 2) { pane++; value = 0.02 + 0.98 * ((pane * 0.6180339887) % 1); }
+    out[f] = out[f + 1] = out[f + 2] = value;
+    prev = f;
+  }
+  return out;
 }
 
 export type BakeDef = [url: string, cmapUrl: string | null, opts?: BakeOptions];

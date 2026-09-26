@@ -5,6 +5,7 @@
 // platforms where trains dwell, and the river trestles under the rails. A city builds its set the first time the player arrives;
 // the four most recent stay alive so nothing pops when crossing a strait.
 import * as THREE from 'three';
+import type { NightLights } from './nightLights.js';
 import { Baked } from '../../engine/baked.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { RAIL_Y, railNetFor, layRails, railTile, type RailRoute } from '../../worlds/railRoute.js';
@@ -16,7 +17,7 @@ import { citySeed } from '../../worlds/cityGrid.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 import type { Railway } from './railway.js';
 
-const LIT_RED = new THREE.MeshBasicMaterial({ color: 0xff3b30 });
+const LIT_RED = new THREE.MeshBasicMaterial({ color: 0xff3b30, toneMapped: false });
 const DIM_RED = new THREE.MeshBasicMaterial({ color: 0x4a2226 });
 const STEEL = 0x5f6774;
 const CREAM = 0xe8e4d8;
@@ -316,6 +317,8 @@ export class Transit {
         // (kept dynamic so they can flash)
         const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), DIM_RED);
         lamp.position.set(wx + nx * s - ux * toward * 0.02, 1.75, wz + nz * s - uz * toward * 0.02);
+        // (it faces the traffic coming up this approach: its glow shows only to them, G10)
+        lamp.userData.face = { x: -ux * toward, z: -uz * toward };
         inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }
@@ -354,6 +357,10 @@ export class Transit {
     return rail.distTo(inst.bx, inst.by, c.line, c.d) < CROSSING_WARN_DIST;
   }
 
+  /** at night a lit crossing lamp glows here (G10) */
+  night: NightLights | null = null;
+  private _p = new THREE.Vector3();
+
   /** the lamps + booms of every built city follow the world's trains */
   update(dt: number, elapsed: number, rail: Railway): void {
     for (const inst of this.cities.values()) {
@@ -364,6 +371,12 @@ export class Transit {
         const phase = Math.floor(elapsed * 2.6) % 2;
         for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
         for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;
+        if (warn && this.night && this.night.night.value > 0.01) {
+          for (const l of phase === 0 ? sig.a : sig.b) {
+            l.getWorldPosition(this._p);
+            this.night.flash({ x: this._p.x, y: this._p.y, z: this._p.z, color: 0xff3b2e, size: 1.0, pool: 0, face: l.userData.face });
+          }
+        }
         const target = warn ? 0 : -BOOM_UP;
         const rate = (BOOM_UP / BOOM_TIME) * dt;
         for (const pivot of sig.arms) {

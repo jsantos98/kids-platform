@@ -23,8 +23,8 @@ self.onmessage = (e: MessageEvent<Msg>): void => {
   if (m.type === 'island') { useBase(m.data.base); installIslandData(m.data); return; }
   try {
     useBase(m.base);
-    const { geo, boxes } = generateCityChunkData(m.bx, m.by, m.cx, m.cz);
-    post({ ok: true, key: m.key, geo, boxes, lights: chunkLights(m.bx, m.by, m.cx, m.cz) }, Object.values(geo).map(a => a.array.buffer));
+    const { geo, boxes, glows } = generateCityChunkData(m.bx, m.by, m.cx, m.cz);
+    post({ ok: true, key: m.key, geo, boxes, glows, lights: chunkLights(m.bx, m.by, m.cx, m.cz) }, Object.values(geo).map(a => a.array.buffer));
   } catch (err) {
     post({ ok: false, key: m.key, error: String(err) }, []);
   }

@@ -4,7 +4,8 @@
 // farther out are disposed. Also owns the dynamic traffic-light props at
 // signalized intersections.
 import * as THREE from 'three';
-import { generateCityChunk, type CollisionBox } from '../../worlds/cityChunk.js';
+import { generateCityChunk, type CollisionBox, type ChunkGlow } from '../../worlds/cityChunk.js';
+import type { NightLights } from './nightLights.js';
 import { meshFromBakedData, type BakedData } from '../../engine/baked.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { cityAt, CITY_PITCH } from '../../worlds/cityGrid.js';
@@ -12,7 +13,7 @@ import { WORLD_CHUNKS } from '../../worlds/world.js';
 import { coastFor, clipToRect } from '../../worlds/coast.js';
 import { chunkLights, type ChunkLight } from '../../worlds/roadLayout.js';
 import { lightState } from './lights.js';
-import { makeTrafficLights, setHead, type TrafficLightProps } from './lampProps.js';
+import { makeTrafficLights, setHead, type TrafficLightProps, type LampHead } from './lampProps.js';
 
 const CHUNKS_PER_CITY = CITY_PITCH / 64; // world-chunk stride between city cells
 /** chunk bakes queued at the worker at once (nearest first; only a few, so
@@ -36,6 +37,9 @@ export class ChunkManager {
   private pending = new Set<string>();
   private queue: Array<[number, number, number, number, string]> = [];
   private landCache = new Map<string, boolean>();
+
+  /** the chunks' lamps glow here at night (G10) */
+  night: NightLights | null = null;
 
   constructor(private scene: THREE.Scene, private CH = 64, private VIEW_R = 4) {}
 
@@ -67,7 +71,7 @@ export class ChunkManager {
   attachWorker(w: Worker, base: () => number): void {
     this.worker = w;
     this.base = base;
-    w.onmessage = (e: MessageEvent<{ ok: boolean; key: string; geo?: BakedData; boxes?: CollisionBox[]; lights?: ChunkLight[]; error?: string }>) => {
+    w.onmessage = (e: MessageEvent<{ ok: boolean; key: string; geo?: BakedData; boxes?: CollisionBox[]; lights?: ChunkLight[]; glows?: ChunkGlow[]; error?: string }>) => {
       const r = e.data;
       const at = this.inFlight.get(r.key);
       this.inFlight.delete(r.key);
@@ -77,7 +81,7 @@ export class ChunkManager {
       const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
       if (Math.max(Math.abs(wx - this.here.wx), Math.abs(wz - this.here.wz)) > this.VIEW_R + 1) return; // gone out of range
       if (!r.ok || !r.geo) { console.warn('chunk worker failed on', r.key, r.error); this.addChunk(bx, by, cx, cz); return; }
-      this.finish(bx, by, cx, cz, meshFromBakedData(r.geo), r.boxes!, r.lights);
+      this.finish(bx, by, cx, cz, meshFromBakedData(r.geo), r.boxes!, r.glows ?? [], r.lights);
     };
     w.onerror = e => {
       console.warn('chunk worker error', e.message);
@@ -93,12 +97,12 @@ export class ChunkManager {
   addChunk(bx: number, by: number, cx: number, cz: number): void {
     const key = `${bx},${by},${cx},${cz}`;
     if (this.chunks.has(key)) return;
-    const { mesh, boxes } = generateCityChunk(bx, by, cx, cz);
-    this.finish(bx, by, cx, cz, mesh, boxes);
+    const { mesh, boxes, glows } = generateCityChunk(bx, by, cx, cz);
+    this.finish(bx, by, cx, cz, mesh, boxes, glows);
   }
 
   /** a baked chunk joins the world (world-offset mesh, boxes, lights) */
-  private finish(bx: number, by: number, cx: number, cz: number, mesh: THREE.Mesh, boxes: CollisionBox[],
+  private finish(bx: number, by: number, cx: number, cz: number, mesh: THREE.Mesh, boxes: CollisionBox[], glows: ChunkGlow[],
                  /** the worker's lights (else read from the plan here) */
                  lightData: ChunkLight[] = chunkLights(bx, by, cx, cz)): void {
     const key = `${bx},${by},${cx},${cz}`;
@@ -121,6 +125,7 @@ export class ChunkManager {
     }
     const wx = bx * CHUNKS_PER_CITY + cx, wz = by * CHUNKS_PER_CITY + cz;
     this.chunks.set(key, { mesh, boxes: wboxes, wx, wz, cx, cz, lights });
+    this.night?.addChunk(key, glows, ox, oz);
   }
 
   forceChunkAt(px: number, pz: number): void {
@@ -189,6 +194,7 @@ export class ChunkManager {
         this.scene.remove(ch.mesh);
         ch.mesh.geometry.dispose();
         for (const l of ch.lights) this.scene.remove(l.props.group);
+        this.night?.dropChunk(key);
         this.chunks.delete(key);
       }
     }
@@ -204,8 +210,10 @@ export class ChunkManager {
     return out;
   }
 
-  /** Sync every visible traffic light to its intersection's phase. */
-  updateLights(elapsed: number): void {
+  /** Sync every visible traffic light to its intersection's phase; at
+   * night each lit lamp near (px, pz) glows too (G10) */
+  updateLights(elapsed: number, px = 0, pz = 0): void {
+    const glow = this.night && this.night.night.value > 0.01;
     for (const ch of this.chunks.values()) {
       for (const l of ch.lights) {
         const st = lightState(l.x, l.z, elapsed);
@@ -213,7 +221,18 @@ export class ChunkManager {
         const ns = st === 'ns' ? 'go' : st === 'nsY' ? 'slow' : 'stop';
         for (const h of l.props.ew) setHead(h, ew);
         for (const h of l.props.ns) setHead(h, ns);
+        if (glow && Math.abs(l.x + ch.mesh.position.x - px) < 260 && Math.abs(l.z + ch.mesh.position.z - pz) < 260) {
+          for (const h of l.props.ew) this.glowHead(h, ew);
+          for (const h of l.props.ns) this.glowHead(h, ns);
+        }
       }
     }
+  }
+
+  private _p = new THREE.Vector3();
+  private glowHead(h: LampHead, phase: 'go' | 'slow' | 'stop'): void {
+    const lamp = phase === 'go' ? h.green : phase === 'slow' ? h.yellow : h.red;
+    lamp.getWorldPosition(this._p);
+    this.night!.flash({ x: this._p.x, y: this._p.y, z: this._p.z, color: phase === 'go' ? 0x3cff6a : phase === 'slow' ? 0xffc21a : 0xff3b2e, size: 0.9, pool: 0, face: lamp.userData.face });
   }
 }

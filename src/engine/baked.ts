@@ -87,6 +87,11 @@ export class Baked {
   private merged(): THREE.BufferGeometry {
     // mergeGeometries requires uniform indexed-ness; normalize to non-indexed
     const parts = this.geos.map((g) => (g.index ? g.toNonIndexed() : g));
+    // (window glass carries a `glow` attribute: everything else gets zeros,
+    // since merging needs one attribute set)
+    if (parts.some(g => g.attributes.glow)) {
+      for (const g of parts) if (!g.attributes.glow) g.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1));
+    }
     const merged = mergeGeometries(parts);
     this.geos.length = 0;
     return merged;
@@ -115,8 +120,34 @@ export class Baked {
 /** a merged geometry as plain attribute arrays */
 export type BakedData = Record<string, { array: Float32Array; itemSize: number }>;
 
+/** 0 by day … 1 at night: lights the baked windows (the game sets it, G10) */
+export const bakedNight = { value: 0 };
+
+/** a baked mesh's material; with window glass (`glow`), lit at night: each
+ * pane's value decides whether its lights are on (about 45 % of them), and
+ * they come on one by one as night falls */
+function bakedMaterial(windows: boolean): THREE.MeshLambertMaterial {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  if (!windows) return m;
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uNight = bakedNight;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float glow;\nvarying float vGlow;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vGlow;\nuniform float uNight;')
+      .replace('#include <emissivemap_fragment>', [
+        '#include <emissivemap_fragment>',
+        'float lit = step(0.0001, vGlow) * step(fract(vGlow * 7.31), 0.45 * uNight);',
+        'totalEmissiveRadiance += vec3(1.0, 0.74, 0.36) * lit * (0.55 + 0.35 * fract(vGlow * 3.7));',
+      ].join('\n'));
+  };
+  m.customProgramCacheKey = () => 'baked-windows';
+  return m;
+}
+
 function meshOf(geo: THREE.BufferGeometry, { cast = true, receive = true }: BakedOptions): THREE.Mesh {
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+  const m = new THREE.Mesh(geo, bakedMaterial(!!geo.attributes.glow));
   m.castShadow = cast;
   m.receiveShadow = receive;
   return m;

@@ -6,10 +6,11 @@ import * as THREE from 'three';
 import { bakedModel } from '../../engine/assets.js';
 import { templateToMesh } from '../../engine/baked.js';
 
+// (lit lamps skip tone mapping: they stay full-bright at night, G10)
 export const LAMP_MATS = {
-  red: new THREE.MeshBasicMaterial({ color: 0xff3b30 }),
-  yellow: new THREE.MeshBasicMaterial({ color: 0xffcc00 }),
-  green: new THREE.MeshBasicMaterial({ color: 0x2ecc40 }),
+  red: new THREE.MeshBasicMaterial({ color: 0xff3b30, toneMapped: false }),
+  yellow: new THREE.MeshBasicMaterial({ color: 0xffcc00, toneMapped: false }),
+  green: new THREE.MeshBasicMaterial({ color: 0x2ecc40, toneMapped: false }),
   off: new THREE.MeshBasicMaterial({ color: 0x2b2f38 }),
 };
 
@@ -90,6 +91,10 @@ export function makeTrafficLights(poles: Array<{ x: number; z: number; ry: numbe
       head = { red: lamp(4.7), yellow: lamp(4.3), green: lamp(3.9) };
     }
     group.add(g);
+    // (every lens faces the head's local -x: turned by ry, (-cos ry, sin ry)
+    // — its glow shows only to someone in front of it, G10)
+    const face = { x: -Math.cos(ry), z: Math.sin(ry) };
+    for (const l of [head.red, head.yellow, head.green]) l.userData.face = face;
     out[axis].push(head);
   }
   return out;

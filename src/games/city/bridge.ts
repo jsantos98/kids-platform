@@ -49,7 +49,41 @@ export function bridgeLayout(bx: number, by: number): BridgeLayout {
   return out;
 }
 
-export interface BuiltBridge { group: THREE.Group; boxes: CollisionBox[] }
+/** the picnic island's lighthouse: its lamp and the beam that sweeps round
+ * at night (G10), world coordinates */
+export interface Lighthouse { lamp: THREE.Mesh; beam: THREE.Group; x: number; y: number; z: number }
+export interface BuiltBridge { group: THREE.Group; boxes: CollisionBox[]; lighthouse: Lighthouse }
+
+/** the lighthouse's height to its lamp (m) */
+const LAMP_Y = 15.6;
+
+/** two long soft cones of light from the lamp, opposite ways, fading out
+ * along their length (additive, drawn at night) */
+function makeBeam(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false,
+    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false,
+  });
+  for (const yaw of [0, Math.PI]) {
+    const geo = new THREE.CylinderGeometry(0.5, 9, 90, 20, 6, true);
+    // (its narrow top turned onto -x, then shifted so it starts at the lamp)
+    geo.rotateZ(Math.PI / 2);
+    geo.translate(45, 0, 0);
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const f = Math.pow(1 - pos.getX(i) / 90, 1.8);
+      col.set([1 * f, 0.93 * f, 0.72 * f], i * 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.y = yaw;
+    m.rotation.z = -0.06; // (dipping a little toward the sea)
+    g.add(m);
+  }
+  g.visible = false;
+  return g;
+}
 
 /** Build this city's picnic-island causeway, offset into world space. */
 export function buildBridge(bx: number, by: number, ox: number, oz: number): BuiltBridge {
@@ -93,13 +127,34 @@ export function buildBridge(bx: number, by: number, ox: number, oz: number): Bui
   B.box(6, 0.1, id, BEACH, ISLE.x1 + 3, 0.05, icz);
   B.box(6, 0.1, id, BEACH, ISLE.x2 - 3, 0.05, icz);
 
+  // the lighthouse, on the island's far corner: a white tower with red
+  // bands, its gallery, the lamp room and a red cap (G10: its lamp and
+  // beam light up at night)
+  const LX = ISLE.x2 - 8, LZ = ISLE.z2 - 8;
+  B.cyl(3.4, 3.8, 0.8, 16, 0x9a948a, LX, 0.4, LZ);
+  const bands = 6, H = 13.6;
+  for (let k = 0; k < bands; k++) {
+    const y0 = 0.8 + (k * H) / bands, rb = 3 - (k * 1.1) / bands, rt = 3 - ((k + 1) * 1.1) / bands;
+    B.cyl(rt, rb, H / bands, 16, k % 2 ? 0xd9473f : 0xf7f3ea, LX, y0 + H / bands / 2, LZ);
+  }
+  B.cyl(2.5, 2.5, 0.35, 16, 0x3c4450, LX, 14.6, LZ);
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    B.box(0.1, 0.9, 0.1, 0x3c4450, LX + Math.cos(a) * 2.35, 15.2, LZ + Math.sin(a) * 2.35);
+  }
+  B.cyl(2.45, 2.45, 0.08, 16, 0x3c4450, LX, 15.65, LZ);
+  B.cyl(1.4, 1.4, 0.25, 12, 0x3c4450, LX, 16.9, LZ);
+  B.cone(1.7, 1.4, 12, 0xd9473f, LX, 17.7, LZ);
+  B.sphere(0.25, 0x3c4450, LX, 18.5, LZ);
+  boxes.push({ x1: LX - 3.2, x2: LX + 3.2, z1: LZ - 3.2, z2: LZ + 3.2 });
+
   // trees + rocks (deterministic scatter, clear of the bridge landing)
   const trees = ['tree-default', 'tree-oak', 'tree-detailed', 'tree-fat', 'tree-thin']
     .map(bakedModel).filter((t): t is BakedTemplate => !!t);
   const rocks = ['rock-a', 'rock-b'].map(bakedModel).filter((t): t is BakedTemplate => !!t);
   const clear = (x: number, z: number): boolean =>
     x > ISLE.x1 + 4 && x < ISLE.x2 - 4 && z > ISLE.z1 + 4 && z < ISLE.z2 - 4 &&
-    !(x > X - HALF_W && x < X + HALF_W && z < ISLE.z1 + 10);
+    !(x > X - HALF_W && x < X + HALF_W && z < ISLE.z1 + 10) && Math.hypot(x - LX, z - LZ) > 6;
   for (let k = 0; k < 22 && trees.length; k++) {
     if (boxes.length >= 7) break;
     const x = ISLE.x1 + 6 + r() * (iw - 12), z = ISLE.z1 + 6 + r() * (id - 12);
@@ -120,8 +175,16 @@ export function buildBridge(bx: number, by: number, ox: number, oz: number): Bui
   mesh.receiveShadow = true;
   const group = new THREE.Group();
   group.add(mesh);
+  // the lamp room's glass (lit at night) and the beam
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 1.3, 12),
+    new THREE.MeshBasicMaterial({ color: 0xcfe3ea, toneMapped: false }));
+  glass.position.set(LX, LAMP_Y, LZ);
+  group.add(glass);
+  const beam = makeBeam();
+  beam.position.set(LX, LAMP_Y, LZ);
+  group.add(beam);
   group.position.set(ox, 0, oz);
-  return { group, boxes };
+  return { group, boxes, lighthouse: { lamp: glass, beam, x: LX + ox, y: LAMP_Y, z: LZ + oz } };
 }
 
 function bakeTpl(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number, ry: number, s: number): void {

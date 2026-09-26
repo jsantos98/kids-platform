@@ -232,10 +232,15 @@ export function makeBeacon(color: number): THREE.Mesh {
   return m;
 }
 
-/** gentle pulse; brighter when the mission is far so it stays findable */
+/** 0 by day … 1 at night: beacons shine brighter in the dark (G10) */
+let guideNight = 0;
+export function setGuideNight(n: number): void { guideNight = n; }
+
+/** gentle pulse; brighter when the mission is far so it stays findable,
+ * and at night */
 export function pulseBeacon(b: THREE.Mesh, elapsed: number, index: number, dist: number): void {
   const far = Math.min(1, dist / 180);
-  (b.material as THREE.MeshBasicMaterial).opacity = (0.18 + 0.2 * far) * (0.8 + 0.2 * Math.sin(elapsed * 3 + index));
+  (b.material as THREE.MeshBasicMaterial).opacity = (0.18 + 0.2 * far) * (0.8 + 0.2 * Math.sin(elapsed * 3 + index)) * (1 + 0.9 * guideNight);
   // melt away up close: the mission itself is right there
   b.visible = dist > 14;
 }

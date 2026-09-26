@@ -58,7 +58,13 @@ export function inBox(b: CollisionBox, x: number, z: number, r: number): boolean
 export interface CityChunkResult {
   mesh: THREE.Mesh;
   boxes: CollisionBox[];
+  glows: ChunkGlow[];
 }
+
+/** what lights up at night (G10) */
+export const GLOW = { lamp: 0 } as const;
+/** a light the chunk bakes (city-local): the game draws its glow at night */
+export interface ChunkGlow { x: number; y: number; z: number; kind: number }
 
 const j = (r: Rng, amp: number) => (r() - 0.5) * 2 * amp;
 const pick = <T,>(r: Rng, arr: T[]): T => arr[(r() * arr.length) | 0];
@@ -76,7 +82,18 @@ function bakeModel(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number
   if (s3) _ks.set(s3[0], s3[1], s3[2]);
   else _ks.set(s, s, s);
   _km.compose(_kv.set(x, y, z), _kq, _ks);
-  for (const g of tpl.geos) B.raw(g.clone().applyMatrix4(_km));
+  // (window panes: shifted by this building's own amount, so no two
+  // buildings light the same windows, G10)
+  const shift = (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453)) % 1;
+  for (const g of tpl.geos) {
+    const c = g.clone().applyMatrix4(_km);
+    const glow = c.attributes.glow as THREE.BufferAttribute | undefined;
+    if (glow) {
+      const a = glow.array as Float32Array;
+      for (let i = 0; i < a.length; i++) if (a[i] > 0) a[i] = ((a[i] + shift) % 1) || 0.5;
+    }
+    B.raw(c);
+  }
 }
 
 function kenneyTPL() {
@@ -171,22 +188,23 @@ export function chunkGroundColor(bx: number, by: number, cx: number, cz: number)
 }
 
 export function generateCityChunk(bx: number, by: number, cx: number, cz: number): CityChunkResult {
-  const { B, boxes } = bakeCityChunk(bx, by, cx, cz);
-  return { mesh: B.build(), boxes };
+  const { B, boxes, glows } = bakeCityChunk(bx, by, cx, cz);
+  return { mesh: B.build(), boxes, glows };
 }
 
 /** the same chunk as plain data (the chunk worker's reply) */
-export function generateCityChunkData(bx: number, by: number, cx: number, cz: number): { geo: BakedData; boxes: CollisionBox[] } {
-  const { B, boxes } = bakeCityChunk(bx, by, cx, cz);
-  return { geo: B.buildData(), boxes };
+export function generateCityChunkData(bx: number, by: number, cx: number, cz: number): { geo: BakedData; boxes: CollisionBox[]; glows: ChunkGlow[] } {
+  const { B, boxes, glows } = bakeCityChunk(bx, by, cx, cz);
+  return { geo: B.buildData(), boxes, glows };
 }
 
-function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Baked; boxes: CollisionBox[] } {
+function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Baked; boxes: CollisionBox[]; glows: ChunkGlow[] } {
   const seed = citySeed(bx, by);
   const r = rng(chunkSeed(seed, cx, cz));
   const CH = 64, X0 = cx * CH, Z0 = cz * CH;
   const B = new Baked();
   const boxes: CollisionBox[] = [];
+  const glows: ChunkGlow[] = [];
   const TPL = kenneyTPL();
   const plan = cityPlanFor(bx, by);
   const rail = railNetFor(bx, by);
@@ -683,6 +701,8 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
         // the lamp's arm (native -z) reaches back over the road
         bakeModel(B, TPL.lightCurved, x, 0.1, z, Math.atan2(-rx, -rz) - Math.PI, 5.5);
         boxes.push({ x1: x - 0.3, x2: x + 0.3, z1: z - 0.3, z2: z + 0.3, small: 1 });
+        // (its bulb hangs under the arm's end: native (0, 0.66, -0.19) × 5.5)
+        glows.push({ x: x - rx * 1.05, y: 3.55, z: z - rz * 1.05, kind: GLOW.lamp });
       }
     }
   }
@@ -972,5 +992,5 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     }
   }
 
-  return { B, boxes };
+  return { B, boxes, glows };
 }

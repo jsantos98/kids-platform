@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { C, mat } from '../../engine/stage.js';
 import { Baked } from '../../engine/baked.js';
 import { waveAt, hullObject, boatLoop } from './sea.js';
-import { buildBridge } from './bridge.js';
+import { buildBridge, type Lighthouse } from './bridge.js';
+import type { NightLights } from './nightLights.js';
 import { makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
@@ -14,7 +15,7 @@ import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 interface Bobber { mesh: THREE.Object3D; x: number; z: number; amp: number; phase: number }
 
-interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[] }
+interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[]; lighthouse: Lighthouse }
 
 export class CityScenery {
   private cities = new Map<string, Inst>();
@@ -104,7 +105,7 @@ export class CityScenery {
     }
 
     this.scene.add(group);
-    this.cities.set(key, { group, boxes, bobbers });
+    this.cities.set(key, { group, boxes, bobbers, lighthouse: bridge.lighthouse });
     while (this.cities.size > 3) {
       const oldest = this.cities.keys().next().value as string;
       const inst = this.cities.get(oldest)!;
@@ -117,8 +118,19 @@ export class CityScenery {
     }
   }
 
-  update(elapsed: number): void {
+  /** at night the lighthouses' lamps glow here (G10) */
+  night: NightLights | null = null;
+  private _lamp = new THREE.Color();
+
+  update(elapsed: number, night = 0): void {
     for (const inst of this.cities.values()) {
+      // the lighthouse: its lamp comes on and its beam sweeps round at night
+      const L = inst.lighthouse;
+      L.beam.visible = night > 0.02;
+      L.beam.rotation.y = elapsed * 0.7;
+      ((L.beam.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = night * 0.22;
+      (L.lamp.material as THREE.MeshBasicMaterial).color.copy(this._lamp.setHex(0xcfe3ea).lerp(new THREE.Color(0xfff0b8), night));
+      if (night > 0.02) this.night?.flash({ x: L.x, y: L.y, z: L.z, color: 0xfff0c0, size: 9, pool: 0, strength: night });
       for (const b of inst.bobbers) {
         b.mesh.position.y = waveAt(b.x, b.z, elapsed) * b.amp + 0.03;
         b.mesh.rotation.x = Math.sin(elapsed * 0.8 + b.phase) * 0.02 * b.amp;

@@ -700,7 +700,7 @@ if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on 
         const x = ga.attributes[k].array, y = gb.attributes[k]?.array;
         return !!y && x.length === y.length && x.every((v, i) => v === y[i]);
       })
-      && JSON.stringify(a.boxes) === JSON.stringify(d.boxes);
+      && JSON.stringify(a.boxes) === JSON.stringify(d.boxes) && JSON.stringify(a.glows) === JSON.stringify(d.glows);
     if (!same) { workerFaults++; console.log(`  R38 detail: chunk 1,0,${cx},${cz} baked by the worker differs`); }
   }
   clearAllWorldCaches();

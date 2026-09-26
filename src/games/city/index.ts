@@ -60,6 +60,7 @@ import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 import { LoadingScreen, nextFrame } from './loading.js';
 import { raceCar, engineOf } from '../raceCars.js';
+import { lineOfSight } from './sight.js';
 import { t as tr, applyI18n, ordinal, numberLocale, type Key } from '../../i18n/index.js';
 
 applyI18n('city.pageTitle');
@@ -313,14 +314,36 @@ const musicBtn = document.getElementById('musicBtn')!;
 const showMusic = (): void => { musicBtn.classList.toggle('off', !audio.isMusicOn); };
 showMusic();
 musicBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMusicOn(!audio.isMusicOn); showMusic(); });
-/** the music for the moment (G12): the mission's scene, the race, the chase,
- * or the island by day / by night (switched with a margin, so dusk doesn't
- * flip it back and forth) */
+/** the music for the moment (G12): the mission's scene, the race, the chase
+ * once a getaway car is in sight, or the island by day / by night (switched
+ * with a margin, so dusk doesn't flip it back and forth) */
 let musicNight = false;
-function musicNow(night: number, inScene: boolean): MusicId {
+/** how far a getaway car can be seen (m): from the street, from the air */
+const SIGHT_GROUND = 130, SIGHT_AIR = 190;
+/** the chase tune carries on this long (s) after the last getaway car went
+ * out of sight — round a corner and back isn't a change of music */
+const CHASE_HOLD = 10;
+let chaseHold = 0, sightCheck = 0;
+/** is a getaway car in sight: near enough, and no building standing between
+ * the kid's eye and it (from the helicopter, over the low roofs)? */
+function robberInSight(): boolean {
+  const st = player.state, eye = (V.fly ? st.alt : 0) + 1.8, range = V.fly ? SIGHT_AIR : SIGHT_GROUND;
+  for (const r of robbers) {
+    if (!r.active || Math.hypot(r.x - st.x, r.z - st.z) > range) continue;
+    const boxes = new Set([...chunks.boxesNear(st.x, st.z), ...chunks.boxesNear((st.x + r.x) / 2, (st.z + r.z) / 2), ...chunks.boxesNear(r.x, r.z)]);
+    if (lineOfSight(st.x, st.z, eye, r.x, r.z, 1.2, [...boxes])) return true;
+  }
+  return false;
+}
+function musicNow(night: number, inScene: boolean, dt: number): MusicId {
   if (inScene) return 'scene';
   if (MODE.id === 'race') return 'race';
-  if (MODE.chase) return 'chase';
+  if (MODE.chase) {
+    chaseHold = Math.max(0, chaseHold - dt);
+    sightCheck -= dt;
+    if (sightCheck <= 0) { sightCheck = 0.25; if (robberInSight()) chaseHold = CHASE_HOLD; }
+    if (chaseHold > 0) return 'chase';
+  }
   if (night > 0.6) musicNight = true;
   else if (night < 0.4) musicNight = false;
   return musicNight ? 'night' : 'day';
@@ -526,6 +549,7 @@ if (q.get('debugsea') === '1') {
     prefetched: () => prefetch.done,
     /** police modes: the getaway car */
     robbers: () => robbers,
+    robberInSight,
     /** the platforms' passengers */
     boarding: () => boarding.list(),
     /** race mode: the race on this island */
@@ -1351,9 +1375,13 @@ const tick = (): void => {
     engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : undefined,
     rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
   });
-  audio.setMusic(musicNow(day.night, !!view.scene));
-  // (the tracks likely next, fetched ahead: a mission's scene, the night)
-  if (elapsed > 4) { if (MODE.calls.length) audio.preloadMusic('scene'); if (MODE.id !== 'race' && !MODE.chase) audio.preloadMusic(musicNight ? 'day' : 'night'); }
+  audio.setMusic(musicNow(day.night, !!view.scene, dt));
+  // (the tracks likely next, fetched ahead: a mission's scene, the chase, the night)
+  if (elapsed > 4) {
+    if (MODE.calls.length) audio.preloadMusic('scene');
+    if (MODE.chase) audio.preloadMusic('chase');
+    if (MODE.id !== 'race') audio.preloadMusic(musicNight ? 'day' : 'night');
+  }
   {
     // the vehicle's own roof lamps flash when its model has them (the police
     // car, the ambulance, the fire truck); otherwise the game's light bar

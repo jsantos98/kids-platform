@@ -147,7 +147,8 @@ effect (loops on repeat) and every spoken line in both languages, section by sec
 ### Music
 
 Each moment has its own music: the garage, the island by day and by night,
-the race, the police chase and the mission scenes — four tracks each, played
+the race, the police chase (once a getaway car is in sight — until then the
+island's music) and the mission scenes — four tracks each, played
 in turn (shuffled, a couple of minutes each, each mission scene the next
 one). It crossfades from track to track and when the moment changes, carries
 on where it left off when you come back, and goes quieter while the narrator

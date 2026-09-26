@@ -100,19 +100,37 @@
     "loop": true
   },
   "siren-fire": {
-    "prompt": "European fire truck siren, two-tone hi-lo \"nee-naw\", Portuguese style, steady, heard from inside the truck, seamless loop",
-    "seconds": 4,
-    "loop": true
+    "prompt": "fire truck two-tone hi-lo siren (built: tools/siren.py)",
+    "seconds": 4.8,
+    "loop": true,
+    "tones": {
+      "lo": 435,
+      "hi": 580,
+      "tone": 0.6,
+      "cycles": 4
+    }
   },
   "siren-ambulance": {
-    "prompt": "European ambulance siren, two-tone hi-lo, slightly faster and higher than a fire truck, steady, seamless loop",
-    "seconds": 4,
-    "loop": true
+    "prompt": "ambulance two-tone hi-lo siren (built: tools/siren.py)",
+    "seconds": 4.5,
+    "loop": true,
+    "tones": {
+      "lo": 520,
+      "hi": 695,
+      "tone": 0.45,
+      "cycles": 5
+    }
   },
   "siren-police": {
-    "prompt": "European police car siren, fast two-tone hi-lo, steady, seamless loop",
-    "seconds": 4,
-    "loop": true
+    "prompt": "police two-tone hi-lo siren (built: tools/siren.py)",
+    "seconds": 4.2,
+    "loop": true,
+    "tones": {
+      "lo": 600,
+      "hi": 800,
+      "tone": 0.3,
+      "cycles": 7
+    }
   },
   "pump": {
     "prompt": "fire hose spraying a strong jet of water, steady hiss and splash, seamless loop",

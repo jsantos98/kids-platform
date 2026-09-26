@@ -11,6 +11,10 @@ export interface SfxDef {
   seconds: number;
   /** a seamless loop (engines, sirens, ambience), or a one-shot */
   loop: boolean;
+  /** a two-tone siren built rather than generated (tools/siren.py): its low
+   * and high tone (Hz), each tone's length (s) and the cycles in the loop —
+   * ElevenLabs' sirens came out as irregular warbles that never looped */
+  tones?: { lo: number; hi: number; tone: number; cycles: number };
 }
 
 export const SFX = {
@@ -37,10 +41,10 @@ export const SFX = {
   'race-vintage': { prompt: '1950s vintage race car engine, a rattly old-fashioned straight-six drone, steady, seamless loop', seconds: 5, loop: true },
   'race-drag': { prompt: 'drag racing car, a huge loud supercharged V8 rumble at high revs, steady, seamless loop', seconds: 5, loop: true },
   'race-monster': { prompt: 'monster truck, a big deep V8 rumbling and roaring at medium revs, steady, seamless loop', seconds: 5, loop: true },
-  // sirens (loops)
-  'siren-fire': { prompt: 'European fire truck siren, two-tone hi-lo "nee-naw", Portuguese style, steady, heard from inside the truck, seamless loop', seconds: 4, loop: true },
-  'siren-ambulance': { prompt: 'European ambulance siren, two-tone hi-lo, slightly faster and higher than a fire truck, steady, seamless loop', seconds: 4, loop: true },
-  'siren-police': { prompt: 'European police car siren, fast two-tone hi-lo, steady, seamless loop', seconds: 4, loop: true },
+  // sirens (loops, built — tools/siren.py)
+  'siren-fire': { prompt: 'fire truck two-tone hi-lo siren (built: tools/siren.py)', seconds: 4.8, loop: true, tones: { lo: 435, hi: 580, tone: 0.6, cycles: 4 } },
+  'siren-ambulance': { prompt: 'ambulance two-tone hi-lo siren (built: tools/siren.py)', seconds: 4.5, loop: true, tones: { lo: 520, hi: 695, tone: 0.45, cycles: 5 } },
+  'siren-police': { prompt: 'police two-tone hi-lo siren (built: tools/siren.py)', seconds: 4.2, loop: true, tones: { lo: 600, hi: 800, tone: 0.3, cycles: 7 } },
   // the fire hose, a level crossing, the world around (loops)
   'pump': { prompt: 'fire hose spraying a strong jet of water, steady hiss and splash, seamless loop', seconds: 4, loop: true },
   // (a level crossing's bell: ONE strike, which the game rings at a steady

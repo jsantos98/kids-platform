@@ -26,7 +26,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from seamless import make_seamless  # noqa: E402
+from seamless import make_seamless, fix_seam, level  # noqa: E402
+from siren import build as build_siren  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / 'public' / 'audio' / 'sfx'
@@ -69,9 +70,8 @@ def finish(d: dict, raw: Path, ogg: Path) -> None:
                             'silenceremove=start_periods=1:start_threshold=-90dB:start_silence=0,areverse',
                             '-ac', '1', '-ar', '44100', '-f', 'f32le', str(f32)], check=True)
             y, score = make_seamless(np.fromfile(f32, np.float32), 44100)
-            y.astype(np.float32).tofile(cut)
-            subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-f', 'f32le', '-ar', '44100', '-ac', '1', '-i', str(cut),
-                            '-af', 'loudnorm=I=-20:TP=-2:linear=true', '-c:a', 'libvorbis', '-q:a', '5', str(ogg)], check=True)
+            level(fix_seam(y, 44100)).tofile(cut)
+            encode_loop(cut, ogg)
         print(f'  seamless: {len(y) / 44100:.2f} s loop, pattern match {score:.2f}')
         return
     af = ('silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.02,areverse,'
@@ -79,6 +79,13 @@ def finish(d: dict, raw: Path, ogg: Path) -> None:
           'loudnorm=I=-18:TP=-1.5:linear=true')
     subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', str(raw), '-af', af, '-ac', '1', '-ar', '44100',
                     '-c:a', 'libvorbis', '-q:a', '5', str(ogg)], check=True)
+
+
+def encode_loop(f32: Path, ogg: Path) -> None:
+    """a loop's samples (44.1 kHz mono float) as OGG, untouched otherwise —
+    no filter that isn't loop-aware may run over a loop"""
+    subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-f', 'f32le', '-ar', '44100', '-ac', '1', '-i', str(f32),
+                    '-c:a', 'libvorbis', '-q:a', '6', '-ar', '44100', str(ogg)], check=True)
 
 
 def refinish(want: dict, manifest: dict) -> None:
@@ -123,6 +130,17 @@ def main() -> None:
         if only and sid not in only:
             if ogg.exists() and sid in old:
                 manifest[sid] = old[sid]
+            continue
+        if d.get('tones'):
+            # a siren: built, sample-exactly periodic (no credits)
+            t = d['tones']
+            y = build_siren(t['lo'], t['hi'], t['tone'], t['cycles'])
+            with tempfile.TemporaryDirectory() as tmp:
+                f32 = Path(tmp) / 'siren.f32'
+                level(y).tofile(f32)
+                encode_loop(f32, ogg)
+            print(f"{sid}.ogg  built siren {t['lo']}/{t['hi']} Hz, {t['tone']} s tones  (no credits)", flush=True)
+            seam.add(sid)
             continue
         key = key or api_key()
         with tempfile.TemporaryDirectory() as tmp:

@@ -72,3 +72,35 @@ def make_seamless(x: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
     # y[L-1] continues as x did) into the true start — equal power
     y[:cf] = x[:cf] * np.sin(t) + x[L:L + cf] * np.cos(t)
     return y, score
+
+
+def fix_seam(y: np.ndarray, sr: int, ms: float = 12) -> np.ndarray:
+    """ease away any leftover step where the loop wraps: the difference
+    between its first sample and where its last would continue to, spread
+    over the last `ms` as a gentle ramp"""
+    k = int(ms / 1000 * sr)
+    y = y.astype(np.float64).copy()
+    want = 2 * y[-1] - y[-2]                  # where the last sample was heading
+    step = y[0] - want
+    y[-k:] += step * np.linspace(0, 1, k) ** 2
+    return y.astype(np.float32)
+
+
+def level(y: np.ndarray, rms_db: float = -20.0, peak: float = 0.89) -> np.ndarray:
+    """one constant gain to a loudness (RMS dBFS), kept under a peak — no
+    resampling (ffmpeg's loudnorm resamples to 192 kHz, which isn't
+    loop-aware and clicked at the seam)"""
+    r = float(np.sqrt(np.mean(y.astype(np.float64) ** 2))) + 1e-9
+    g = min(10 ** (rms_db / 20) / r, peak / (float(np.abs(y).max()) + 1e-9))
+    return (y * g).astype(np.float32)
+
+
+def resample_loop(y: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
+    """resample a loop circularly (in the frequency domain), so its seam stays one"""
+    n_out = int(round(len(y) * sr_out / sr_in))
+    spec = np.fft.rfft(y.astype(np.float64))
+    out = np.zeros(n_out // 2 + 1, complex)
+    m = min(len(out), len(spec))
+    out[:m] = spec[:m]
+    return (np.fft.irfft(out, n_out) * n_out / len(y)).astype(np.float32)
+

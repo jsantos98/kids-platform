@@ -283,11 +283,12 @@ export class Transit {
     // posts stand on both shoulders of both approaches (9.4 m up/down the
     // road, 7.6 m out); each boom yaws across the carriageway from its
     // shoulder — local +z points back toward the road's centre line (R12)
-    const spots: Array<[number, number, number]> = [];
+    // (each spot: x, z, the boom's yaw, and how far along the street it stands)
+    const spots: Array<[number, number, number, number]> = [];
     for (const al of [-9.4, 9.4]) {
       for (const side of [-1, 1]) {
         spots.push([c.x + ux * al + nx * 7.6 * side, c.z + uz * al + nz * 7.6 * side,
-          Math.atan2(-nx * side, -nz * side)]);
+          Math.atan2(-nx * side, -nz * side), al]);
       }
     }
     const lamps: THREE.Mesh[][] = [[], [], [], []];
@@ -296,13 +297,22 @@ export class Transit {
       const [px, pz, ary] = spots[i];
       const wx = ox + px, wz = oz + pz;
       B.cyl(0.09, 0.11, 1.8, 8, STEEL, wx, 0.9, wz);
-      // white crossbuck facing down the street
-      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry + Math.PI / 4, 0);
-      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry - Math.PI / 4, 0);
-      // pair of signal lamps (kept dynamic so they can flash)
-      for (const s of [-0.34, 0.34]) {
-        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), DIM_RED);
-        lamp.position.set(wx + ux * s, 1.75, wz + uz * s);
+      // the white crossbuck stands upright facing down the street: each board
+      // is rolled ±45° about its own facing axis, then turned so that axis
+      // runs along the street (XYZ order: roll first, then yaw). Turned
+      // ±45° about the vertical instead, the boards lay flat and the X faced
+      // the sky.
+      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry, Math.PI / 4);
+      B.box(1.5, 0.2, 0.09, 0xfaf7ef, wx, 2.35, wz, 0, ry, -Math.PI / 4);
+      // the pair of signal lamps side by side ACROSS the road (along the
+      // street they hid one behind the other), on a dark backplate on the
+      // crossing's side, so they face the traffic coming up this approach
+      const toward = -Math.sign(spots[i][3]); // along u, from this post toward the crossing
+      B.box(1.0, 0.5, 0.06, 0x3a3f47, wx + ux * toward * 0.12, 1.75, wz + uz * toward * 0.12, 0, ry, 0);
+      for (const s of [-0.3, 0.3]) {
+        // (kept dynamic so they can flash)
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), DIM_RED);
+        lamp.position.set(wx + nx * s - ux * toward * 0.02, 1.75, wz + nz * s - uz * toward * 0.02);
         inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }

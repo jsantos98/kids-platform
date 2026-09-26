@@ -18,10 +18,25 @@ import { CROSSING_WARN_DIST } from '../transit.js';
 import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
 
-const MODELS = [
-  '/assets/kenney/sedan.glb', '/assets/kenney/taxi.glb', '/assets/kenney/suv.glb',
-  '/assets/kenney/van.glb', '/assets/kenney/police.glb', '/assets/kenney/ambulance.glb',
-  '/assets/kenney/hatchback-sports.glb',
+/** the island's traffic: the Car Kit's ordinary road vehicles — no race
+ * cars or karts, no police car or ambulance (those are the kid's) — each at
+ * its own length, most of them cars and the odd van or truck (`w`: its share
+ * of the fleet) */
+export interface TrafficModel { url: string; len: number; w: number }
+const K = '/assets/kenney/';
+export const TRAFFIC_MODELS: TrafficModel[] = [
+  { url: `${K}sedan.glb`, len: 4.4, w: 4 },
+  { url: `${K}sedan-sports.glb`, len: 4.4, w: 2 },
+  { url: `${K}hatchback-sports.glb`, len: 4.0, w: 2 },
+  { url: `${K}suv.glb`, len: 4.6, w: 3 },
+  { url: `${K}suv-luxury.glb`, len: 4.8, w: 2 },
+  { url: `${K}taxi.glb`, len: 4.4, w: 2 },
+  { url: `${K}van.glb`, len: 5.0, w: 2 },
+  { url: `${K}delivery.glb`, len: 5.4, w: 1 },
+  { url: `${K}delivery-flat.glb`, len: 5.4, w: 1 },
+  { url: `${K}truck.glb`, len: 6.5, w: 1 },
+  { url: `${K}truck-flat.glb`, len: 6.5, w: 1 },
+  { url: `${K}garbage-truck.glb`, len: 6.5, w: 1 },
 ];
 const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
 const LANE = 3.5;
@@ -47,6 +62,8 @@ interface Car {
   dodge: number;
   r: Rng;
   model: number;
+  /** its length (m): the model's (a truck is half as long again as a car) */
+  len: number;
   /** crossing a node on a curve (junction turn or roundabout ring) */
   round?: { pts: Array<{ x: number; z: number }>; cum: number[]; s: number; next: number; node: number; out: number };
   /** world position this frame, the path's heading and the body's (eased) */
@@ -85,11 +102,12 @@ function mergedOf(root: THREE.Object3D): { geo: THREE.BufferGeometry; mat: THREE
   const geo = ok.length ? mergeGeometries(ok) : null;
   return geo && mat ? { geo, mat } : null;
 }
-function carModel(url: string): Promise<{ geo: THREE.BufferGeometry; mat: THREE.Material } | null> {
-  let p = modelCache.get(url);
+function carModel(url: string, len: number): Promise<{ geo: THREE.BufferGeometry; mat: THREE.Material } | null> {
+  const key = `${url}@${len}`;
+  let p = modelCache.get(key);
   if (!p) {
-    p = spawnVehicle(url, { len: 4.4 }).then(mergedOf).catch(() => null);
-    modelCache.set(url, p);
+    p = spawnVehicle(url, { len }).then(mergedOf).catch(() => null);
+    modelCache.set(key, p);
   }
   return p;
 }
@@ -100,8 +118,9 @@ function fallbackModel(k: number): { geo: THREE.BufferGeometry; mat: THREE.Mater
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _y = new THREE.Vector3(0, 1, 0);
 
-/** an AI car's footprint (half length / half width, m) */
-const CAR_HALF_L = 2.2, CAR_HALF_W = 1.0;
+/** an AI car's footprint: half its length, and half its width (a truck's
+ * wider) */
+const halfW = (c: Car): number => (c.len > 5.2 ? 1.2 : 1.0);
 const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz, z: hx });
 
 export class IslandCars {
@@ -114,7 +133,14 @@ export class IslandCars {
               private ox: number, private oz: number, extraModels: string[] = []) {
     this.graph = graphFor(bx, by);
     const g = this.graph;
-    const models = [...MODELS, ...extraModels];
+    // (an extra — the fire truck driving itself when the kid isn't — one share)
+    const models: TrafficModel[] = [...TRAFFIC_MODELS, ...extraModels.map(url => ({ url, len: 6.6, w: 1 }))];
+    const total = models.reduce((a, m) => a + m.w, 0);
+    const pick = (x: number): number => {
+      let acc = 0;
+      for (let i = 0; i < models.length; i++) { acc += models[i].w / total; if (x < acc) return i; }
+      return models.length - 1;
+    };
     // a fixed fleet sized to the island's streets — about a car every 55 m
     // of street — seeded per island, each started on its own stretch of lane
     const count = Math.max(12, Math.min(Math.round(270 * SCALE * SCALE), Math.round(g.totalLen / 55)));
@@ -126,9 +152,11 @@ export class IslandCars {
       for (let t = 0; t < 6 && this.cars.some(o => o.edge === e.id && o.dir === dir && Math.abs(o.s - s0) < 12); t++) {
         e = edges[(r() * edges.length) | 0]; dir = r() < 0.5 ? 1 : -1; s0 = (0.2 + r() * 0.6) * e.len;
       }
+      // (its model from a stream of its own, so the fleet's spots don't move)
+      const model = pick(rng(chunkSeed(citySeed(bx, by), 0x7b0, k))());
       const car: Car = {
         id: k, edge: e.id, dir, next: e.id, s: s0,
-        speed: 6 + r() * 4, v: 0, dodge: 0, r, model: k % models.length,
+        speed: 6 + r() * 4, v: 0, dodge: 0, r, model, len: models[model].len,
         x: 0, z: 0, h: 0, ry: 0,
       };
       car.next = this.nextEdge(car, this.endNode(car), e).id;
@@ -137,7 +165,7 @@ export class IslandCars {
     }
     for (const c of this.cars) { this.place(c); c.ry = c.h; }
     // the fleet's meshes: the stand-in now, each kit model when it's in
-    models.forEach((url, mi) => {
+    models.forEach(({ url, len }, mi) => {
       const n = this.cars.filter(c => c.model === mi).length;
       if (!n) return;
       const set = (m: { geo: THREE.BufferGeometry; mat: THREE.Material } | null): void => {
@@ -153,7 +181,7 @@ export class IslandCars {
         this.scene.add(im);
       };
       set(fallbackModel(mi));
-      carModel(url).then(set).catch(() => {});
+      carModel(url, len).then(set).catch(() => {});
     });
   }
 
@@ -163,14 +191,14 @@ export class IslandCars {
   dispose(): void { for (const m of this.meshes) if (m) this.scene.remove(m); }
 
   /** a push that moves a vehicle of radius r at world (x, z) out of the
-   * car it overlaps (a car's footprint as a 4.4 x 2 m box), or null */
+   * car it overlaps (its footprint: its length by 2 m, a truck's 2.4), or null */
   bump(x: number, z: number, r: number): { dx: number; dz: number } | null {
     for (const c of this.cars) {
       const dx = x - c.x, dz = z - c.z;
       if (dx * dx + dz * dz > 64) continue;
       const fx = Math.sin(c.h), fz = Math.cos(c.h);
       const a = dx * fx + dz * fz, l = dx * fz - dz * fx;
-      const pa = CAR_HALF_L + r - Math.abs(a), pl = CAR_HALF_W + r - Math.abs(l);
+      const pa = c.len / 2 + r - Math.abs(a), pl = halfW(c) + r - Math.abs(l);
       if (pa <= 0 || pl <= 0) continue;
       // out along the shallower side
       if (pl < pa) {
@@ -353,7 +381,9 @@ export class IslandCars {
     const gapAhead = (c: Car): number => {
       const sl = slotOf.get(c)!;
       const l = lanes.get(sl.key)!;
-      if (sl.i + 1 < l.length) return l[sl.i + 1].s - l[sl.i].s;
+      // (measured as between two 4.4 m cars: a longer one ahead or behind
+      // keeps the same bumper-to-bumper room)
+      if (sl.i + 1 < l.length) return l[sl.i + 1].s - l[sl.i].s - lenAdj(c, l[sl.i + 1].car);
       if (c.round) return Infinity;
       // last on this street: the first car on the one it takes next,
       // measured along the curve both take through the junction (a car
@@ -366,8 +396,9 @@ export class IslandCars {
       if (!nl || !nl.length || nl[0].car === c) return Infinity;
       const f = nl[0].car;
       const along = f.round && f.round.node === end.id ? f.round.s : 2 * IN + (nl[0].s - IN);
-      return (e.len - IN - c.s) + along;
+      return (e.len - IN - c.s) + along - lenAdj(c, f);
     };
+    const lenAdj = (a: Car, b: Car): number => (a.len + b.len) / 2 - 4.4;
     const follow = (gap: number, v: number): number => (gap < 16 ? Math.min(v, Math.max(0, (gap - 7) * 0.9)) : v);
 
     for (const c of this.cars) {

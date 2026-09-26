@@ -1,20 +1,22 @@
 // Day and night (G10): the time of day as a pure function of the game
-// clock. One day lasts DAY_LEN seconds: dawn 30 s, day 7 min, dusk 30 s,
-// night 2 min — short nights, and darker rather than dark (the fill light
-// keeps ~45 % of the day's and the moon lights the streets: the darkest
-// moment keeps ≥15 % of noon's light, still easy to read). Every game
-// starts in the morning; `?time=day|dusk|night|dawn` (or a fraction of the
-// day, 0 = dawn) jumps there. Everything that lights up at night reads
-// `night` (0 by day … 1 at night, eased through dusk and dawn).
+// clock, on a 24-hour clock the kid can see (the HUD's hour hand). One game
+// day lasts DAY_LEN = 12 minutes — a game hour is 30 s: dawn 5–7h, day
+// 7–21h, dusk 21–23h, night 23–5h; the sun rises at 6h and sets at 22h.
+// Nights are darker rather than dark (the fill light keeps ~45 % of the
+// day's and the moon lights the streets: the darkest moment keeps ≥15 % of
+// noon's light, still easy to read). Every game starts at 8:00;
+// `?time=dawn|morning|day|noon|dusk|night|midnight`, an hour (`?time=22`)
+// or a fraction of the day jumps there. `phase` is the fraction of the day
+// since midnight. Everything that lights up at night reads `night` (0 by
+// day … 1 at night, eased through dusk and dawn).
 
-/** one whole day (s) */
-export const DAY_LEN = 600;
-/** the parts of the day, as fractions of it: dawn, day, dusk, night */
-export const DAWN = 30 / DAY_LEN, DAYTIME = 420 / DAY_LEN, DUSK = 30 / DAY_LEN;
-/** when the sun sets (the end of dusk) — night fills the rest */
-export const SUNSET = DAWN + DAYTIME + DUSK;
-/** the sun clears the horizon mid-dawn and meets it again mid-dusk */
-export const SUN_RISE = DAWN * 0.5, SUN_SET = DAWN + DAYTIME + DUSK * 0.5;
+/** one whole day (s): a game hour is DAY_LEN / 24 = 30 s */
+export const DAY_LEN = 720;
+const H = 1 / 24;
+/** the parts of the day (fractions since midnight) */
+export const DAWN_AT = 5 * H, DAY_AT = 7 * H, DUSK_AT = 21 * H, NIGHT_AT = 23 * H;
+/** the sun clears the horizon mid-dawn (6h) and meets it again mid-dusk (22h) */
+export const SUN_RISE = 6 * H, SUN_SET = 22 * H;
 /** the shadow light never lies lower than this (rad), however low the sun */
 export const LIGHT_MIN_ELEV = (30 * Math.PI) / 180;
 /** the moon's phases: new, crescent, quarter, gibbous, full, and back */
@@ -71,31 +73,39 @@ const NIGHT: Palette = {
   skyTop: 0x0c1633, skyBottom: 0x2e3a63, hemiSky: 0x909cc6, hemiGround: 0x45495c, hemiI: 0.85,
   lightColor: 0xc4cfff, lightI: 0.65, sunColor: 0xffa05a, sunGlow: 0, exposure: 0.95, night: 1, stars: 1,
 };
-/** the day's key moments: from the end of night through dawn, the day,
- * dusk and night again (each eased into the next) */
+/** the day's key moments, from midnight round (each eased into the next) */
 const KEYS: Array<[number, Palette]> = [
   [0, NIGHT],
-  [DAWN * 0.5, TWILIGHT],
-  [DAWN + 0.012, DAY],
-  [DAWN + DAYTIME - 0.012, DAY],
-  [DAWN + DAYTIME + DUSK * 0.5, TWILIGHT],
-  [SUNSET + 0.012, NIGHT],
+  [DAWN_AT, NIGHT],
+  [SUN_RISE, TWILIGHT],
+  [DAY_AT + 0.25 * H, DAY],
+  [DUSK_AT - 0.25 * H, DAY],
+  [SUN_SET, TWILIGHT],
+  [NIGHT_AT, NIGHT],
   [1, NIGHT],
 ];
 
-/** the part of the day a new game starts at: a little after sunrise */
-export const MORNING = DAWN + 0.03;
-/** the middle of the day */
-export const NOON = DAWN + DAYTIME / 2;
-const NAMED: Record<string, number> = { dawn: DAWN * 0.4, morning: MORNING, day: 0.4, noon: NOON, dusk: DAWN + DAYTIME + DUSK * 0.5, night: SUNSET + 0.09, midnight: SUNSET + (1 - SUNSET) / 2 };
+/** the time a new game starts at: 8:00 */
+export const MORNING = 8 * H;
+/** the middle of the day (the sun at its highest) */
+export const NOON = (SUN_RISE + SUN_SET) / 2;
+const NAMED: Record<string, number> = {
+  dawn: 5.6 * H, morning: MORNING, day: 10 * H, noon: NOON, dusk: SUN_SET, night: 23.5 * H, midnight: 2 * H,
+};
 
-/** where in the day a game starts: the morning, or `?time=` */
+/** where in the day a game starts: 8:00, or `?time=` (a name, an hour
+ * 1–24 or a fraction of the day) */
 export function startPhase(query: string | null): number {
   if (!query) return MORNING;
   if (query in NAMED) return NAMED[query];
   const f = Number(query);
-  return Number.isFinite(f) ? ((f % 1) + 1) % 1 : MORNING;
+  if (!Number.isFinite(f)) return MORNING;
+  const p = f > 1 ? f / 24 : f;
+  return ((p % 1) + 1) % 1;
 }
+
+/** the hour on the clock for a time of day (0 … 24) */
+export function hourOf(phase: number): number { return phase * 24; }
 
 const smooth = (x: number): number => x * x * (3 - 2 * x);
 function lerpColor(a: number, b: number, f: number): number {

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { createStage, makeHUD, type Dressing } from '../../engine/stage.js';
 import { bakedNight } from '../../engine/baked.js';
-import { dayState, startPhase, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
+import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
@@ -505,6 +505,35 @@ const particles = new Particles(scene);
 
 // ---- HUD ----
 const missionEl = document.getElementById('mission')!;
+// the game clock (G10): an hour hand going round a 12-hour face, a sun on
+// the face by day and the moon (in tonight's phase) by night; the face
+// darkens with the sky
+const clockEls = {
+  hand: document.getElementById('clockHand')!, face: document.getElementById('clockFace')!,
+  ticks: document.getElementById('clockTicks')!, sun: document.getElementById('clockSun')!,
+  moon: document.getElementById('clockMoon')!, shade: document.getElementById('clockMoonShade')!,
+};
+let clockShown = '';
+const mixHex = (a: number, b: number, f: number): string => '#' + new THREE.Color(a).lerp(new THREE.Color(b), f).getHexString();
+function updateClock(): void {
+  const hour = hourOf(day.phase);
+  const deg = ((hour % 12) / 12) * 360;
+  const isNight = day.night > 0.5;
+  // (only when something shows a change: 0.5 deg of the hand, the sky's shade)
+  const key = `${deg.toFixed(1)}|${isNight}|${day.moonPhase}|${Math.round(day.night * 20)}`;
+  if (key === clockShown) return;
+  clockShown = key;
+  clockEls.hand.setAttribute('transform', `rotate(${deg.toFixed(1)} 50 50)`);
+  const face = mixHex(0xdff1fb, 0x2a3a66, day.night);
+  clockEls.face.setAttribute('fill', face);
+  clockEls.ticks.setAttribute('stroke', mixHex(0x4a5058, 0xcfd8f0, day.night));
+  clockEls.shade.setAttribute('fill', face);
+  clockEls.sun.style.display = isNight ? 'none' : '';
+  clockEls.moon.style.display = isNight ? '' : 'none';
+  // the moon's lit part: waxing lights the right (the shade slides left), waning the left
+  const p = day.moonPhase, lit = (1 - Math.cos((2 * Math.PI * p) / MOON_PHASES)) / 2;
+  clockEls.shade.setAttribute('cx', ((p <= MOON_PHASES / 2 ? -1 : 1) * 19 * lit).toFixed(1));
+}
 const guideEl = document.getElementById('guide')!;
 const guideIcon = document.getElementById('guideIcon')!;
 const guideArrow = document.getElementById('guideArrow')!;
@@ -1258,6 +1287,7 @@ const tick = (): void => {
     promptFill.style.width = '0%';
   }
 
+  updateClock();
   nightLights.fireflies(curCity, st.x, st.z, elapsed);
   nightLights.update(day.night);
   bakedNight.value = day.night;

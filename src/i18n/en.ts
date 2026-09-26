@@ -65,6 +65,7 @@ export const EN = {
   // ---- the game page ----
   'city.pageTitle': 'Endless City',
   'city.loadingPanel': 'loading…',
+  'city.clock': 'the time of day',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
   'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · draw calls {calls} · triangles {tris}',

@@ -1,11 +1,11 @@
 // G10 check: the day/night cycle keeps its promises. Samples dayState over
 // several days (and from every named start) and fails if nights run longer
-// than a quarter of the day, any output jumps between neighbouring samples,
+// than a third of the day (the 24-hour clock: 6 h night, 2 h dusk and dawn), any output jumps between neighbouring samples,
 // midnight falls under the brightness floor ("darker, not dark"), the sun is
 // down outside the night (or up in it), the shadow light dips under LIGHT_MIN_ELEV, or
 // the moon skips any of its eight phases.
 //   npx tsx tools/check-daylight.ts
-import { dayState, startPhase, DAY_LEN, MOON_PHASES, LIGHT_MIN_ELEV, type DayState } from '../src/engine/daylight.js';
+import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES, LIGHT_MIN_ELEV, type DayState } from '../src/engine/daylight.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; if (fails < 30) console.log('  FAIL ' + m); };
@@ -21,7 +21,7 @@ for (let t = 0; t <= DAYS * DAY_LEN; t += STEP) samples.push(dayState(t, startPh
 // 1. short nights
 const nightShare = samples.filter(d => d.night >= 0.5).length / samples.length;
 console.log(`night share ${(nightShare * 100).toFixed(1)}% of the day`);
-if (nightShare > 0.255) fail(`nights take ${(nightShare * 100).toFixed(1)}% of the day (max 25%)`);
+if (nightShare > 0.35) fail(`nights take ${(nightShare * 100).toFixed(1)}% of the day (max 35%: 6 h of night and half of dusk and dawn)`);
 if (nightShare < 0.1) fail(`nights take only ${(nightShare * 100).toFixed(1)}% of the day — there is barely a night`);
 
 // 2. no jumps (a quarter second apart, no output may leap)
@@ -76,6 +76,13 @@ if (seen.size !== MOON_PHASES) fail(`only ${seen.size} of ${MOON_PHASES} moon ph
 // 6. every game starts in the morning; the named times land where they say
 const first = dayState(0);
 if (first.night > 0.01 || first.sunDir[1] <= 0) fail('a new game does not start in daylight');
+// the clock: 8:00 at the start, the hours land where they say
+if (Math.abs(hourOf(dayState(0).phase) - 8) > 1e-6) fail(`a new game starts at ${hourOf(dayState(0).phase).toFixed(2)}h, not 8:00`);
+if (Math.abs(hourOf(dayState(30).phase) - 9) > 1e-6) fail('a game hour is not 30 s');
+for (const [h, night] of [[3, 1], [13, 0], [23.5, 1]] as const) {
+  const d = dayState(0, startPhase(String(h)));
+  if (Math.abs(d.night - night) > 0.01) fail(`?time=${h} gives night ${d.night.toFixed(2)}`);
+}
 for (const [name, night] of [['night', 1], ['midnight', 1], ['noon', 0], ['day', 0]] as const) {
   const d = dayState(0, startPhase(name));
   if (Math.abs(d.night - night) > 0.01) fail(`?time=${name} gives night ${d.night.toFixed(2)}`);

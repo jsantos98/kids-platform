@@ -83,6 +83,9 @@
     font-family: inherit; font-weight: 800; font-size: clamp(13px, 1.9vh, 17px); color: var(--ink-soft);
   }
   #lang button.on { background: var(--sel, #e25c5c); color: #fffdf8; }
+  /* the music's switch (off: faded, struck through) */
+  #lang button.music { padding: 6px 10px; }
+  #lang button.music.off { opacity: .55; background: linear-gradient(135deg, transparent 46%, #e25c5c 46%, #e25c5c 54%, transparent 54%); }
   #wheel { width: clamp(38px, 6vh, 58px); height: clamp(38px, 6vh, 58px); transition: transform .08s linear; }
 
   /* ---- the game's keys, for the grown-up setting things up ---- */

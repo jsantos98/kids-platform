@@ -68,6 +68,7 @@ export const PT: Record<Key, string> = {
   'city.loadingPanel': 'a carregar…',
   'city.clock': 'a hora do dia',
   'city.mute': 'som ligado / desligado',
+  'city.music': 'música ligada / desligada',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',
   'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · chamadas de desenho {calls} · triângulos {tris}',

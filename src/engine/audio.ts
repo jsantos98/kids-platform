@@ -7,15 +7,23 @@
 // the sea). Each plays its recording (sfxList.ts, recorded by
 // tools/make-sfx.py into public/audio/sfx/) — the loops at a speed that
 // follows the vehicle's — and, until a recording has loaded or where there
-// is none, a sound synthesized here in code. Everything is built lazily on
-// the first user gesture (autoplay rules).
+// is none, a sound synthesized here in code. And the music (G12: musicList.ts,
+// recorded by tools/make-music.py into public/audio/music/), on a bus of its
+// own under everything, crossfading from track to track as the moment
+// changes. Everything is built lazily on the first user gesture (autoplay rules).
 
 import { SFX, type SfxId } from './sfxList.js';
+import { MUSIC, type MusicId } from './musicList.js';
 
 export type EngineKind = 'car' | 'truck' | 'kart' | 'heli' | 'plane' | 'boat' | 'train';
 export type SirenStyle = 'fire' | 'ambulance' | 'police' | 'heli';
 
-const MUTE_KEY = 'game.mute';
+const MUTE_KEY = 'game.mute', MUSIC_KEY = 'game.music';
+/** the music's level — under the effects, far under the voice — and how far
+ * a voice line ducks it */
+const MUSIC_LEVEL = 0.3, MUSIC_DUCK = 0.45;
+/** a change of track crossfades over about this long (s) */
+const MUSIC_FADE = 2.4;
 /** the effects' and the ambience's levels — well under the narrator's voice
  * (which plays on its own at full level) — and how far a voice line ducks them */
 const SFX_LEVEL = 0.5, AMB_LEVEL = 0.45, DUCK = 0.45;
@@ -74,10 +82,26 @@ export class GameAudio {
   private samples = new Map<SfxId, AudioBuffer>();
   /** the recorded loops playing (each silent until asked for) */
   private loops = new Map<SfxId, { src: AudioBufferSourceNode; gain: GainNode }>();
+  // ---- the music ----
+  private musicBus: GainNode | null = null;
+  private musicOn = true;
+  private ducked = false;
+  private tracks = new Map<MusicId, AudioBuffer>();
+  private loading = new Set<MusicId>();
+  /** tracks that couldn't be had (never asked for again) */
+  private missing = new Set<MusicId>();
+  private wantTrack: MusicId | null = null;
+  private track: { id: MusicId; src: AudioBufferSourceNode; gain: GainNode; startedAt: number; offset: number } | null = null;
+  /** where each track was when it last faded out: coming back to it carries on */
+  private resumeAt = new Map<MusicId, number>();
 
-  /** @param root the path from the page to the site root (the recordings) */
-  constructor(private root = '') {
-    try { this.muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* no storage */ }
+  /** @param root the path from the page to the site root (the recordings)
+   * @param sfx load the sound effects (the garage plays only music) */
+  constructor(private root = '', private sfxOn = true) {
+    try {
+      this.muted = localStorage.getItem(MUTE_KEY) === '1';
+      this.musicOn = localStorage.getItem(MUSIC_KEY) !== '0';
+    } catch { /* no storage */ }
   }
 
   /** fetch and decode every recording (a missing one keeps its synth sound) */
@@ -150,6 +174,9 @@ export class GameAudio {
       this.amb = ac.createGain();
       this.amb.gain.value = AMB_LEVEL;
       this.amb.connect(this.master);
+      this.musicBus = ac.createGain();
+      this.musicBus.gain.value = this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) : 0;
+      this.musicBus.connect(this.master);
       // white noise, shared by every noisy sound
       const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
       const d = buf.getChannelData(0);
@@ -178,7 +205,8 @@ export class GameAudio {
       this.pumpGain.gain.value = 0;
       src.connect(bp); bp.connect(this.pumpGain); this.pumpGain.connect(this.sfx);
       src.start();
-      this.loadSamples();
+      if (this.sfxOn) this.loadSamples();
+      if (this.wantTrack) { const w = this.wantTrack; this.wantTrack = null; this.setMusic(w); }
     } catch {
       this.ac = null;
     }
@@ -192,12 +220,78 @@ export class GameAudio {
     if (this.master && this.ac) this.master.gain.setTargetAtTime(m ? 0 : 1, this.ac.currentTime, 0.05);
   }
 
-  /** duck the sound effects and ambience under a voice line */
+  /** duck the sound effects, ambience and music under a voice line */
   duck(on: boolean): void {
+    // (called every frame is fine: only a change ramps)
+    if (on === this.ducked && this.ac) return;
+    this.ducked = on;
     if (!this.ac || !this.sfx || !this.amb) return;
     const t = this.ac.currentTime;
     this.sfx.gain.setTargetAtTime(SFX_LEVEL * (on ? DUCK : 1), t, 0.12);
     this.amb.gain.setTargetAtTime(AMB_LEVEL * (on ? DUCK : 1), t, 0.12);
+    this.musicLevel(0.15);
+  }
+
+  // ---- the music ----
+
+  /** is the music on? (its own switch, remembered for every visit) */
+  get isMusicOn(): boolean { return this.musicOn; }
+  setMusicOn(on: boolean): void {
+    this.musicOn = on;
+    try { localStorage.setItem(MUSIC_KEY, on ? '1' : '0'); } catch { /* no storage */ }
+    this.musicLevel(0.3);
+  }
+
+  private musicLevel(k: number): void {
+    if (!this.ac || !this.musicBus) return;
+    this.musicBus.gain.setTargetAtTime(this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) : 0, this.ac.currentTime, k);
+  }
+
+  /** the track to play now (null: none), crossfaded from the one playing; a
+   * track comes back where it left off. Called every frame is fine. */
+  setMusic(id: MusicId | null): void {
+    const ac = this.ac;
+    if (!ac || !this.musicBus) { this.wantTrack = id; return; }
+    if (id === this.wantTrack && (this.track?.id === id || (id && !this.tracks.has(id)))) return;
+    this.wantTrack = id;
+    const t = ac.currentTime;
+    if (this.track && this.track.id !== id) {
+      const old = this.track, dur = old.src.buffer!.duration;
+      this.resumeAt.set(old.id, (old.offset + (t - old.startedAt)) % dur);
+      old.gain.gain.setTargetAtTime(0, t, MUSIC_FADE / 4);
+      old.src.stop(t + MUSIC_FADE * 1.5);
+      this.track = null;
+    }
+    if (!id || this.track) return;
+    const buf = this.tracks.get(id);
+    // (not loaded yet: it starts once it has)
+    if (!buf) { this.preloadMusic(id); return; }
+    const src = ac.createBufferSource(), gain = ac.createGain();
+    src.buffer = buf;
+    src.loop = true;
+    gain.gain.value = 0;
+    gain.gain.setTargetAtTime(1, t + 0.05, MUSIC_FADE / 4);
+    src.connect(gain); gain.connect(this.musicBus);
+    const offset = this.resumeAt.get(id) ?? 0;
+    src.start(t + 0.05, offset);
+    this.track = { id, src, gain, startedAt: t + 0.05, offset };
+  }
+
+  /** fetch a track ahead, so a change to it starts at once */
+  preloadMusic(id: MusicId): void {
+    const ac = this.ac;
+    if (!ac || this.tracks.has(id) || this.loading.has(id) || this.missing.has(id) || !(id in MUSIC)) return;
+    this.loading.add(id);
+    void fetch(`${this.root}audio/music/${id}.ogg`)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then(b => ac.decodeAudioData(b))
+      .then(b => {
+        this.tracks.set(id, b);
+        // (the track wanted meanwhile: it starts now)
+        if (this.wantTrack === id && !this.track) { this.wantTrack = null; this.setMusic(id); }
+      })
+      .catch(() => { this.missing.add(id); })
+      .finally(() => this.loading.delete(id));
   }
 
   /** the siren on / off in the vehicle's own two tones */

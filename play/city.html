@@ -124,14 +124,17 @@
   }
   #homeBtn span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: var(--cream); }
   body.in-scene #homeBtn { display: none; }
-  /* sound on / off, beside the home button (G11) */
-  #muteBtn {
+  /* sound on / off, beside the home button (G11), and the music (G12) */
+  #muteBtn, #musicBtn {
     position: fixed; top: 14px; left: 82px; z-index: 12;
     width: 52px; height: 52px; border-radius: 50%; cursor: pointer;
     display: grid; place-items: center; font-size: 24px; line-height: 1;
     background: var(--cream); border: 3px solid #fffdf8; box-shadow: 0 4px 0 rgba(74, 80, 88, .18);
     touch-action: manipulation;
   }
+  #musicBtn { left: 144px; }
+  /* (off: the note faded and struck through) */
+  #musicBtn.off { opacity: .55; background: linear-gradient(135deg, transparent 46%, #e25c5c 46%, #e25c5c 54%, transparent 54%), var(--cream); }
   /* the loading card: what's happening, a bar with the vehicle driving
      along it, and about how long is left */
   #loading {
@@ -220,6 +223,7 @@
 <canvas id="minimap" width="256" height="256"></canvas>
 <button id="homeBtn" type="button" data-i18n-title="city.home"><span>🏠</span></button>
 <button id="muteBtn" type="button" data-i18n-title="city.mute">🔊</button>
+<button id="musicBtn" type="button" data-i18n-title="city.music">🎵</button>
 <div id="islandPill"><span class="t"></span><span class="mini"><div></div></span></div>
 <div id="loading">
   <div class="isle">🏝️</div>

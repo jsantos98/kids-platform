@@ -1,0 +1,74 @@
+{
+  "garage": {
+    "prompt": "Cheerful, bouncy music for a children's game menu, a toy garage full of vehicles: ukulele, glockenspiel, handclaps, light drums, playful bass, major key, 110 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "bpm": 110,
+    "take": "B",
+    "loop": {
+      "from": 0.023,
+      "to": 52.391,
+      "beats": 96.01,
+      "match": 0.78
+    }
+  },
+  "day": {
+    "prompt": "Sunny, upbeat adventure music for a children's driving game, exploring a little island city by day: acoustic guitar strums, bright piano, marimba melody, bouncy bass, light drums with shaker, major key, happy and carefree, 118 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "bpm": 118,
+    "take": "A",
+    "loop": {
+      "from": 0.302,
+      "to": 81.671,
+      "beats": 160.03,
+      "match": 0.92
+    }
+  },
+  "night": {
+    "prompt": "Calm, warm night-time music for a children's driving game, a little city lit up under the stars: soft electric piano, music box and celesta twinkles, gentle pads, soft brushed drums, round bass, major key, dreamy but still moving along, 92 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "bpm": 92,
+    "take": "A",
+    "loop": {
+      "from": 23.638,
+      "to": 107.117,
+      "beats": 128.0,
+      "match": 0.9
+    }
+  },
+  "race": {
+    "prompt": "Energetic, exciting race music for a children's kart racing game: driving drums, funky bass, bright synth brass stabs, electric guitar riffs, major key, fun and fast but never aggressive, 150 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "bpm": 150,
+    "take": "B",
+    "loop": {
+      "from": 0.395,
+      "to": 57.988,
+      "beats": 143.98,
+      "match": 0.83
+    }
+  },
+  "chase": {
+    "prompt": "Playful cartoon police-chase music for a children's game, sneaky and fun: pizzicato strings, walking upright bass, bongos and snare, cheeky clarinet and muted trumpet melody, spy-caper feel, light-hearted, 128 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "bpm": 128,
+    "take": "B",
+    "loop": {
+      "from": 22.384,
+      "to": 82.387,
+      "beats": 128.01,
+      "match": 0.79
+    }
+  },
+  "scene": {
+    "prompt": "Brave, hopeful little-hero music for a children's rescue mission, putting out a fire and saving a kitten: light marching snare, bright brass and strings, glockenspiel, determined but cheerful, major key, 112 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "bpm": 112,
+    "take": "A",
+    "loop": {
+      "from": 0.395,
+      "to": 21.838,
+      "beats": 40.03,
+      "match": 0.78
+    }
+  }
+}

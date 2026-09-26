@@ -67,6 +67,7 @@ export const EN = {
   'city.loadingPanel': 'loading…',
   'city.clock': 'the time of day',
   'city.mute': 'sound on / off',
+  'city.music': 'music on / off',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
   'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · draw calls {calls} · triangles {tris}',

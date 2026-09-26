@@ -15,7 +15,8 @@ import { RACE_CARS, DEFAULT_CAR, type RaceCar } from './games/raceCars.js';
 import { keysHtml } from './games/keys.js';
 import { loadTotals } from './games/city/state.js';
 import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/index.js';
-import { speak, preloadVoice } from './i18n/voice.js';
+import { speak, preloadVoice, speaking } from './i18n/voice.js';
+import { GameAudio } from './engine/audio.js';
 
 applyI18n('garage.pageTitle');
 preloadVoice();
@@ -280,9 +281,23 @@ function placeHelp(): void {
 placeHelp();
 void document.fonts?.ready.then(placeHelp);
 
+// ---- the garage's music (G12): starts with the first click or key (a page
+// may only start sound then), ducks under the spoken names; its on / off
+// switch sits with the language's, and is the game's own too ----
+const music = new GameAudio('', false);
+music.setMusic('garage');
+for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => music.unlock());
+
 // ---- the language: Português (the default) or English, for every page ----
 const langBox = document.getElementById('lang')!;
 function drawLang(): void {
+  const note = document.createElement('button');
+  note.type = 'button';
+  note.textContent = '🎵';
+  note.className = 'music';
+  note.title = tr('city.music');
+  note.classList.toggle('off', !music.isMusicOn);
+  note.addEventListener('click', e => { e.stopPropagation(); music.unlock(); music.setMusicOn(!music.isMusicOn); drawLang(); });
   langBox.replaceChildren(...LANGS.map(l => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -291,7 +306,7 @@ function drawLang(): void {
     b.classList.toggle('on', l.id === getLang());
     b.addEventListener('click', e => { e.stopPropagation(); pickLang(l.id); });
     return b;
-  }));
+  }), note);
 }
 function pickLang(l: 'pt' | 'en'): void {
   if (l === getLang()) return;
@@ -376,6 +391,7 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   t += dt;
   pollWheel(dt);
+  music.duck(speaking());
   table.rotation.y += dt * 0.45;
   // frame the chosen vehicle by its size (a kart close, the train further back)
   const cur = list[sel];

@@ -7,6 +7,7 @@ import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio, type EngineKind, type SirenStyle } from '../../engine/audio.js';
+import type { MusicId } from '../../engine/musicList.js';
 import { Soundscape } from './soundscape.js';
 import { Narrator } from './narrator.js';
 import { preloadVoice, setVoiceMuted, wakeVoice, voiceReady } from '../../i18n/voice.js';
@@ -307,6 +308,23 @@ const muteBtn = document.getElementById('muteBtn')!;
 const showMute = (): void => { muteBtn.textContent = audio.isMuted ? '🔇' : '🔊'; };
 showMute();
 muteBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMuted(!audio.isMuted); setVoiceMuted(audio.isMuted); showMute(); });
+// the music on / off (its own switch, remembered — G12)
+const musicBtn = document.getElementById('musicBtn')!;
+const showMusic = (): void => { musicBtn.classList.toggle('off', !audio.isMusicOn); };
+showMusic();
+musicBtn.addEventListener('click', e => { e.stopPropagation(); audio.unlock(); audio.setMusicOn(!audio.isMusicOn); showMusic(); });
+/** the music for the moment (G12): the mission's scene, the race, the chase,
+ * or the island by day / by night (switched with a margin, so dusk doesn't
+ * flip it back and forth) */
+let musicNight = false;
+function musicNow(night: number, inScene: boolean): MusicId {
+  if (inScene) return 'scene';
+  if (MODE.id === 'race') return 'race';
+  if (MODE.chase) return 'chase';
+  if (night > 0.6) musicNight = true;
+  else if (night < 0.4) musicNight = false;
+  return musicNight ? 'night' : 'day';
+}
 /** the kid's engine sound, by vehicle */
 const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
   : V.kind === 'rail' ? 'train' : MODE.id === 'truck' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
@@ -1333,6 +1351,9 @@ const tick = (): void => {
     engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : undefined,
     rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
   });
+  audio.setMusic(musicNow(day.night, !!view.scene));
+  // (the tracks likely next, fetched ahead: a mission's scene, the night)
+  if (elapsed > 4) { if (MODE.calls.length) audio.preloadMusic('scene'); if (MODE.id !== 'race' && !MODE.chase) audio.preloadMusic(musicNight ? 'day' : 'night'); }
   {
     // the vehicle's own roof lamps flash when its model has them (the police
     // car, the ambulance, the fire truck); otherwise the game's light bar

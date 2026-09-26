@@ -26,7 +26,7 @@
 <h1>🔊 Todos os sons do jogo</h1>
 <p class="note">Cada efeito e cada frase que o jogo toca, para ouvir se está tudo bem. Os loops (motores, sirenes, ambiente)
 tocam em repetição, para se ouvir a emenda; no jogo os motores mudam de tom com a velocidade. «Tocar todos» passa pela secção
-inteira, um de cada vez (os loops ouvem-se duas voltas).</p>
+inteira, um de cada vez (os loops ouvem-se duas voltas; nas músicas ouve-se só a emenda: 6 s antes e 6 s depois de voltar ao início).</p>
 <nav id="nav"></nav>
 <div id="out">a carregar…</div>
 <script>
@@ -38,8 +38,23 @@ const GROUPS = [
   ['Momentos do jogo', (id, d) => !d.loop],
 ];
 const MOOD = { excited: 'entusiasmado', cheer: 'alegre', warm: 'carinhoso', lively: 'animado' };
+const MUSIC_FOR = { garage: 'a garagem', day: 'a ilha de dia', night: 'a ilha à noite', race: 'a corrida', chase: 'a perseguição (polícia)', scene: 'as missões' };
 let playing = null;
-function stopAll() { document.querySelectorAll('audio').forEach(a => { a.pause(); }); document.querySelectorAll('tr.playing').forEach(r => r.classList.remove('playing')); }
+// the join of a music loop, heard without a gap (an <audio loop> leaves a
+// little one): the last 6 s, round the loop point, the first 6 s
+let ac = null, seamSrc = null;
+const seamBufs = {};
+async function seam(id) {
+  ac ??= new AudioContext();
+  seamSrc?.stop(); seamSrc = null;
+  seamBufs[id] ??= await fetch(`audio/music/${id}.ogg`).then(r => r.arrayBuffer()).then(b => ac.decodeAudioData(b));
+  const buf = seamBufs[id], src = ac.createBufferSource();
+  src.buffer = buf; src.loop = true; src.connect(ac.destination);
+  src.start(0, Math.max(0, buf.duration - 6)); src.stop(ac.currentTime + 12);
+  seamSrc = src;
+  return new Promise(done => { src.onended = done; });
+}
+function stopAll() { seamSrc?.stop(); seamSrc = null; document.querySelectorAll('audio').forEach(a => { a.pause(); }); document.querySelectorAll('tr.playing').forEach(r => r.classList.remove('playing')); }
 async function playSection(btn, rows) {
   if (btn.classList.contains('on')) { btn.classList.remove('on'); playing = null; stopAll(); return; }
   stopAll(); document.querySelectorAll('button.on').forEach(b => b.classList.remove('on'));
@@ -49,6 +64,7 @@ async function playSection(btn, rows) {
     if (playing !== run) return;
     const a = tr.querySelector('audio');
     tr.classList.add('playing'); tr.scrollIntoView({ block: 'nearest' });
+    if (tr.dataset.music) { await seam(tr.dataset.music); tr.classList.remove('playing'); continue; }
     a.currentTime = 0;
     await new Promise(done => {
       const laps = a.loop ? 2 : 1;
@@ -79,11 +95,19 @@ function section(title, headers, rows) {
   document.getElementById('nav').appendChild(a);
 }
 (async () => {
-  const [sfx, voice] = await Promise.all([
+  const [sfx, voice, music] = await Promise.all([
     fetch('audio/sfx/manifest.json').then(r => r.json()),
     fetch('audio/voice/manifest.json').then(r => r.json()),
+    fetch('audio/music/manifest.json').then(r => r.json()).catch(() => ({})),
   ]);
   document.getElementById('out').textContent = '';
+  {
+    const rows = Object.entries(music).map(([id, d]) =>
+      `<tr data-music="${id}"><td class="id">${id}</td><td><audio controls preload="none" loop src="audio/music/${id}.ogg"></audio></td>` +
+      `<td class="meta"><button onclick="stopAll(); seam('${id}')">🔁 ouvir a emenda</button><br>${(d.loop.beats / 4).toFixed(0)} compassos · ` +
+      `${Math.round(d.loop.to - d.loop.from)} s · versão ${d.take}</td><td><b>${MUSIC_FOR[id] || ''}</b><br><small>${d.prompt}</small></td></tr>`);
+    if (rows.length) section('Música', ['música', '', '', 'para'], rows);
+  }
   const ids = Object.keys(sfx).filter(k => !k.startsWith('_'));
   for (const [title, test] of GROUPS) {
     const rows = ids.filter(id => test(id, sfx[id])).map(id => {

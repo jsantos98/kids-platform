@@ -140,8 +140,28 @@ The game page is `play/city.html`.
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |
 
-To hear every sound in the game — each effect (loops on repeat) and every spoken line in both
-languages, section by section — open `dev-sounds.html` (e.g. http://localhost:8321/dev-sounds.html).
+To hear every sound in the game — the music (with a button to hear each loop's join), each
+effect (loops on repeat) and every spoken line in both languages, section by section — open
+`dev-sounds.html` (e.g. http://localhost:8321/dev-sounds.html).
+
+### Music
+
+Each moment has its own music: the garage, the island by day and by night,
+the race, the police chase and the mission scenes. It crossfades when the
+moment changes, carries on where it left off when you come back to a track,
+and goes quieter while the narrator speaks. The 🎵 button (beside 🔊 in the
+game, beside the language in the garage) turns only the music off; it is
+remembered.
+
+The tracks are composed by [ElevenLabs](https://elevenlabs.io) music
+(prompts in `src/engine/musicList.ts`): `python tools/make-music.py` records
+two takes of each track into `.voices/music/`, cuts the chosen one into a
+seamless loop of whole bars (`tools/music_loop.py`) and writes
+`public/audio/music/`. The takes page
+(http://localhost:8321/.voices/music/index.html) plays every take's loop;
+«Guardar escolhas» saves the picks, and the next `make-music.py` run
+installs them (`tools/music-picks.json`). Until a track is picked, the take
+with the longer loop plays. `npx tsx tools/check-sfx.ts` checks every loop.
 
 ## Run it
 
@@ -214,3 +234,6 @@ Sound effects: created with [ElevenLabs](https://elevenlabs.io) sound generation
 (`tools/make-sfx.py`, prompts in `src/engine/sfxList.ts`), the first ones on
 the free plan (non-commercial use, with attribution to ElevenLabs), the rest
 on the Creator plan.
+
+Music: composed with [ElevenLabs](https://elevenlabs.io) music
+(`tools/make-music.py`, prompts in `src/engine/musicList.ts`), Creator plan.

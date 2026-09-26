@@ -1,7 +1,7 @@
 {
   "engine-car": {
-    "prompt": "small city car engine idling then cruising gently, friendly, clean, seamless loop",
-    "seconds": 4,
+    "prompt": "modern car engine running smoothly at a steady cruising speed, even and healthy hum, no revving, no rattle, no sputter, seamless loop",
+    "seconds": 6,
     "loop": true
   },
   "engine-truck": {
@@ -138,5 +138,22 @@
     "prompt": "car driving through a shallow river, a big water splash",
     "seconds": 1,
     "loop": false
-  }
+  },
+  "_seamless": [
+    "amb-birds",
+    "amb-crickets",
+    "amb-waves",
+    "crossing-bell",
+    "engine-boat",
+    "engine-car",
+    "engine-heli",
+    "engine-kart",
+    "engine-plane",
+    "engine-train",
+    "engine-truck",
+    "pump",
+    "siren-ambulance",
+    "siren-fire",
+    "siren-police"
+  ]
 }

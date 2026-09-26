@@ -15,7 +15,7 @@ export interface SfxDef {
 
 export const SFX = {
   // the kid's vehicles (loops; the game changes their speed with the vehicle's)
-  'engine-car': { prompt: 'small city car engine idling then cruising gently, friendly, clean, seamless loop', seconds: 4, loop: true },
+  'engine-car': { prompt: 'modern car engine running smoothly at a steady cruising speed, even and healthy hum, no revving, no rattle, no sputter, seamless loop', seconds: 6, loop: true },
   'engine-truck': { prompt: 'big fire truck diesel engine rumbling steadily at low revs, heard from outside, seamless loop', seconds: 4, loop: true },
   'engine-kart': { prompt: 'small racing kart engine buzzing steadily at medium revs, bright and zippy, seamless loop', seconds: 4, loop: true },
   'engine-heli': { prompt: 'helicopter rotor blades chopping steadily, medium distance, cartoonish but realistic, seamless loop', seconds: 4, loop: true },

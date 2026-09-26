@@ -32,7 +32,7 @@ interface EngineVoice { out: GainNode; set(speed: number, gas: number, t: number
 /** a recorded engine loop's playback speed at rest and how much faster it
  * runs flat out, and its level at rest and flat out */
 const ENGINE_REC: Record<EngineKind, { rate: number; up: number; g0: number; g1: number }> = {
-  car: { rate: 0.8, up: 0.75, g0: 0.35, g1: 0.75 },
+  car: { rate: 0.85, up: 0.4, g0: 0.35, g1: 0.7 },
   truck: { rate: 0.85, up: 0.5, g0: 0.4, g1: 0.8 },
   kart: { rate: 0.85, up: 0.9, g0: 0.3, g1: 0.75 },
   heli: { rate: 0.95, up: 0.2, g0: 0.55, g1: 0.7 },

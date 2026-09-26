@@ -26,7 +26,8 @@
 <h1>🔊 Todos os sons do jogo</h1>
 <p class="note">Cada efeito e cada frase que o jogo toca, para ouvir se está tudo bem. Os loops (motores, sirenes, ambiente)
 tocam em repetição, para se ouvir a emenda; no jogo os motores mudam de tom com a velocidade. «Tocar todos» passa pela secção
-inteira, um de cada vez (os loops ouvem-se duas voltas; nas músicas ouve-se só a emenda: 6 s antes e 6 s depois de voltar ao início).</p>
+inteira, um de cada vez (os loops ouvem-se duas voltas; nas músicas ouve-se só a emenda: 6 s antes e 6 s depois de voltar ao início).
+Cada momento tem várias músicas, que o jogo toca à vez (baralhadas, uns dois minutos cada).</p>
 <nav id="nav"></nav>
 <div id="out">a carregar…</div>
 <script>
@@ -102,10 +103,11 @@ function section(title, headers, rows) {
   ]);
   document.getElementById('out').textContent = '';
   {
+    // (each moment's tracks, which the game plays in turn)
     const rows = Object.entries(music).map(([id, d]) =>
       `<tr data-music="${id}"><td class="id">${id}</td><td><audio controls preload="none" loop src="audio/music/${id}.ogg"></audio></td>` +
       `<td class="meta"><button onclick="stopAll(); seam('${id}')">🔁 ouvir a emenda</button><br>${(d.loop.beats / 4).toFixed(0)} compassos · ` +
-      `${Math.round(d.loop.to - d.loop.from)} s · versão ${d.take}</td><td><b>${MUSIC_FOR[id] || ''}</b><br><small>${d.prompt}</small></td></tr>`);
+      `${Math.round(d.loop.to - d.loop.from)} s</td><td><b>${MUSIC_FOR[id.replace(/-\d+$/, '')] || ''}</b><br><small>${d.prompt}</small></td></tr>`);
     if (rows.length) section('Música', ['música', '', '', 'para'], rows);
   }
   const ids = Object.keys(sfx).filter(k => !k.startsWith('_'));

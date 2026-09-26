@@ -3,7 +3,7 @@
 // loop the list gives now (tools/make-sfx.py records what's missing or
 // changed) — a missing recording would silently fall back to the synth — and
 // every loop is 44.1 kHz and wraps without a click. And the music (G12):
-// every track of src/engine/musicList.ts has its loop in public/audio/music/,
+// every track of every moment in src/engine/musicList.ts has its loop in public/audio/music/,
 // cut from a take recorded from the prompt the list gives now
 // (tools/make-music.py), 44.1 kHz stereo, a whole number of bars, wrapping
 // without a click in either channel.
@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { SFX } from '../src/engine/sfxList.js';
-import { MUSIC } from '../src/engine/musicList.js';
+import { MUSIC, trackFile, type MusicDef, type MusicId } from '../src/engine/musicList.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; console.log('  FAIL ' + m); };
@@ -27,11 +27,12 @@ const sfxFails = fails;
 
 // ---- the music (G12) ----
 const mdir = 'public/audio/music';
-const mman = existsSync(`${mdir}/manifest.json`) ? JSON.parse(readFileSync(`${mdir}/manifest.json`, 'utf-8')) as Record<string, { prompt: string; seconds: number; bpm: number; loop: { beats: number } }> : {};
-for (const [id, d] of Object.entries(MUSIC)) {
+const mman = existsSync(`${mdir}/manifest.json`) ? JSON.parse(readFileSync(`${mdir}/manifest.json`, 'utf-8')) as Record<string, { prompt: string; seconds: number; bpm: number; take: number; loop: { beats: number } }> : {};
+const music = (Object.keys(MUSIC) as MusicId[]).flatMap(m => MUSIC[m].map((d, n) => [trackFile(m, n), d as MusicDef] as const));
+for (const [id, d] of music) {
   if (!existsSync(`${mdir}/${id}.ogg`)) { fail(`music ${id}.ogg is missing (python tools/make-music.py)`); continue; }
   const m = mman[id];
-  if (!m || m.prompt !== d.prompt || m.seconds !== d.seconds || m.bpm !== d.bpm) { fail(`music ${id}.ogg was made from an older prompt (python tools/make-music.py)`); continue; }
+  if (!m || m.prompt !== d.prompt || m.seconds !== d.seconds || m.bpm !== d.bpm || m.take !== (d.take ?? 1)) { fail(`music ${id}.ogg was made from an older prompt (python tools/make-music.py)`); continue; }
   const bars = m.loop.beats / 4;
   if (Math.abs(bars - Math.round(bars)) > 0.1) fail(`music ${id}.ogg loops after ${bars.toFixed(2)} bars, not a whole number`);
   if (clicks(`${mdir}/${id}.ogg`, 2)) fail(`music ${id}.ogg clicks where it loops`);
@@ -57,5 +58,5 @@ function clicks(file: string, channels: number): boolean {
   return false;
 }
 console.log(sfxFails ? `G11 FAIL (${sfxFails})` : `G11 PASS — ${Object.keys(SFX).length} sound effects recorded`);
-console.log(fails - sfxFails ? `G12 FAIL (${fails - sfxFails})` : `G12 PASS — ${Object.keys(MUSIC).length} music loops, whole bars, seamless`);
+console.log(fails - sfxFails ? `G12 FAIL (${fails - sfxFails})` : `G12 PASS — ${music.length} music loops for ${Object.keys(MUSIC).length} moments, whole bars, seamless`);
 process.exit(fails ? 1 : 0);

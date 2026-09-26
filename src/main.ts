@@ -392,6 +392,7 @@ renderer.setAnimationLoop(() => {
   t += dt;
   pollWheel(dt);
   music.duck(speaking());
+  music.setMusic('garage');
   table.rotation.y += dt * 0.45;
   // frame the chosen vehicle by its size (a kart close, the train further back)
   const cur = list[sel];

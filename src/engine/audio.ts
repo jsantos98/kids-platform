@@ -13,7 +13,7 @@
 // changes. Everything is built lazily on the first user gesture (autoplay rules).
 
 import { SFX, type SfxId } from './sfxList.js';
-import { MUSIC, type MusicId } from './musicList.js';
+import { MUSIC, trackFile, type MusicId } from './musicList.js';
 
 export type EngineKind = 'car' | 'truck' | 'kart' | 'heli' | 'plane' | 'boat' | 'train';
 export type SirenStyle = 'fire' | 'ambulance' | 'police' | 'heli';
@@ -24,6 +24,20 @@ const MUTE_KEY = 'game.mute', MUSIC_KEY = 'game.music';
 const MUSIC_LEVEL = 0.3, MUSIC_DUCK = 0.45;
 /** a change of track crossfades over about this long (s) */
 const MUSIC_FADE = 2.4;
+/** each track of a moment plays at least this long (s, in whole passes of
+ * its loop) before the moment moves on to its next */
+const MUSIC_TURN = 100;
+/** moments that start a track afresh every time — a mission's scene, each
+ * scene the next track — rather than carrying on where they left off */
+const FRESH: ReadonlySet<MusicId> = new Set<MusicId>(['scene']);
+
+interface Playlist { order: number[]; pos: number; offset: number }
+/** 0 … n−1 in a random order (the music's order: no part of the world) */
+function shuffled(n: number): number[] {
+  const a = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 /** the effects' and the ambience's levels — well under the narrator's voice
  * (which plays on its own at full level) — and how far a voice line ducks them */
 const SFX_LEVEL = 0.5, AMB_LEVEL = 0.45, DUCK = 0.45;
@@ -86,14 +100,16 @@ export class GameAudio {
   private musicBus: GainNode | null = null;
   private musicOn = true;
   private ducked = false;
-  private tracks = new Map<MusicId, AudioBuffer>();
-  private loading = new Set<MusicId>();
+  /** the tracks, by file, as they load */
+  private tracks = new Map<string, AudioBuffer>();
+  private loading = new Set<string>();
   /** tracks that couldn't be had (never asked for again) */
-  private missing = new Set<MusicId>();
-  private wantTrack: MusicId | null = null;
-  private track: { id: MusicId; src: AudioBufferSourceNode; gain: GainNode; startedAt: number; offset: number } | null = null;
-  /** where each track was when it last faded out: coming back to it carries on */
-  private resumeAt = new Map<MusicId, number>();
+  private missing = new Set<string>();
+  private wantMoment: MusicId | null = null;
+  private track: { moment: MusicId; file: string; src: AudioBufferSourceNode; gain: GainNode; startedAt: number; offset: number; until: number } | null = null;
+  /** each moment's playlist: its tracks shuffled, the one it is on, and where
+   * that one was when it last faded out (coming back carries on) */
+  private playlists = new Map<MusicId, Playlist>();
 
   /** @param root the path from the page to the site root (the recordings)
    * @param sfx load the sound effects (the garage plays only music) */
@@ -206,7 +222,7 @@ export class GameAudio {
       src.connect(bp); bp.connect(this.pumpGain); this.pumpGain.connect(this.sfx);
       src.start();
       if (this.sfxOn) this.loadSamples();
-      if (this.wantTrack) { const w = this.wantTrack; this.wantTrack = null; this.setMusic(w); }
+      if (this.wantMoment) this.setMusic(this.wantMoment);
     } catch {
       this.ac = null;
     }
@@ -247,51 +263,86 @@ export class GameAudio {
     this.musicBus.gain.setTargetAtTime(this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) : 0, this.ac.currentTime, k);
   }
 
-  /** the track to play now (null: none), crossfaded from the one playing; a
-   * track comes back where it left off. Called every frame is fine. */
+  private playlist(id: MusicId): Playlist {
+    let p = this.playlists.get(id);
+    if (!p) { p = { order: shuffled(MUSIC[id].length), pos: 0, offset: 0 }; this.playlists.set(id, p); }
+    return p;
+  }
+
+  /** a moment on to its next track: after the last, a new shuffle that
+   * doesn't start with the one just played */
+  private nextTrack(p: Playlist): void {
+    p.offset = 0;
+    if (++p.pos < p.order.length) return;
+    const last = p.order[p.order.length - 1];
+    p.order = shuffled(p.order.length);
+    if (p.order.length > 1 && p.order[0] === last) p.order.push(p.order.shift()!);
+    p.pos = 0;
+  }
+
+  /** the music for the moment now (null: none). Each moment plays its tracks
+   * in turn, a couple of minutes each, crossfading from one to the next and
+   * from moment to moment; coming back to a moment carries on where it left
+   * off (a scene: the next track, from its start). Call it every frame. */
   setMusic(id: MusicId | null): void {
+    this.wantMoment = id;
     const ac = this.ac;
-    if (!ac || !this.musicBus) { this.wantTrack = id; return; }
-    if (id === this.wantTrack && (this.track?.id === id || (id && !this.tracks.has(id)))) return;
-    this.wantTrack = id;
-    const t = ac.currentTime;
-    if (this.track && this.track.id !== id) {
-      const old = this.track, dur = old.src.buffer!.duration;
-      this.resumeAt.set(old.id, (old.offset + (t - old.startedAt)) % dur);
-      old.gain.gain.setTargetAtTime(0, t, MUSIC_FADE / 4);
-      old.src.stop(t + MUSIC_FADE * 1.5);
+    if (!ac || !this.musicBus) return;
+    const t = ac.currentTime, cur = this.track;
+    if (cur) {
+      if (cur.moment === id && t < cur.until) {
+        // (the moment's next track, fetched while this one plays)
+        const p = this.playlist(id);
+        if (p.pos + 1 < p.order.length) this.fetchTrack(trackFile(id, p.order[p.pos + 1]));
+        return;
+      }
+      const p = this.playlist(cur.moment);
+      if (cur.moment === id || FRESH.has(cur.moment)) this.nextTrack(p);
+      else p.offset = (cur.offset + (t - cur.startedAt)) % cur.src.buffer!.duration;
+      cur.gain.gain.setTargetAtTime(0, t, MUSIC_FADE / 4);
+      cur.src.stop(t + MUSIC_FADE * 1.5);
       this.track = null;
     }
-    if (!id || this.track) return;
-    const buf = this.tracks.get(id);
+    if (!id) return;
+    const p = this.playlist(id);
+    // (a track that couldn't be had: the next one)
+    for (let i = 0; i < p.order.length && this.missing.has(trackFile(id, p.order[p.pos])); i++) this.nextTrack(p);
+    const file = trackFile(id, p.order[p.pos]), buf = this.tracks.get(file);
     // (not loaded yet: it starts once it has)
-    if (!buf) { this.preloadMusic(id); return; }
-    const src = ac.createBufferSource(), gain = ac.createGain();
+    if (!buf) { this.fetchTrack(file); return; }
+    const src = ac.createBufferSource(), gain = ac.createGain(), at = t + 0.05;
     src.buffer = buf;
     src.loop = true;
     gain.gain.value = 0;
-    gain.gain.setTargetAtTime(1, t + 0.05, MUSIC_FADE / 4);
+    gain.gain.setTargetAtTime(1, at, MUSIC_FADE / 4);
     src.connect(gain); gain.connect(this.musicBus);
-    const offset = this.resumeAt.get(id) ?? 0;
-    src.start(t + 0.05, offset);
-    this.track = { id, src, gain, startedAt: t + 0.05, offset };
+    const dur = buf.duration, fresh = FRESH.has(id), offset = fresh ? 0 : p.offset % dur;
+    src.start(at, offset);
+    // (its turn: whole passes of its loop, so it hands over where the loop ends)
+    const turn = fresh ? Infinity : Math.ceil(MUSIC_TURN / dur) * dur - offset;
+    this.track = { moment: id, file, src, gain, startedAt: at, offset, until: at + turn };
   }
 
-  /** fetch a track ahead, so a change to it starts at once */
+  /** fetch the track a moment would play now, so a change to it starts at once */
   preloadMusic(id: MusicId): void {
+    const p = this.playlist(id);
+    this.fetchTrack(trackFile(id, p.order[p.pos]));
+  }
+
+  private fetchTrack(file: string): void {
     const ac = this.ac;
-    if (!ac || this.tracks.has(id) || this.loading.has(id) || this.missing.has(id) || !(id in MUSIC)) return;
-    this.loading.add(id);
-    void fetch(`${this.root}audio/music/${id}.ogg`)
+    if (!ac || this.tracks.has(file) || this.loading.has(file) || this.missing.has(file)) return;
+    this.loading.add(file);
+    void fetch(`${this.root}audio/music/${file}.ogg`)
       .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
       .then(b => ac.decodeAudioData(b))
-      .then(b => {
-        this.tracks.set(id, b);
-        // (the track wanted meanwhile: it starts now)
-        if (this.wantTrack === id && !this.track) { this.wantTrack = null; this.setMusic(id); }
-      })
-      .catch(() => { this.missing.add(id); })
-      .finally(() => this.loading.delete(id));
+      .then(b => { this.tracks.set(file, b); })
+      .catch(() => { this.missing.add(file); })
+      .finally(() => {
+        this.loading.delete(file);
+        // (the music waiting for it: on now)
+        if (!this.track && this.wantMoment) this.setMusic(this.wantMoment);
+      });
   }
 
   /** the siren on / off in the vehicle's own two tones */

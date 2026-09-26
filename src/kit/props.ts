@@ -8,27 +8,6 @@ const G = () => new THREE.Group();
 
 export const CANDY = [C.red, C.orange, C.yellow, C.lime, C.green, C.teal, C.blue, C.purple, C.pink, C.white];
 
-// big unlit map-pin that hovers over objectives (always vivid, points down)
-export function makeMarker(color: number = 0xffc93c): THREE.Group {
-  const g = new THREE.Group();
-  const m = new THREE.MeshBasicMaterial({ color });
-  const head = new THREE.Mesh(new THREE.SphereGeometry(1.35, 20, 14), m);
-  head.position.y = 2.05;
-  const neck = new THREE.Mesh(new THREE.ConeGeometry(0.62, 1.5, 16), m);
-  neck.rotation.x = Math.PI;
-  neck.position.y = 0.55;
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.62, 0.22, 10, 20),
-    new THREE.MeshBasicMaterial({ color: 0xfffdf8 }),
-  );
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 1.05;
-  g.add(head);
-  g.add(neck);
-  g.add(ring);
-  return g;
-}
-
 export function makeFenceRun(len = 4, color: number = C.white, r: Rng = Math.random): THREE.Mesh {
   const b = new Baked();
   const n = Math.max(2, Math.round(len / 0.9));

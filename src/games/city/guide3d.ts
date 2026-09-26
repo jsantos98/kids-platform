@@ -63,6 +63,45 @@ export class GuideArrow {
   }
 }
 
+const iconTex = new Map<string, THREE.CanvasTexture>();
+
+/** the icon drawn on a soft white badge (one texture per icon) */
+function iconTexture(icon: string): THREE.CanvasTexture {
+  let t = iconTex.get(icon);
+  if (t) return t;
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const g = cv.getContext('2d')!;
+  g.beginPath();
+  g.arc(S / 2, S / 2, S / 2 - 18, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255, 253, 248, 0.94)';
+  g.fill();
+  g.lineWidth = 5;
+  g.strokeStyle = 'rgba(60, 40, 30, 0.18)';
+  g.stroke();
+  g.font = '148px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(icon, S / 2, S / 2 + 8);
+  t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  iconTex.set(icon, t);
+  return t;
+}
+
+/** a call's icon floating over it — the same one the HUD badge shows — so
+ * two calls side by side can be told apart (always faces the camera) */
+export function makeIconSprite(icon: string, world = 3.2): THREE.Sprite {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: iconTexture(icon), transparent: true, depthWrite: false, fog: false,
+  }));
+  s.scale.setScalar(world);
+  s.renderOrder = 3;
+  return s;
+}
+
 const beaconGeo = new THREE.CylinderGeometry(1.7, 1.7, 90, 20, 1, true);
 beaconGeo.translate(0, 45, 0);
 

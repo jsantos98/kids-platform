@@ -35,7 +35,7 @@ import { CaughtActivity } from './activity/caught.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { Railway, lineDir, setIslandGate } from './railway.js';
-import { Missions } from './missions.js';
+import { Missions, callIcon } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
 import { Director } from './activity/director.js';
 import type { Activity } from './activity/common.js';
@@ -966,13 +966,11 @@ const tick = (): void => {
   if (winch && !(near && near.type === 'patient' && nd < 9)) winch.update(dt, 1.2, V.scale ?? 1);
   for (const o of missions.objectives) {
     if (!o.marker) continue;
-    // hover marker over the call; the tall beacon pillar does the
+    // hover the call's icon over it; the tall beacon pillar does the
     // long-range finding (it shows over the rooftops, fog or not)
     const busy = activeCall === o;
     o.marker.visible = !busy;
-    o.marker.scale.setScalar(1.6);
     o.marker.position.y = 5.4 + Math.sin(elapsed * 2 + o.index) * 0.5;
-    o.marker.rotation.y += dt * 1.2;
     pulseBeacon(o.beacon, elapsed, o.index, busy ? 0 : o.d);
   }
   // the course gate / station the mode is heading for (when it has one)
@@ -1066,7 +1064,7 @@ const tick = (): void => {
     }
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----
-    showGuide(near.type === 'fire' || near.type === 'rescue' ? '🔥' : near.type === 'patient' ? '🆘' : '🐱', nd,
+    showGuide(callIcon(near.type), nd,
       Math.max(0, Math.min(5, Math.round(5 * (1 - nd / 240)))));
     promptFill.style.width = '0%';
     // arriving: stop beside the call (the helicopter hovers over it) and its

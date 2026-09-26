@@ -5,13 +5,19 @@
 // scene (activity/); `variant` and `seed` decide what that scene looks like.
 import * as THREE from 'three';
 import { C } from '../../engine/palette.js';
-import { makeCatTree, makeFire, makeMarker, makePerson } from '../../kit/index.js';
+import { makeCatTree, makeFire, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { graphFor, type StreetGraph, type SNode } from '../../worlds/streetGraph.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
-import { makeBeacon } from './guide3d.js';
+import { makeBeacon, makeIconSprite } from './guide3d.js';
 
 export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue';
+
+/** the icon the HUD badge shows for a call kind — each call floats the same
+ * one over itself, so calls standing close together can be told apart */
+export function callIcon(type: ObjectiveType): string {
+  return type === 'fire' || type === 'rescue' ? '🔥' : type === 'patient' ? '🆘' : '🐱';
+}
 
 export interface Objective {
   type: ObjectiveType;
@@ -28,7 +34,7 @@ export interface Objective {
   /** the junction the call stands at (world coordinates) */
   gx: number;
   gz: number;
-  marker: THREE.Group;
+  marker: THREE.Object3D;
   /** tall light pillar standing on the mission (guide3d.ts) */
   beacon: THREE.Mesh;
   index: number;
@@ -204,9 +210,8 @@ export class Missions {
     group.position.copy(pos);
     group.position.y = pos.y;
     this.scene.add(group);
-    const markerColor = type === 'fire' || type === 'rescue' ? 0xffc93c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1;
-    const marker = makeMarker(markerColor);
-    marker.position.set(pos.x, 6.4, pos.z);
+    const marker = makeIconSprite(callIcon(type));
+    marker.position.set(pos.x, 5.4, pos.z);
     this.scene.add(marker);
     const beacon = makeBeacon(type === 'fire' || type === 'rescue' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
     beacon.position.set(pos.x, 0, pos.z);

@@ -205,6 +205,12 @@ scene.add(player.car);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
 const crumbs = new Breadcrumbs(V.radius);
 const guideArrow3d = new GuideArrow(scene);
+const _topBox = new THREE.Box3();
+/** how far the player's vehicle reaches above its origin (m) */
+function vehicleTop(): number {
+  _topBox.setFromObject(player.car);
+  return _topBox.isEmpty() ? 2 : Math.max(1, _topBox.max.y - player.car.position.y);
+}
 const camDir = new THREE.Vector3();
 const stuck = { t: 0, x: spawn.x, z: spawn.z, gas: true };
 camera.position.set(spawn.x, V.camUp, spawn.z + V.camBack);
@@ -1003,9 +1009,16 @@ const tick = (): void => {
   // otherwise at the next junction of the shortest street route
   const way = goal && mode === 'drive' ? guideWaypoint(goal.x, goal.z, goalD) : null;
   const bearing = way ? Math.atan2(way.x - st.x, way.z - st.z) : null;
-  // (just over the vehicle's roof — the kit models' heights differ)
-  const roof = (player.car.userData.top as number | undefined) ?? 2;
-  guideArrow3d.update(dt, elapsed, player.car.position, airborne ? 4.4 : V.kind === 'rail' ? 6 : roof + 1.2, bearing);
+  // the arrow: the same size on screen and the same gap over the vehicle's
+  // real top (its model, rotor and roof lamps measured — a fixed lift sat
+  // it inside the helicopter's rotor), whatever the camera's distance (each
+  // vehicle's camera sits at its own: fixed in the world, the arrow was big
+  // over one vehicle and small over another)
+  {
+    const top = V.kind === 'rail' ? 4.6 : vehicleTop();
+    const size = Math.max(0.7, Math.min(3.2, camera.position.distanceTo(player.car.position) / 14));
+    guideArrow3d.update(dt, elapsed, player.car.position, top + 0.9 * size, bearing, size);
+  }
   camera.getWorldDirection(camDir);
   const camYaw = Math.atan2(camDir.x, camDir.z);
   const showGuide = (icon: string, dist: number, dots: number): void => {

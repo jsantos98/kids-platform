@@ -49,8 +49,10 @@ export class GuideArrow {
    * @param at   vehicle position (the arrow hovers above it)
    * @param lift metres above `at`
    * @param bearing world heading to point along (atan2(dx, dz)), or null to hide
+   * @param size   scale (the game keeps it the same size on screen whatever
+   *               the camera's distance)
    */
-  update(dt: number, elapsed: number, at: THREE.Vector3, lift: number, bearing: number | null): void {
+  update(dt: number, elapsed: number, at: THREE.Vector3, lift: number, bearing: number | null, size = 1): void {
     this.group.visible = bearing !== null;
     if (bearing === null) return;
     // ease the swing so the arrow never snaps
@@ -58,8 +60,9 @@ export class GuideArrow {
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
     this.yaw += d * Math.min(1, dt * 6);
-    this.group.position.set(at.x, at.y + lift + Math.sin(elapsed * 3) * 0.12, at.z);
+    this.group.position.set(at.x, at.y + lift + Math.sin(elapsed * 3) * 0.12 * size, at.z);
     this.group.rotation.y = this.yaw;
+    this.group.scale.setScalar(size);
   }
 }
 

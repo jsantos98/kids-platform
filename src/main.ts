@@ -9,6 +9,7 @@ import { spawnVehicle } from './engine/assets.js';
 import { makeHelicopter, makePlane, makeTree, makeConifer, makeCloud } from './kit/index.js';
 import { rng } from './engine/rng.js';
 import { GAMES, type GameEntry } from './games/registry.js';
+import { keysHtml } from './games/keys.js';
 import { loadTotals } from './games/city/state.js';
 import { applyI18n, getLang, setLang, LANGS } from './i18n/index.js';
 import { speak, preloadVoice } from './i18n/voice.js';
@@ -115,6 +116,7 @@ const tiles = GAMES.map((e, i) => {
 const lastOff = GAMES.map(() => 0);
 const nameT = document.querySelector('#name .t') as HTMLElement;
 const nameB = document.querySelector('#name .b') as HTMLElement;
+const keysEl = document.getElementById('keys')!;
 function layout(): void {
   const n = GAMES.length, half = Math.floor(n / 2);
   const gap = Math.min(innerWidth / (n + 0.5), innerHeight * 0.21);
@@ -136,6 +138,8 @@ function showName(): void {
   const e = GAMES[sel];
   nameT.textContent = `${e.icon} ${e.title}`;
   nameB.textContent = e.blurb;
+  // (the keys the chosen vehicle answers to in the game)
+  keysEl.innerHTML = keysHtml(e);
   // (restart the pop)
   nameT.style.animation = 'none';
   void nameT.offsetWidth;

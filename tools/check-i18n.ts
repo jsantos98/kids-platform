@@ -7,6 +7,8 @@
 //    the body's text outside <script>/<style> (texts come from data-i18n*);
 //  - the scripts that draw the UI: no string literal that reads like a
 //    shouted prompt (two capitalised words, or a word plus "!"/"…");
+//  - the garage's key help: each mode's controls (registry.ts) match its
+//    ModeDef (siren = lightbar, the train = the rail vehicle);
 //  - the recorded voice: a clip for every spoken line, recorded from the
 //    dictionaries' current text (tools/make-voice.py).
 // Run: npx tsx tools/check-i18n.ts
@@ -69,6 +71,20 @@ for (const f of scripts) {
   }
 }
 
+// ---- the garage's key help says what each mode really answers to ----
+{
+  const { GAMES } = await import('../src/games/registry.js');
+  const { MODES } = await import('../src/games/city/modes.js');
+  for (const g of GAMES) {
+    const m = (MODES as Record<string, { lightbar: boolean; vehicle: { kind: string } }>)[g.id];
+    if (!m) { fails.push(`registry: '${g.id}' is not a play mode`); continue; }
+    if (g.controls.siren !== m.lightbar) fails.push(`registry: '${g.id}' lists the siren key ${g.controls.siren ? 'but has no siren' : 'but leaves it out'}`);
+    if ((g.controls.drive === 'train') !== (m.vehicle.kind === 'rail')) fails.push(`registry: '${g.id}' drive '${g.controls.drive}' doesn't match its vehicle (${m.vehicle.kind})`);
+    const kinds: Record<string, string> = { heli: 'heli', plane: 'plane', boat: 'boat', train: 'rail', road: 'ground', race: 'ground' };
+    if (kinds[g.controls.drive] !== m.vehicle.kind) fails.push(`registry: '${g.id}' drive '${g.controls.drive}' but its vehicle moves as '${m.vehicle.kind}'`);
+  }
+}
+
 for (const f of fails) console.log('FAIL', f);
-console.log(fails.length ? `FAIL — ${fails.length} text(s) outside src/i18n (G9)` : `PASS — every text is translated (${Object.keys(EN).length} keys × 2 languages) (G9)`);
+console.log(fails.length ? `FAIL — ${fails.length} problem(s) with the texts, voice or key help (G9)` : `PASS — every text is translated (${Object.keys(EN).length} keys × 2 languages) (G9)`);
 process.exit(fails.length ? 1 : 0);

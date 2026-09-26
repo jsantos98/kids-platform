@@ -29,7 +29,7 @@
 
   /* ---- the chosen vehicle's name ---- */
   #name {
-    position: fixed; left: 50%; bottom: calc(24vh + 18px); transform: translateX(-50%); z-index: 5;
+    position: fixed; left: 50%; bottom: calc(24vh + 30px); transform: translateX(-50%); z-index: 5;
     display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
   }
   #name .t {
@@ -42,7 +42,9 @@
   @keyframes pop { from { transform: scale(.7); opacity: .2; } to { transform: scale(1); opacity: 1; } }
 
   /* ---- the carousel: every vehicle, the chosen one big in the middle ---- */
-  #carousel { position: fixed; left: 0; right: 0; bottom: 5vh; height: 19vh; z-index: 5; }
+  /* (lifted clear of the key help under it: the chosen tile's bottom came
+     within 1 px of it on an 800×600 window) */
+  #carousel { position: fixed; left: 0; right: 0; bottom: calc(5vh + 12px); height: 19vh; z-index: 5; }
   .tile {
     position: absolute; left: 50%; top: 50%; width: 15vh; height: 15vh; margin: -7.5vh 0 0 -7.5vh;
     border-radius: 50%; display: grid; place-items: center; cursor: pointer;
@@ -83,13 +85,24 @@
 
   /* ---- the game's keys, for the grown-up setting things up ---- */
   #keys {
-    position: fixed; bottom: 0.9vh; left: 50%; transform: translateX(-50%); z-index: 6;
-    white-space: nowrap; pointer-events: none;
+    /* (centred by margins, not left 50% + translate: that capped its width at
+       half the window and wrapped it on every screen under ~1900 px) */
+    position: fixed; bottom: 0.9vh; left: 12px; right: 12px; margin: 0 auto; width: fit-content; z-index: 6;
+    box-sizing: border-box; text-align: center; pointer-events: none;
     padding: 6px 20px; border-radius: 999px; background: var(--cream);
     box-shadow: 0 3px 0 rgba(74, 80, 88, .12);
-    font-weight: 700; font-size: clamp(12px, 1.8vh, 16px); color: var(--ink-soft);
+    font-weight: 700; font-size: clamp(12px, 1.8vh, 16px); line-height: 1.45; color: var(--ink-soft);
   }
   #keys b { color: var(--ink); }
+  /* (each key with its action stays together; the list wraps between them on
+     a narrow screen, and the carousel steps up over the second line) */
+  #keys .k { white-space: nowrap; }
+  #keys .lead { margin-right: 4px; }
+  @media (max-width: 760px) {
+    #keys { border-radius: 18px; }
+    #carousel { bottom: calc(5vh + 58px); }
+    #name { bottom: calc(24vh + 76px); }
+  }
   #go {
     position: fixed; right: 3vw; top: 42vh; z-index: 6; cursor: pointer;
     display: flex; align-items: center; gap: 12px; border: 4px solid #fffdf8; border-radius: 999px;
@@ -126,7 +139,7 @@
 </div>
 <div id="lang" role="group" data-i18n-title="garage.language"></div>
 <button id="go" type="button"><span data-i18n="garage.go"></span><span class="pedal">🦶</span></button>
-<div id="keys" data-i18n-html="garage.keys"></div>
+<div id="keys"></div>
 <div id="wipe"></div>
 <script type="module" src="/src/main.ts"></script>
 </body>

@@ -95,15 +95,18 @@ missing or out of date.
 
 | Action | USB wheel | Keyboard |
 |---|---|---|
-| Steer | wheel | `A` / `D` or ← / → |
+| Steer (not the train: it follows its track) | wheel | `A` / `D` or ← / → |
 | Gas / brake (reverse) | right / left pedal (triggers) | `W` / `S` or ↑ / ↓ |
-| Spray / rescue | the A button | `Space` |
-| Siren | — | `E` (or the SIREN button) |
+| Siren (emergency vehicles) | — | `E` (or the SIREN button) |
 | Camera: chase / high / cab | — | `C` |
-| Reset | — | `R` |
+| Back to the start (not the train) | — | `R` |
+| Back to the garage | start / select held a second | `Esc` (or 🏠) |
 
-In mission scenes only steering counts (the wheel, `A`/`D`, or the mouse's
-x position).
+What `W` / `S` do depends on the vehicle: the helicopters fly forward and
+back, the plane only goes faster and slower, the train goes and brakes. The
+garage shows the keys for the vehicle chosen, under the carousel. In mission
+scenes only steering counts (the wheel, `A`/`D`, or the mouse's x
+position).
 
 ### Useful URL options
 

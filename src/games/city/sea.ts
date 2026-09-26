@@ -193,11 +193,6 @@ export class Fleet {
       b.mesh.rotation.z = Math.sin(elapsed * 0.9 + b.phase) * 0.05;
     }
   }
-
-  /** where the boats are (world) — the minimap's white dots */
-  dots(): Array<{ x: number; z: number }> {
-    return this.boats.map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
-  }
 }
 
 /** Bake the watercraft kit templates, then build the sea. */

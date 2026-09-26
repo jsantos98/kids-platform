@@ -1,7 +1,11 @@
-// Minimap: the whole island at a glance — chunk biomes, roads, river, railway,
-// traffic-light state, missions and the player arrow. Drawn on a 2D
-// canvas, fixed on the island centre so north stays up.
-import { lightState } from './lights.js';
+// Minimap: the streets round the kid at a glance, north up — the island's
+// shore and districts, streets, river and railway, the goals (each as the
+// icon its HUD badge shows: the calls, the getaway cars, the course gates,
+// the next station) and a big arrow for the kid. Zoomed in on the kid (the
+// whole island in a 150 px square was unreadable, and a dot at every traffic
+// light filled it with red): a goal off the edge sits on the rim, pointing
+// the way. The island is drawn once into an offscreen canvas per island and
+// each frame copies the window round the kid.
 import { chunkGroundColor, slabColor } from '../../worlds/cityChunk.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
@@ -12,49 +16,138 @@ import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
 import { bridgeLayout } from './bridge.js';
 import { coastFor, causewaySpan } from '../../worlds/coast.js';
-import type { Missions } from './missions.js';
+import { callIcon, type Missions } from './missions.js';
 
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
 
-const CH = 64;           // chunk size (world metres)
-const SIZE = 256;        // canvas backing-store pixels
-const VIEW = ISLAND + 170; // world metres across (island + sea + bridge island)
+const CH = 64;              // chunk size (world metres)
+const SIZE = 384;           // canvas backing-store pixels
+const VIEW = 520;           // world metres across, round the kid
+const SPAN = ISLAND + 420;  // the offscreen island: island + sea + causeways (m)
+const PX = 1;               // offscreen pixels per metre
+
+/** a goal on the map (world coordinates) and its icon */
+export interface MapGoal { x: number; z: number; icon: string }
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
-
   private bx = 0;
   private by = 0;
   private ox = 0;
   private oz = 0;
+  /** the island drawn once (null: to draw for the current island) */
+  private base: HTMLCanvasElement | null = null;
+  private icons = new Map<string, HTMLCanvasElement>();
 
   /** point the map at another island of the archipelago */
   setCity(bx: number, by: number, ox: number, oz: number): void {
+    if (bx !== this.bx || by !== this.by) this.base = null;
     this.bx = bx; this.by = by; this.ox = ox; this.oz = oz;
   }
 
   constructor(canvas: HTMLCanvasElement, private missions: Missions,
-              private seaBoats: () => Array<{ x: number; z: number }> = () => [],
-              /** other live targets (getaway cars, course gates), world */
-              private goals: () => Array<{ x: number; z: number; color: string }> = () => []) {
+              /** the other live goals (getaway cars, course gates, the next station), world */
+              private goals: () => MapGoal[] = () => []) {
     canvas.width = SIZE;
     canvas.height = SIZE;
     this.ctx = canvas.getContext('2d')!;
   }
 
-  update(playerX: number, playerZ: number, heading: number, elapsed: number): void {
-    const plan = cityPlanFor(this.bx, this.by);
+  update(playerX: number, playerZ: number, heading: number): void {
+    const ctx = this.ctx, s = SIZE, scale = s / VIEW;
     const px = playerX - this.ox, pz = playerZ - this.oz; // city-local
-    const ctx = this.ctx;
-    const s = SIZE;
-    const scale = s / VIEW;
-    const tx = (x: number) => (x - (CENTER - VIEW / 2)) * scale;
-    const ty = (z: number) => (z - (CENTER - VIEW / 2)) * scale;
+    this.base ??= this.drawIsland();
+    // the window round the kid, from the offscreen island
+    const o0 = CENTER - SPAN / 2;
+    ctx.fillStyle = '#72c3de';
+    ctx.fillRect(0, 0, s, s);
+    ctx.drawImage(this.base, (px - VIEW / 2 - o0) * PX, (pz - VIEW / 2 - o0) * PX, VIEW * PX, VIEW * PX, 0, 0, s, s);
+    const tx = (x: number): number => (x - px) * scale + s / 2;
+    const ty = (z: number): number => (z - pz) * scale + s / 2;
+
+    // the goals: each one's icon on a white disc; off the map, on its rim
+    // with a little pointer toward it
+    const R = 21;
+    const all: MapGoal[] = [
+      ...this.missions.objectives.map(o => ({ x: o.pos.x, z: o.pos.z, icon: callIcon(o.type) })),
+      ...this.goals(),
+    ];
+    for (const g of all) {
+      let x = tx(g.x - this.ox), y = ty(g.z - this.oz);
+      const lim = s / 2 - R - 6;
+      const dx = x - s / 2, dy = y - s / 2;
+      const out = Math.max(Math.abs(dx), Math.abs(dy)) > lim;
+      if (out) {
+        const k = lim / Math.max(Math.abs(dx), Math.abs(dy));
+        x = s / 2 + dx * k; y = s / 2 + dy * k;
+        // the pointer: a small triangle on the disc's outer side
+        const a = Math.atan2(dy, dx);
+        ctx.fillStyle = '#fffdf8';
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * (R + 7), y + Math.sin(a) * (R + 7));
+        ctx.lineTo(x + Math.cos(a + 0.5) * (R - 2), y + Math.sin(a + 0.5) * (R - 2));
+        ctx.lineTo(x + Math.cos(a - 0.5) * (R - 2), y + Math.sin(a - 0.5) * (R - 2));
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.drawImage(this.icon(g.icon), x - R, y - R, 2 * R, 2 * R);
+    }
+
+    // the kid: a big arrow in the middle, the way it's heading
+    ctx.save();
+    ctx.translate(s / 2, s / 2);
+    ctx.rotate(heading);
+    ctx.fillStyle = '#e25c5c';
+    ctx.strokeStyle = '#fffdf8';
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -32);
+    ctx.lineTo(23, 24);
+    ctx.lineTo(0, 12);
+    ctx.lineTo(-23, 24);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** an icon on a white disc, drawn once */
+  private icon(icon: string): HTMLCanvasElement {
+    let c = this.icons.get(icon);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    g.beginPath();
+    g.arc(32, 32, 30, 0, Math.PI * 2);
+    g.fillStyle = '#fffdf8';
+    g.fill();
+    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(45, 49, 66, 0.35)';
+    g.stroke();
+    g.font = '38px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(icon, 32, 35);
+    this.icons.set(icon, c);
+    return c;
+  }
+
+  /** the island, once: shore, districts, streets, river, railway, causeways */
+  private drawIsland(): HTMLCanvasElement {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = Math.ceil(SPAN * PX);
+    const ctx = cv.getContext('2d')!;
+    const o0 = CENTER - SPAN / 2;
+    const tx = (x: number): number => (x - o0) * PX;
+    const ty = (z: number): number => (z - o0) * PX;
+    const plan = cityPlanFor(this.bx, this.by);
 
     // the island — its real shore, a sand rim, district tints clipped to it —
     // on the sea
     ctx.fillStyle = '#72c3de';
-    ctx.fillRect(0, 0, s, s);
+    ctx.fillRect(0, 0, cv.width, cv.height);
     const coast = coastFor(this.bx, this.by);
     ctx.beginPath();
     coast.pts.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
@@ -66,10 +159,9 @@ export class Minimap {
     for (let cx = 0; cx < WORLD_CHUNKS; cx++) {
       for (let cz = 0; cz < WORLD_CHUNKS; cz++) {
         ctx.fillStyle = hex(chunkGroundColor(this.bx, this.by, cx, cz));
-        ctx.fillRect(tx(cx * CH) + 1.5, ty(cz * CH) + 1.5, CH * scale, CH * scale);
+        ctx.fillRect(tx(cx * CH) + 4, ty(cz * CH) + 4, CH * PX, CH * PX);
       }
     }
-    // ... and every block in its district's colour
     for (const bl of plan.blocks) {
       ctx.beginPath();
       bl.poly.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
@@ -79,46 +171,63 @@ export class Minimap {
     }
     ctx.restore();
 
-    // streets: every edge of the street graph
-    const graph = graphFor(this.bx, this.by);
-    ctx.strokeStyle = '#8f97a3';
-    ctx.lineWidth = 12 * scale;
+    // the causeways out to the four neighbours (off the island's edge is fine)
+    ctx.fillStyle = '#8f97a3';
+    const S = causewaySpan(this.bx, this.by, 's'), E = causewaySpan(this.bx, this.by, 'e');
+    const N = causewaySpan(this.bx, this.by - 1, 's'), W = causewaySpan(this.bx - 1, this.by, 'e');
+    const far = SPAN;
+    ctx.fillRect(tx(S.at - 7), ty(S.from), 14 * PX, far * PX);
+    ctx.fillRect(tx(E.from), ty(E.at - 7), far * PX, 14 * PX);
+    ctx.fillRect(tx(N.at - 7), ty(N.to - CITY_PITCH - far), 14 * PX, far * PX);
+    ctx.fillRect(tx(W.to - CITY_PITCH - far), ty(W.at - 7), far * PX, 14 * PX);
+    // the bridge + picnic island off the south shore
+    const BRIDGE = bridgeLayout(this.bx, this.by);
+    ctx.fillStyle = '#c8b98e';
+    ctx.fillRect(tx(BRIDGE.ISLE.x1), ty(BRIDGE.ISLE.z1), 40 * PX, 40 * PX);
+    ctx.fillStyle = '#a9c88b';
+    ctx.fillRect(tx(BRIDGE.ISLE.x1 + 2), ty(BRIDGE.ISLE.z1 + 2), 36 * PX, 36 * PX);
+    ctx.fillStyle = '#8f97a3';
+    ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * PX, 42 * PX);
+
+    // the river, ribbon-width
+    ctx.strokeStyle = '#5fadc9';
+    ctx.lineWidth = 14 * PX;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
-    for (const e of graph.edges) {
-      const a = graph.nodes[e.a], b = graph.nodes[e.b];
-      ctx.moveTo(tx(a.x), ty(a.z));
-      ctx.lineTo(tx(b.x), ty(b.z));
-    }
+    riverFor(this.bx, this.by).pts.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
     ctx.stroke();
 
-    // a race island's circuit: the loop in white on its apron
+    // streets: every edge of the street graph, a little wider than life so
+    // they read at a glance — a dark edge, a light road
+    const graph = graphFor(this.bx, this.by);
+    for (const [w, col] of [[21, '#6d7580'], [16, '#aab1bb']] as Array<[number, string]>) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w * PX;
+      ctx.beginPath();
+      for (const e of graph.edges) {
+        const a = graph.nodes[e.a], b = graph.nodes[e.b];
+        ctx.moveTo(tx(a.x), ty(a.z));
+        ctx.lineTo(tx(b.x), ty(b.z));
+      }
+      ctx.stroke();
+    }
+
+    // a race island's circuit: the loop in white
     const race = raceTrackFor(this.bx, this.by);
     if (race) {
       ctx.strokeStyle = '#f4f1ea';
-      ctx.lineWidth = 12 * scale;
+      ctx.lineWidth = 14 * PX;
       ctx.beginPath();
       race.path.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));
       ctx.closePath();
       ctx.stroke();
     }
 
-    // the river, ribbon-width
-    const river = riverFor(this.bx, this.by);
-    ctx.strokeStyle = '#5fadc9';
-    ctx.lineWidth = 11 * scale;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    river.pts.forEach((p, k) => {
-      const x = tx(p.x), y = ty(p.z);
-      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.lineCap = 'butt';
-
     // the railway: this island's two through lines, plus the neighbours'
     // lines arriving over our north and west straits
     ctx.strokeStyle = '#7a6248';
-    ctx.lineWidth = 3.4 * scale;
+    ctx.lineWidth = 5 * PX;
     ctx.beginPath();
     for (const [nbx, nby, dx, dz] of [[this.bx, this.by, 0, 0], [this.bx, this.by - 1, 0, -CITY_PITCH], [this.bx - 1, this.by, -CITY_PITCH, 0]]) {
       for (const L of railNetFor(nbx, nby).lines) {
@@ -130,119 +239,7 @@ export class Minimap {
       }
     }
     ctx.stroke();
-
-    // train stations: blue platforms
-    ctx.fillStyle = '#4a90d9';
-    for (const st of plan.stations) {
-      ctx.fillRect(tx(st.x) - 3, ty(st.z) - 3, 6, 6);
-    }
-
-    // the bridge + picnic island off the south shore
-    ctx.fillStyle = '#c8b98e';
-    const BRIDGE = bridgeLayout(this.bx, this.by);
-    ctx.fillRect(tx(BRIDGE.ISLE.x1), ty(BRIDGE.ISLE.z1), 40 * scale, 40 * scale);
-    ctx.fillStyle = '#a9c88b';
-    ctx.fillRect(tx(BRIDGE.ISLE.x1 + 2), ty(BRIDGE.ISLE.z1 + 2), 36 * scale, 36 * scale);
-    ctx.fillStyle = '#8f97a3';
-    ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * scale, 42 * scale);
-
-    // causeways heading out to the four neighbouring cities
-    // (each deck runs from our last dry land out over the strait)
-    ctx.fillStyle = '#a9b0ba';
-    const S = causewaySpan(this.bx, this.by, 's'), E = causewaySpan(this.bx, this.by, 'e');
-    const N = causewaySpan(this.bx, this.by - 1, 's'), W = causewaySpan(this.bx - 1, this.by, 'e');
-    const far = VIEW; // off the map is fine — the canvas clips it
-    ctx.fillRect(tx(S.at - 5.5), ty(S.from), 11 * scale, far * scale);
-    ctx.fillRect(tx(E.from), ty(E.at - 5.5), far * scale, 11 * scale);
-    ctx.fillRect(tx(N.at - 5.5), ty(N.to - CITY_PITCH - far), 11 * scale, far * scale);
-    ctx.fillRect(tx(W.to - CITY_PITCH - far), ty(W.at - 5.5), far * scale, 11 * scale);
-
-    // traffic lights: one dot per real intersection (plazas get an amber
-    // one); level crossings get a white ×
-    for (const n of graph.nodes) {
-      if (n.plaza) {
-        ctx.fillStyle = '#f6c952';
-        ctx.beginPath();
-        ctx.arc(tx(n.x), ty(n.z), 4.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#fffdf8';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        continue;
-      }
-      if (!n.signalized) continue;
-      const st = lightState(n.x, n.z, elapsed);
-      ctx.fillStyle = st === 'ew' ? '#2ecc40' : st === 'ewY' || st === 'nsY' ? '#ffcc00' : '#ff3b30';
-      ctx.beginPath();
-      ctx.arc(tx(n.x), ty(n.z), 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // level crossings: a small white × on the street
-    ctx.strokeStyle = '#fffdf8';
-    ctx.lineWidth = 2;
-    for (const c of plan.crossings) {
-      const x = tx(c.x), y = ty(c.z);
-      ctx.beginPath();
-      ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
-      ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4);
-      ctx.stroke();
-    }
-
-    // objectives: fires orange, cats pink, patients blue
-    for (const o of this.missions.objectives) {
-      ctx.fillStyle = o.type === 'fire' ? '#f4661f' : o.type === 'patient' ? '#4a90d9' : '#f06292';
-      ctx.strokeStyle = '#fffdf8';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(tx(o.pos.x), ty(o.pos.z), 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // getaway cars, course gates
-    // (bigger than the light dots, ringed dark and white so they stand out)
-    for (const gl of this.goals()) {
-      ctx.beginPath();
-      ctx.arc(tx(gl.x), ty(gl.z), 7, 0, Math.PI * 2);
-      ctx.fillStyle = '#2d3142';
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(tx(gl.x), ty(gl.z), 5.2, 0, Math.PI * 2);
-      ctx.fillStyle = gl.color;
-      ctx.strokeStyle = '#fffdf8';
-      ctx.lineWidth = 1.5;
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // boats: white dots out on the water
-    for (const b of this.seaBoats()) {
-      ctx.fillStyle = '#fffdf8';
-      ctx.strokeStyle = '#4a7d94';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(tx(b.x), ty(b.z), 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    // player arrow
-    ctx.save();
-    ctx.translate(tx(px), ty(pz));
-    ctx.rotate(heading);
-    ctx.fillStyle = '#e25c5c';
-    ctx.strokeStyle = '#fffdf8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(6.5, 7);
-    ctx.lineTo(0, 3.5);
-    ctx.lineTo(-6.5, 7);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    ctx.lineCap = 'butt';
+    return cv;
   }
 }
-

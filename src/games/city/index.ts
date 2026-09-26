@@ -417,11 +417,17 @@ const promptEl = document.getElementById('prompt')!;
 const promptText = document.getElementById('promptText')!;
 const promptFill = document.getElementById('promptFill')!;
 const camLabel = document.getElementById('camLabel')!;
-const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions, () => islands.boatDots(),
-  () => [
-    ...robbers.filter(r => r.active).map(r => ({ x: r.x, z: r.z, color: '#7fb453' })),
-    ...(course?.gates ?? []).filter(g => !g.passed).map(g => ({ x: g.x, z: g.z, color: '#ffd35c' })),
-  ]);
+// (the minimap shows the goals, each as its badge's icon: the calls, the
+// getaway cars, the course gates still to pass, the train's next station)
+const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, missions,
+  () => {
+    const st = V.kind === 'rail' ? nextStation() : null;
+    return [
+      ...robbers.filter(r => r.active).map(r => ({ x: r.x, z: r.z, icon: GOAL_ICON.robber })),
+      ...(course?.gates ?? []).filter(g => !g.passed).map(g => ({ x: g.x, z: g.z, icon: GOAL_ICON[course!.kind] })),
+      ...(st ? [{ x: st.x, z: st.z, icon: GOAL_ICON.station }] : []),
+    ];
+  });
 
 // ---- the city grid: drive across a strait and the next city wakes up.
 // The per-city systems (plan, shore scenery, transit furniture, minimap,
@@ -945,7 +951,7 @@ const tick = (): void => {
   particles.updateDrift(dt, mode === 'drive', st.v, input.steer, player.car);
   particles.update(dt);
   chunks.updateLights(elapsed);
-  minimap.update(st.x, st.z, st.heading, elapsed);
+  minimap.update(st.x, st.z, st.heading);
   // mission-scene steering: +1 = right on screen — the wheel (turned right),
   // D / right arrow, or the mouse's x when nothing else is pressed
   let aimIn = 0;

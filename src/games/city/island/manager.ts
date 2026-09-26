@@ -79,11 +79,6 @@ export class IslandManager {
     return null;
   }
 
-  /** every awake island's boats (the minimap's dots) */
-  boatDots(): Array<{ x: number; z: number }> {
-    return [...this.sims.values()].filter(s => s.active).flatMap(s => s.fleet.dots());
-  }
-
   /** debug: awake / dormant islands and their populations */
   list(): unknown {
     return [...this.sims.values()].map(s => ({

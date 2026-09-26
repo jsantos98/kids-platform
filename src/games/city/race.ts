@@ -16,7 +16,7 @@ const CHEER = 7;
 const AI_LANE = [-3.5, 3.5, 0];
 const AI_SKILL = [1.0, 0.95, 0.9];
 /** the AI karts' top speed: below the kid's kart flat out (15 m/s) */
-const AI_TOP = 13.6;
+export const AI_TOP = 13.6;
 /** the kit tiles' walls stand this far either side of the centreline (m) */
 const WALL = 9.2;
 
@@ -28,6 +28,8 @@ interface AiKart {
   v: number;
   /** finishing place, once over the line for the last time */
   place: number;
+  /** its car (the engine it sounds like) */
+  car: RaceCar;
 }
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
@@ -67,7 +69,7 @@ export class Race {
       group.add(stub);
       spawnVehicle(`/${rivals[i].glb}`, { len: rivals[i].len, yaw: rivals[i].yaw }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
       scene.add(group);
-      this.ai.push({ group, s: 0, lat: 0, v: 0, place: 0 });
+      this.ai.push({ group, s: 0, lat: 0, v: 0, place: 0, car: rivals[i] });
     }
   }
 

@@ -64,6 +64,9 @@ export class GameAudio {
   private noise: AudioBuffer | null = null;
   private engines = new Map<EngineKind, EngineVoice>();
   private engineKind: EngineKind | null = null;
+  private engineRec: SfxId | null = null;
+  /** the race rivals' engines: a voice of its own each (panned where it is) */
+  private rivalVoices: Array<{ id: SfxId; src: AudioBufferSourceNode; gain: GainNode; pan: StereoPannerNode } | null> = [];
   private crossing: { gain: GainNode; pan: StereoPannerNode; next: number } | null = null;
   private ambience: { waves: GainNode; birdsAt: number; cricketsAt: number } | null = null;
   private muted = false;
@@ -234,19 +237,22 @@ export class GameAudio {
 
   /** the engine of the kid's vehicle: `speed` 0 … 1 of its top speed, `gas`
    * 0 … 1; null silences it (a mission scene) */
-  setEngine(kind: EngineKind | null, speed = 0, gas = 0): void {
+  setEngine(kind: EngineKind | null, speed = 0, gas = 0, rec?: SfxId): void {
     const ac = this.ac;
     if (!ac) return;
     if (kind !== this.engineKind) {
       if (this.engineKind) {
         this.engines.get(this.engineKind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
         this.loops.get(`engine-${this.engineKind}` as SfxId)?.gain.gain.setTargetAtTime(0, ac.currentTime, 0.2);
+        if (this.engineRec) this.loops.get(this.engineRec)?.gain.gain.setTargetAtTime(0, ac.currentTime, 0.2);
       }
       this.engineKind = kind;
     }
+    this.engineRec = kind ? rec ?? null : null;
     if (!kind) return;
-    // the recorded loop, sped up with the vehicle (the synth voice falls quiet)
-    const lv = this.loopOf(`engine-${kind}` as SfxId);
+    // the recorded loop, sped up with the vehicle (the synth voice falls
+    // quiet); a race car plays its own (`rec`)
+    const lv = this.loopOf(rec && this.samples.has(rec) ? rec : `engine-${kind}` as SfxId);
     if (lv) {
       const sp = Math.max(0, Math.min(1, speed)), g = Math.max(0, Math.min(1, gas)), e = ENGINE_REC[kind];
       this.engines.get(kind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
@@ -362,6 +368,36 @@ export class GameAudio {
         }
       },
     };
+  }
+
+  /** the race rivals' engines this frame: each its car's recording, at its
+   * speed (0 … 1), panned (−1 … 1) and faded with its distance (m); an empty
+   * list silences them */
+  setRivalEngines(list: Array<{ id: SfxId; speed: number; pan: number; dist: number }>): void {
+    const ac = this.ac;
+    if (!ac) return;
+    const t = ac.currentTime;
+    list.forEach((r, i) => {
+      let v = this.rivalVoices[i];
+      if (v && v.id !== r.id) { v.src.stop(); v.gain.disconnect(); v = null; }
+      if (!v) {
+        const buf = this.samples.get(r.id);
+        if (!buf) return;
+        const src = ac.createBufferSource(), gain = ac.createGain(), pan = ac.createStereoPanner();
+        src.buffer = buf; src.loop = true;
+        // (a random start, so two rivals with the same car don't sound as one)
+        src.start(0, Math.random() * buf.duration);
+        gain.gain.value = 0;
+        src.connect(gain); gain.connect(pan); pan.connect(this.sfx!);
+        v = { id: r.id, src, gain, pan };
+        this.rivalVoices[i] = v;
+      }
+      const e = ENGINE_REC.kart;
+      v.src.playbackRate.setTargetAtTime(e.rate + e.up * Math.max(0, Math.min(1, r.speed)), t, 0.12);
+      v.gain.gain.setTargetAtTime(0.55 / (1 + r.dist / 14), t, 0.1);
+      v.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, r.pan)), t, 0.1);
+    });
+    for (let i = list.length; i < this.rivalVoices.length; i++) this.rivalVoices[i]?.gain.gain.setTargetAtTime(0, t, 0.2);
   }
 
   private noiseSource(): AudioBufferSourceNode {

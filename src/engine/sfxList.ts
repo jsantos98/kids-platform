@@ -22,6 +22,21 @@ export const SFX = {
   'engine-plane': { prompt: 'small single propeller airplane flying steadily, propeller buzz, seamless loop', seconds: 4, loop: true },
   'engine-boat': { prompt: 'small motor boat outboard engine putt-putt with water splashing along the hull, seamless loop', seconds: 4, loop: true },
   'engine-train': { prompt: 'electric passenger train rolling on rails, gentle clickety-clack of the wheels over rail joints, steady, seamless loop', seconds: 4, loop: true },
+  // the race cars: each its own engine (the kid's, and the rivals' from where
+  // they are) — raceCars.ts names the one each car plays
+  'race-f1': { prompt: 'Formula 1 race car engine at high revs, high-pitched screaming V10 whine, steady, heard from just behind, seamless loop', seconds: 5, loop: true },
+  'race-future': { prompt: 'futuristic electric race car, smooth rising sci-fi turbine whine with a soft electric hum, steady, seamless loop', seconds: 5, loop: true },
+  'race-kartPurple': { prompt: 'small go-kart two-stroke engine buzzing brightly at medium revs, zippy, steady, seamless loop', seconds: 5, loop: true },
+  'race-kartPink': { prompt: 'cute little go-kart engine with a bubbly four-stroke putter, happy and light, steady, seamless loop', seconds: 5, loop: true },
+  'race-kartYellow': { prompt: 'electric go-kart, a light whirring electric motor with a gentle whine, steady, seamless loop', seconds: 5, loop: true },
+  'race-kartGreen': { prompt: 'go-kart engine with a raspy lawnmower-like buzz at medium revs, steady, seamless loop', seconds: 5, loop: true },
+  'race-kartBrown': { prompt: 'go-kart with a deeper chunky single-cylinder engine thump at medium revs, steady, seamless loop', seconds: 5, loop: true },
+  'race-racer': { prompt: 'sporty race car engine, smooth confident growl at medium-high revs, steady, seamless loop', seconds: 5, loop: true },
+  'race-speedster': { prompt: 'fast sports car engine, a sharp raspy high-revving roar, steady, seamless loop', seconds: 5, loop: true },
+  'race-racerLow': { prompt: 'low sleek race car, a deep smooth burbling engine at high speed, steady, seamless loop', seconds: 5, loop: true },
+  'race-vintage': { prompt: '1950s vintage race car engine, a rattly old-fashioned straight-six drone, steady, seamless loop', seconds: 5, loop: true },
+  'race-drag': { prompt: 'drag racing car, a huge loud supercharged V8 rumble at high revs, steady, seamless loop', seconds: 5, loop: true },
+  'race-monster': { prompt: 'monster truck, a big deep V8 rumbling and roaring at medium revs, steady, seamless loop', seconds: 5, loop: true },
   // sirens (loops)
   'siren-fire': { prompt: 'European fire truck siren, two-tone hi-lo "nee-naw", Portuguese style, steady, heard from inside the truck, seamless loop', seconds: 4, loop: true },
   'siren-ambulance': { prompt: 'European ambulance siren, two-tone hi-lo, slightly faster and higher than a fire truck, steady, seamless loop', seconds: 4, loop: true },

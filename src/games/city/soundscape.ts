@@ -6,6 +6,7 @@
 // race's countdown and laps, a station stop, a splash — each its own sound.
 // (The narrator's voice hangs off the same events: narrator.ts.)
 import type { GameAudio, EngineKind, SirenStyle } from '../../engine/audio.js';
+import type { SfxId } from '../../engine/sfxList.js';
 import { honks } from './island/cars.js';
 
 export type GameEvent =
@@ -30,6 +31,10 @@ export interface FrameState {
   sea: number;
   /** the nearest level crossing warning a train, or null */
   crossing: { x: number; z: number; d: number } | null;
+  /** a race car's own engine recording (the kid's) */
+  engineRec?: SfxId;
+  /** the race rivals: where they are, their car's engine, their speed 0 … 1 */
+  rivals?: Array<{ x: number; z: number; id: SfxId; speed: number }>;
 }
 
 export class Soundscape {
@@ -50,7 +55,8 @@ export class Soundscape {
   frame(dt: number, s: FrameState): void {
     this.t += dt;
     const a = this.audio;
-    a.setEngine(s.engine, s.speed, s.gas);
+    a.setEngine(s.engine, s.speed, s.gas, s.engineRec);
+    a.setRivalEngines(s.engine && s.rivals ? s.rivals.map(r => ({ id: r.id, speed: r.speed, ...this.place(s, r.x, r.z) })) : []);
     a.setSiren(s.siren, s.sirenStyle);
     a.setPump(s.pump);
     if (s.crossing) {

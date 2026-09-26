@@ -34,6 +34,71 @@
     "seconds": 4,
     "loop": true
   },
+  "race-f1": {
+    "prompt": "Formula 1 race car engine at high revs, high-pitched screaming V10 whine, steady, heard from just behind, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-future": {
+    "prompt": "futuristic electric race car, smooth rising sci-fi turbine whine with a soft electric hum, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-kartPurple": {
+    "prompt": "small go-kart two-stroke engine buzzing brightly at medium revs, zippy, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-kartPink": {
+    "prompt": "cute little go-kart engine with a bubbly four-stroke putter, happy and light, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-kartYellow": {
+    "prompt": "electric go-kart, a light whirring electric motor with a gentle whine, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-kartGreen": {
+    "prompt": "go-kart engine with a raspy lawnmower-like buzz at medium revs, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-kartBrown": {
+    "prompt": "go-kart with a deeper chunky single-cylinder engine thump at medium revs, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-racer": {
+    "prompt": "sporty race car engine, smooth confident growl at medium-high revs, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-speedster": {
+    "prompt": "fast sports car engine, a sharp raspy high-revving roar, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-racerLow": {
+    "prompt": "low sleek race car, a deep smooth burbling engine at high speed, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-vintage": {
+    "prompt": "1950s vintage race car engine, a rattly old-fashioned straight-six drone, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-drag": {
+    "prompt": "drag racing car, a huge loud supercharged V8 rumble at high revs, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
+  "race-monster": {
+    "prompt": "monster truck, a big deep V8 rumbling and roaring at medium revs, steady, seamless loop",
+    "seconds": 5,
+    "loop": true
+  },
   "siren-fire": {
     "prompt": "European fire truck siren, two-tone hi-lo \"nee-naw\", Portuguese style, steady, heard from inside the truck, seamless loop",
     "seconds": 4,
@@ -151,6 +216,19 @@
     "engine-train",
     "engine-truck",
     "pump",
+    "race-drag",
+    "race-f1",
+    "race-future",
+    "race-kartBrown",
+    "race-kartGreen",
+    "race-kartPink",
+    "race-kartPurple",
+    "race-kartYellow",
+    "race-monster",
+    "race-racer",
+    "race-racerLow",
+    "race-speedster",
+    "race-vintage",
     "siren-ambulance",
     "siren-fire",
     "siren-police"

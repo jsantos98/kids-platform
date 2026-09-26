@@ -32,7 +32,7 @@ import { CENTER, ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, cityBase, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
 import { raceTrackFor } from '../../worlds/raceIsland.js';
-import { Race, LAPS } from './race.js';
+import { Race, LAPS, AI_TOP } from './race.js';
 import { Boarding } from './boarding.js';
 import { IslandPrefetch } from './prefetch.js';
 import { exportBakedTemplates } from '../../engine/assets.js';
@@ -58,7 +58,7 @@ import { riverFor } from '../../worlds/riverRoute.js';
 import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 import { LoadingScreen, nextFrame } from './loading.js';
-import { raceCar } from '../raceCars.js';
+import { raceCar, engineOf } from '../raceCars.js';
 import { t as tr, applyI18n, ordinal, numberLocale, type Key } from '../../i18n/index.js';
 
 applyI18n('city.pageTitle');
@@ -1329,6 +1329,9 @@ const tick = (): void => {
     siren: sirenOn, sirenStyle: SIREN_STYLE, pump: director.pumping,
     x: st.x, z: st.z, heading: st.heading, night: day.night, sea: seaNear,
     crossing: view.scene ? null : transit.nearestWarning(st.x, st.z, railway),
+    // (the race: the kid's car sounds like itself, and so does each rival)
+    engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : undefined,
+    rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
   });
   {
     // the vehicle's own roof lamps flash when its model has them (the police

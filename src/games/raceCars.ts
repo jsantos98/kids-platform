@@ -5,6 +5,8 @@
 // other cars from this line-up, one from each family.
 // Toy Car Kit models face -z (R15): they spawn turned by π.
 
+import type { SfxId } from '../engine/sfxList.js';
+
 export type CarFamily = 'formula' | 'kart' | 'toy';
 
 export interface RaceCar {
@@ -40,6 +42,9 @@ export const RACE_CARS: RaceCar[] = [
 ];
 
 export const DEFAULT_CAR = 'f1';
+
+/** the engine recording a race car plays (sfxList.ts: race-<id>) */
+export function engineOf(car: RaceCar): SfxId { return `race-${car.id}` as SfxId; }
 
 /** the car `?car=` names (the F1 when it names none) */
 export function raceCar(id: string | null | undefined): RaceCar {

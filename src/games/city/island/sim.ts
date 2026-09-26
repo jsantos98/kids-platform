@@ -97,7 +97,9 @@ export class IslandSim {
     this.simTime = t;
     // (the cars stop for the walkers on their crossings, the walkers wait
     // at the corners for the cars — each sees the other's last step)
-    this.cars.update(dt, t, this.opts.railway, player, draw, this.walkers.walkers);
+    // (cars queue behind the kid's road vehicle — its footprint is the
+    // walkers' threat; a flying one passes nothing to wait behind)
+    this.cars.update(dt, t, this.opts.railway, player, draw, this.walkers.walkers, threat);
     this.walkers.update(dt, t, this.opts.railway, threat, player, draw, this.cars.cars);
     if (draw) this.fleet.update(this.simTime);
   }

@@ -30,6 +30,9 @@ const BOOM_TIME = 1.6;  // seconds to lower or raise
 /** a train nearer than this (arc m) starts the lamps flashing and the
  * booms closing — the car AI holds at the same distance */
 export const CROSSING_WARN_DIST = 60;
+/** a crossing's posts and booms stand this far up and down the street from
+ * its centre (R12); cars stop short of the boom line */
+export const CROSSING_BOOM = 9.4;
 
 interface Signal {
   a: THREE.Mesh[];            // left lamps of every post
@@ -285,7 +288,7 @@ export class Transit {
     // shoulder — local +z points back toward the road's centre line (R12)
     // (each spot: x, z, the boom's yaw, and how far along the street it stands)
     const spots: Array<[number, number, number, number]> = [];
-    for (const al of [-9.4, 9.4]) {
+    for (const al of [-CROSSING_BOOM, CROSSING_BOOM]) {
       for (const side of [-1, 1]) {
         spots.push([c.x + ux * al + nx * 7.6 * side, c.z + uz * al + nz * 7.6 * side,
           Math.atan2(-nx * side, -nz * side), al]);
@@ -316,7 +319,13 @@ export class Transit {
         inst.dyn.add(lamp);
         lamps[i].push(lamp);
       }
-      // the boom: a striped arm on a pivot, raised while the road is open
+      // the boom — HALF barriers: only the post on the entry lane's shoulder
+      // has one (driving +u, the right-hand lane is n·side −1; driving −u
+      // it is +1), so the lane leaving the crossing stays open and a car
+      // caught inside can always drive out (booms on both lanes boxed it in)
+      inst.boxes.push({ x1: wx - 0.35, x2: wx + 0.35, z1: wz - 0.35, z2: wz + 0.35, small: 1 });
+      const al = spots[i][3], side = i % 2 === 0 ? -1 : 1;
+      if (side !== Math.sign(al)) continue;
       const outer = new THREE.Group();
       outer.position.set(wx, 0, wz);
       outer.rotation.y = ary;
@@ -335,7 +344,6 @@ export class Transit {
       outer.add(pivot);
       inst.dyn.add(outer);
       arms.push(pivot);
-      inst.boxes.push({ x1: wx - 0.35, x2: wx + 0.35, z1: wz - 0.35, z2: wz + 0.35, small: 1 });
     }
     inst.signals.push({ a: lamps.map(l => l[0]), b: lamps.map(l => l[1]), arms, c });
   }
@@ -375,10 +383,13 @@ export class Transit {
       for (const sig of inst.signals) {
         if (!sig.arms.length || sig.arms[0].rotation.x < -BOOM_UP * 0.6) continue; // (still up)
         const c = sig.c, ux = Math.sin(c.heading), uz = Math.cos(c.heading);
-        for (const al of [-9.4, 9.4]) {
-          const cx = inst.ox + c.x + ux * al, cz = inst.oz + c.z + uz * al;
+        for (const al of [-CROSSING_BOOM, CROSSING_BOOM]) {
+          // (half barriers: a bar across the entry lane only — from just past
+          // the centre line to the kerb — so the way out stays open)
+          const nx = uz, nz = -ux, side = Math.sign(al);
+          const cx = inst.ox + c.x + ux * al + nx * side * 3.3, cz = inst.oz + c.z + uz * al + nz * side * 3.3;
           // across the carriageway (local x), a thin bar along the street
-          const hx = 7.4, hz = 0.5;
+          const hx = 4.0, hz = 0.5;
           const ca = Math.abs(Math.cos(c.heading)), sa = Math.abs(Math.sin(c.heading));
           const ex = hx * ca + hz * sa, ez = hx * sa + hz * ca;
           out.push({ x1: cx - ex, x2: cx + ex, z1: cz - ez, z2: cz + ez, obb: { cx, cz, hx, hz, ry: c.heading } });

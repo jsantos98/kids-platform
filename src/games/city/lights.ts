@@ -23,5 +23,15 @@ export function lightState(x: number, z: number, t: number): LightState {
   return 'nsY';
 }
 
+/** seconds of green left for heads showing `phase` (0: not green now) — a
+ * car only starts over a level crossing just short of the lights if it will
+ * reach the stop line on this green (island/cars.ts) */
+export function greenLeft(x: number, z: number, t: number, phase: 'ew' | 'ns'): number {
+  const off = ((x + z) * WAVE_STEP) % LIGHT_PERIOD;
+  const p = (t + off + LIGHT_PERIOD) % LIGHT_PERIOD;
+  if (phase === 'ew') return p < 6.5 ? 6.5 - p : 0;
+  return p >= 8 && p < 14.5 ? 14.5 - p : 0;
+}
+
 /** metres from the intersection centre where cars stop (before the crosswalk) */
 export const STOP_LINE = 18.5;

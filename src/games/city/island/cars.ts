@@ -13,8 +13,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { citySeed } from '../../../worlds/cityGrid.js';
 import { SCALE } from '../../../worlds/world.js';
 import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
-import { lightState, STOP_LINE } from '../lights.js';
-import { CROSSING_WARN_DIST } from '../transit.js';
+import { lightState, greenLeft, STOP_LINE } from '../lights.js';
+import { CROSSING_WARN_DIST, CROSSING_BOOM } from '../transit.js';
+import type { Threat } from './walkers.js';
 import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
 
@@ -148,8 +149,10 @@ export class IslandCars {
     for (let k = 0; k < count && edges.length; k++) {
       const r = rng(chunkSeed(citySeed(bx, by), 0x7af, k));
       let e = edges[(r() * edges.length) | 0], dir: 1 | -1 = r() < 0.5 ? 1 : -1, s0 = (0.2 + r() * 0.6) * e.len;
-      // (never on top of another car: a few seeded tries for a clear spot)
-      for (let t = 0; t < 6 && this.cars.some(o => o.edge === e.id && o.dir === dir && Math.abs(o.s - s0) < 12); t++) {
+      // (never on top of another car, nor on a level crossing: a few seeded
+      // tries for a clear spot)
+      const onCrossing = (): boolean => e.crossings.some(cr => Math.abs((dir > 0 ? cr.s : e.len - cr.s) - s0) < CROSSING_BOOM + 5);
+      for (let t = 0; t < 8 && (onCrossing() || this.cars.some(o => o.edge === e.id && o.dir === dir && Math.abs(o.s - s0) < 12)); t++) {
         e = edges[(r() * edges.length) | 0]; dir = r() < 0.5 ? 1 : -1; s0 = (0.2 + r() * 0.6) * e.len;
       }
       // (its model from a stream of its own, so the fleet's spots don't move)
@@ -320,7 +323,7 @@ export class IslandCars {
    * anybody on the crosswalk ahead.
    */
   update(dt: number, elapsed: number, rail: Railway | null, player: THREE.Vector3 | null, draw: boolean,
-         walkers: Array<{ x: number; z: number }> | null = null): void {
+         walkers: Array<{ x: number; z: number }> | null = null, road: Threat | null = null): void {
     const g = this.graph;
     // ---- who is where ----
     type Slot = { s: number; car: Car };
@@ -399,6 +402,20 @@ export class IslandCars {
       return (e.len - IN - c.s) + along - lenAdj(c, f);
     };
     const lenAdj = (a: Car, b: Car): number => (a.len + b.len) / 2 - 4.4;
+    /** the kid's road vehicle in the lane ahead (heading h): wait behind it,
+     * bumper to bumper ~2.5 m, braking early enough to get there — it was
+     * only seen 16 m out, stopping 6 m short of its centre, which a 6.6 m
+     * truck and a 4.4 m car overlap (the push felt like being rammed) */
+    const forPlayer = (c: Car, h: number, v: number): number => {
+      if (!road) return v;
+      const fx = Math.sin(h), fz = Math.cos(h);
+      const dx = road.x - c.x, dz = road.z - c.z;
+      const ahead = dx * fx + dz * fz, side = dx * fz - dz * fx;
+      if (ahead <= 0 || ahead > 40 || Math.abs(side) > road.halfW + 1.8) return v;
+      const room = ahead - road.halfL - c.len / 2 - 2.5;
+      // (v² = 2·a·d: from here, stopping in `room` at a gentle 4 m/s²)
+      return Math.min(v, Math.sqrt(Math.max(0, 8 * room)));
+    };
     const follow = (gap: number, v: number): number => (gap < 16 ? Math.min(v, Math.max(0, (gap - 7) * 0.9)) : v);
 
     for (const c of this.cars) {
@@ -408,6 +425,7 @@ export class IslandCars {
         // ahead and anybody on the crossing hold it
         let vT = follow(gapAhead(c), c.speed * 0.8);
         vT = forWalkers(c, c.h, vT);
+        vT = forPlayer(c, c.h, vT);
         c.v += Math.max(-8 * dt, Math.min(5 * dt, vT - c.v));
         c.round.s += c.v * dt;
         if (c.round.s >= c.round.cum[c.round.cum.length - 1]) {
@@ -423,9 +441,10 @@ export class IslandCars {
         const e = g.edges[c.edge];
         const end = this.endNode(c);
         let vTarget = c.speed;
+        let green = true;
         if (end.signalized) {
           const st = lightState(end.x, end.z, elapsed);
-          const green = g.phaseOf(end, e) === 'ew' ? st === 'ew' : st === 'ns';
+          green = g.phaseOf(end, e) === 'ew' ? st === 'ew' : st === 'ns';
           if (!green) {
             const dStop = e.len - STOP_LINE - c.s;
             if (dStop < 12) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
@@ -434,10 +453,46 @@ export class IslandCars {
         if (rail) {
           for (const cr of e.crossings) {
             const sC = c.dir > 0 ? cr.s : e.len - cr.s;
-            if (sC <= c.s) continue;
+            // (a crossing counts until the car's tail is past its far boom)
+            if (sC + CROSSING_BOOM + c.len / 2 + 0.5 <= c.s) continue;
+            // stop with the nose 1.2 m short of the boom line (the old 10.5 m
+            // left the nose past the boom, between the barriers)
+            const dStop = sC - CROSSING_BOOM - 1.2 - c.len / 2 - c.s;
             if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, elapsed) < CROSSING_WARN_DIST) {
-              const dStop = sC - 10.5 - c.s;
-              if (dStop < 16) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
+              // (already past the stop point when the warning starts — or
+              // caught inside by a queue — never stay on the crossing: drive
+              // on until the tail is clear of the far boom, a red light
+              // beyond notwithstanding)
+              if (dStop > -0.5) {
+                if (dStop < 16) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
+              } else vTarget = Math.max(vTarget, Math.min(c.speed, 6));
+            } else if (dStop > -0.5 && dStop < 16) {
+              // keep the crossing clear: start over it only if wherever this
+              // car may have to stop beyond it — behind the car ahead, at a
+              // red light — leaves its whole length past the far boom (a
+              // car queued at the lights just past a crossing sat with its
+              // tail between the barriers)
+              const clearAt = sC + CROSSING_BOOM + 0.5 + c.len / 2;
+              const sl = slotOf.get(c)!, l = lanes.get(sl.key)!;
+              const f = sl.i + 1 < l.length ? l[sl.i + 1] : null;
+              let reach = f && !f.car.round ? f.s - f.car.len / 2 - 2.6 - c.len / 2 : Infinity;
+              // where traffic may stop at the junction ahead: a roundabout's
+              // give-way, a junction without lights, a red — or a green that
+              // runs out before this car gets to the stop line
+              let hold = Infinity;
+              if (end.plaza) hold = e.len - ROUND_IN;
+              else if (end.signalized) {
+                const need = (e.len - STOP_LINE - c.s) / Math.max(3, c.speed * 0.9) + 0.5;
+                if (!green || greenLeft(end.x, end.z, elapsed, g.phaseOf(end, e)) < need) hold = e.len - STOP_LINE;
+              } else if (!end.mouth && end.edges.length >= 3) hold = e.len - TURN_IN;
+              if (hold < Infinity) {
+                // (everybody ahead beyond the crossing may queue there, this
+                // car at the back of it)
+                let q = 0;
+                for (let j = sl.i + 1; j < l.length; j++) if (!l[j].car.round && l[j].s > sC) q += l[j].car.len + 2.6;
+                reach = Math.min(reach, hold - q);
+              }
+              if (reach < clearAt) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
             }
           }
         }
@@ -457,13 +512,13 @@ export class IslandCars {
         }
         if (holdAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (holdAt - c.s) * 1.4));
         vTarget = forWalkers(c, c.h, vTarget);
-        // the player: brake for them in the lane ahead, ease aside when close
+        // the kid's road vehicle: queue behind it, ease aside when close
+        vTarget = forPlayer(c, c.h, vTarget);
         let dodge = 0;
-        if (player) {
+        if (road) {
           const hx = e.ux * c.dir, hz = e.uz * c.dir;
-          const dx = player.x - c.x, dz = player.z - c.z;
-          const ahead = dx * hx + dz * hz, side = -dx * hz + dz * hx;
-          if (ahead > 0 && ahead < 16 && Math.abs(side) < 3) vTarget = Math.min(vTarget, Math.max(0, (ahead - 6) * 0.8));
+          const dx = road.x - c.x, dz = road.z - c.z;
+          const side = -dx * hz + dz * hx;
           if (Math.hypot(dx, dz) < 6) dodge = side > 0 ? -1.2 : 1.8; // away from the player, kerb-ward by default
         }
         c.dodge += (dodge - c.dodge) * Math.min(1, dt * 3);

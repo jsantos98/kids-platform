@@ -54,10 +54,10 @@
     "seconds": 4,
     "loop": true
   },
-  "crossing-bell": {
-    "prompt": "railway level crossing warning bell ringing, ding ding ding at a steady rhythm, seamless loop",
-    "seconds": 4,
-    "loop": true
+  "crossing-ding": {
+    "prompt": "a single strike of a railway level crossing warning bell, one clear bright ding with a short ring, nothing else",
+    "seconds": 1,
+    "loop": false
   },
   "amb-birds": {
     "prompt": "gentle daytime birdsong in a city park, a few small birds chirping, calm, seamless loop",
@@ -143,7 +143,6 @@
     "amb-birds",
     "amb-crickets",
     "amb-waves",
-    "crossing-bell",
     "engine-boat",
     "engine-car",
     "engine-heli",

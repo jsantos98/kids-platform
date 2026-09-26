@@ -40,6 +40,8 @@ const ENGINE_REC: Record<EngineKind, { rate: number; up: number; g0: number; g1:
   boat: { rate: 0.85, up: 0.6, g0: 0.3, g1: 0.75 },
   train: { rate: 0.7, up: 0.55, g0: 0.0, g1: 0.8 },
 };
+/** how often a level crossing's bell strikes (s) */
+const CROSSING_PACE = 0.55;
 /** which recording each siren style plays, and how loud */
 const SIREN_REC: Record<SirenStyle, { id: SfxId; gain: number }> = {
   fire: { id: 'siren-fire', gain: 0.55 },
@@ -103,6 +105,18 @@ export class GameAudio {
     l = { src, gain };
     this.loops.set(id, l);
     return l;
+  }
+
+  /** a recorded one-shot at an exact time on the audio clock */
+  private shotAt(id: SfxId, when: number, gain: number, dest: AudioNode): void {
+    const buf = this.samples.get(id);
+    if (!buf || !this.ac) return;
+    const src = this.ac.createBufferSource();
+    src.buffer = buf;
+    const g = this.ac.createGain();
+    g.gain.value = gain;
+    src.connect(g); g.connect(dest);
+    src.start(when);
   }
 
   /** play a recorded one-shot (false: not loaded — the caller synthesizes) */
@@ -502,8 +516,17 @@ export class GameAudio {
     const c = this.crossing, t = ac.currentTime;
     c.gain.gain.setTargetAtTime(on ? 1 / (1 + dist / 20) : 0, t, 0.1);
     c.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
-    const lv = this.loopOf('crossing-bell', c.pan);
-    if (lv) { lv.gain.gain.setTargetAtTime(0.7, t, 0.05); return; }
+    // the recorded strike, rung at a steady pace on the audio clock (each
+    // queued a little ahead at its exact time, so frames can't jitter it)
+    if (this.samples.has('crossing-ding')) {
+      if (!on) return;
+      if (c.next < t) c.next = t + 0.02;
+      while (c.next < t + 0.12) {
+        this.shotAt('crossing-ding', c.next, 0.8, c.pan);
+        c.next += CROSSING_PACE;
+      }
+      return;
+    }
     if (on && t >= c.next) {
       this.note(1480, t, 0.25, 0.06, 'square', c.pan);
       c.next = t + 0.5;

@@ -28,7 +28,9 @@ export const SFX = {
   'siren-police': { prompt: 'European police car siren, fast two-tone hi-lo, steady, seamless loop', seconds: 4, loop: true },
   // the fire hose, a level crossing, the world around (loops)
   'pump': { prompt: 'fire hose spraying a strong jet of water, steady hiss and splash, seamless loop', seconds: 4, loop: true },
-  'crossing-bell': { prompt: 'railway level crossing warning bell ringing, ding ding ding at a steady rhythm, seamless loop', seconds: 4, loop: true },
+  // (a level crossing's bell: ONE strike, which the game rings at a steady
+  // pace — a recorded ringing never looped cleanly)
+  'crossing-ding': { prompt: 'a single strike of a railway level crossing warning bell, one clear bright ding with a short ring, nothing else', seconds: 1, loop: false },
   'amb-birds': { prompt: 'gentle daytime birdsong in a city park, a few small birds chirping, calm, seamless loop', seconds: 8, loop: true },
   'amb-crickets': { prompt: 'soft crickets chirping on a warm summer night, calm, seamless loop', seconds: 8, loop: true },
   'amb-waves': { prompt: 'gentle sea waves lapping on a sandy beach, calm and soft, seamless loop', seconds: 8, loop: true },

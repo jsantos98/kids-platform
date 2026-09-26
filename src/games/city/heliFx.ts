@@ -3,6 +3,13 @@
 // helicopter's winch (a line with a hook that pays out while rescuing).
 import * as THREE from 'three';
 
+/** the searchlight's spot: this far ahead of the helicopter and this big
+ * round. The chase camera sits behind and above it, so a spot on the ground
+ * nearer than ~20 m ahead shows under the helicopter on screen, hidden by
+ * its body (at 7 m it was). A getaway car within SPOT_R + SPOT_GRACE of its
+ * centre counts as lit (G7) — the kid is four. */
+export const SPOT_AHEAD = 20, SPOT_R = 6.5, SPOT_GRACE = 1.5;
+
 export class Searchlight {
   private cone: THREE.Mesh;
   private spot: THREE.Mesh;
@@ -31,7 +38,7 @@ export class Searchlight {
   }
 
   /** light the ground `ahead` metres in front of the helicopter */
-  update(x: number, alt: number, z: number, heading: number, ahead = 7, radius = 8): void {
+  update(x: number, alt: number, z: number, heading: number, ahead = SPOT_AHEAD, radius = SPOT_R): void {
     const gx = x + Math.sin(heading) * ahead, gz = z + Math.cos(heading) * ahead;
     const top = alt + 0.8;
     const len = Math.hypot(top, ahead);

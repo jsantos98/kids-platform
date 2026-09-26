@@ -9,10 +9,10 @@ import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio } from '../../engine/audio.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
-import { createPlayer, physicsStep, startCrash, HELI_ALT, PLANE_ALT } from './player.js';
+import { createPlayer, physicsStep, startCrash, heliSirenLamps, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
 import { modeFromURL } from './modes.js';
 import { Course } from './course.js';
-import { Searchlight, Winch } from './heliFx.js';
+import { Searchlight, Winch, SPOT_AHEAD, SPOT_R, SPOT_GRACE } from './heliFx.js';
 import { Breadcrumbs } from './breadcrumb.js';
 import { NightLights } from './nightLights.js';
 import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
@@ -165,8 +165,8 @@ scene.add(groundFollower);
 
 /** the kid's plane, helicopter or boat at night (G10): like the real
  * thing, a red light on the left, green on the right, a blinking red
- * beacon and double white strobes; the police helicopter flashes red and
- * blue under its belly, the medical one lights the ground beneath it; a boat
+ * beacon and double white strobes; a helicopter's siren lamps glow on
+ * their beat, the medical one lights the ground beneath it; a boat
  * shows a white masthead light and its red / green sides */
 const _lamp = new THREE.Vector3();
 function flyingLamps(): void {
@@ -185,11 +185,12 @@ function flyingLamps(): void {
     lamp(at(0.8, 1.3, 1.0), 0xff2a22, 1.3);
     lamp(at(-0.8, 1.3, 1.0), 0x33ff66, 1.3);
     if (t % 1.1 < 0.12) lamp(at(0, 3.1, -4.05), 0xff2a22, 1.4);
-    if (MODE.searchlight) {
-      // police: red and blue strobes, turn about
-      const blue = Math.floor(t * 6) % 2 === 0;
-      lamp(at(blue ? 0.5 : -0.5, 0.95, 0.4), blue ? 0x3a7bff : 0xff2a22, 1.6);
-    } else {
+    // its siren lamps glow with the siren (the same beat they flash on)
+    if (sirenOn) {
+      const beat = Math.floor(t * 5) % 2;
+      lamp(at(beat === 0 ? 0.8 : -0.8, 1.08, 1.25), beat === 0 && MODE.searchlight ? 0xff2a22 : 0x3a7bff, 1.6);
+    }
+    if (!MODE.searchlight) {
       // medical: a soft landing light on the ground below
       const g = at(0, 0, 0.8);
       nightLights.beam(g.x, 0.3, g.z, player.state.heading, 9, 11, 0xfff4dc, 0.8);
@@ -250,6 +251,8 @@ let spawn = (() => {
 })()
 const player = createPlayer(V, spawn.x, spawn.z, spawn.heading);
 scene.add(player.car);
+// a helicopter's siren lamps are part of it: small domes on its belly band (G3)
+if (V.kind === 'heli' && MODE.lightbar) player.car.userData.siren = heliSirenLamps(player.car, !!MODE.searchlight);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
 const crumbs = new Breadcrumbs(V.radius);
 const guideArrow3d = new GuideArrow();
@@ -258,6 +261,29 @@ const _topBox = new THREE.Box3();
 function vehicleTop(): number {
   _topBox.setFromObject(player.car);
   return _topBox.isEmpty() ? 2 : Math.max(1, _topBox.max.y - player.car.position.y);
+}
+/** the cab camera: just past the vehicle's nose, about three quarters of
+ * its height up, looking ahead — measured from the model itself (fixed
+ * numbers sat the eye inside some kit models); the train's nose from its
+ * first unit. Measured again whenever the model changes (it streams in). */
+const _cabBox = new THREE.Box3();
+const _ahead = new THREE.Vector3();
+let cabCache: { key: string; f: number; y: number } | null = null;
+function cabEye(): { f: number; y: number } {
+  if (V.kind === 'rail') return { f: railway.kidNose() + 0.4, y: 3.0 };
+  const key = `${player.car.children.length}:${player.car.userData.top ?? 0}`;
+  if (cabCache?.key === key) return cabCache;
+  const c = player.car, pos = c.position.clone(), rot = c.rotation.clone();
+  c.position.set(0, 0, 0);
+  c.rotation.set(0, 0, 0);
+  c.updateMatrixWorld(true);
+  _cabBox.setFromObject(c);
+  c.position.copy(pos);
+  c.rotation.copy(rot);
+  c.updateMatrixWorld(true);
+  if (_cabBox.isEmpty()) return { f: V.cabF, y: V.cabY };
+  cabCache = { key, f: _cabBox.max.z + 0.3, y: _cabBox.min.y + (_cabBox.max.y - _cabBox.min.y) * 0.72 };
+  return cabCache;
 }
 const camDir = new THREE.Vector3();
 const stuck = { t: 0, x: spawn.x, z: spawn.z, gas: true };
@@ -874,7 +900,7 @@ const tick = (): void => {
     if (rb.active) {
       rb.update(dt, elapsed, st.x, st.z, director.busy);
       const lit = V.kind === 'heli'
-        ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * 7), rb.z - (st.z + Math.cos(st.heading) * 7)) < 8
+        ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * SPOT_AHEAD), rb.z - (st.z + Math.cos(st.heading) * SPOT_AHEAD)) < SPOT_R + SPOT_GRACE
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
       // (no catching while it dashes: that's it shaking the police off)
       if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0) rb.caught += dt;
@@ -949,7 +975,8 @@ const tick = (): void => {
   const flyY = V.kind === 'boat' ? 0 : st.alt;
   const fwd = new THREE.Vector3(Math.sin(st.heading), 0, Math.cos(st.heading));
   if (camMode === 'cab') {
-    camera.position.set(st.x + fwd.x * V.cabF, flyY + V.cabY, st.z + fwd.z * V.cabF);
+    const eye = cabEye();
+    camera.position.set(st.x + fwd.x * eye.f, flyY + eye.y, st.z + fwd.z * eye.f);
     camera.lookAt(st.x + fwd.x * 25, flyY + 1.4, st.z + fwd.z * 25);
   } else if (camMode === 'high') {
     // higher chase angle: the whole truck plus more of the street around it
@@ -1085,9 +1112,17 @@ const tick = (): void => {
   // vehicle's camera sits at its own: fixed in the world, the arrow was big
   // over one vehicle and small over another)
   {
-    const top = V.kind === 'rail' ? 4.6 : vehicleTop();
-    const size = Math.max(0.7, Math.min(3.2, camera.position.distanceTo(player.car.position) / 14));
-    guideArrow3d.update(dt, elapsed, player.car.position, top + 1.6 * size, bearing, size, camera.position);
+    if (camMode === 'cab') {
+      // (from the cab the vehicle's roof is behind the eye: the arrow floats
+      // a few metres ahead of the windscreen instead)
+      const eye = cabEye(), f = eye.f + 7;
+      _ahead.set(st.x + Math.sin(st.heading) * f, player.car.position.y, st.z + Math.cos(st.heading) * f);
+      guideArrow3d.update(dt, elapsed, _ahead, eye.y + 1.1, bearing, 0.55, camera.position);
+    } else {
+      const top = V.kind === 'rail' ? 4.6 : vehicleTop();
+      const size = Math.max(0.7, Math.min(3.2, camera.position.distanceTo(player.car.position) / 14));
+      guideArrow3d.update(dt, elapsed, player.car.position, top + 1.6 * size, bearing, size, camera.position);
+    }
   }
   camera.getWorldDirection(camDir);
   const camYaw = Math.atan2(camDir.x, camDir.z);
@@ -1193,13 +1228,18 @@ const tick = (): void => {
   {
     // the vehicle's own roof lamps flash when its model has them (the police
     // car, the ambulance, the fire truck); otherwise the game's light bar
-    const own = player.car.userData.siren as { red: THREE.Mesh[]; blue: THREE.Mesh[] } | null | undefined;
+    const own = player.car.userData.siren as SirenLamps | null | undefined;
     const phase = Math.floor(elapsed * 5) % 2;
     if (own) {
-      // (on: each lamp alternates glowing / dark; off: the model's own paint)
+      // (on: the two beats alternate glowing / dark; off: the model's own
+      // paint, or a built-on lamp shows dim)
       sirenBar.group.visible = false;
-      for (const l of own.red) { l.visible = sirenOn; (l.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff2a1a : 0x3a1010); }
-      for (const l of own.blue) { l.visible = sirenOn; (l.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x4a8cff : 0x10183a); }
+      for (const [lamps, beat] of [[own.red, 0], [own.blue, 1]] as Array<[THREE.Mesh[], number]>) {
+        for (const l of lamps) {
+          l.visible = sirenOn || !!l.userData.always;
+          (l.material as THREE.MeshBasicMaterial).color.setHex(sirenOn && phase === beat ? l.userData.lit : l.userData.dim);
+        }
+      }
     } else if (sirenOn) {
       // alternate the light bar: red flash / blue flash
       (sirenBar.red.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff3b30 : 0x4a1616);

@@ -461,6 +461,13 @@ export class Railway {
     return { x: p.x, z: p.z, h: p.h, v: k.v, y: p.y };
   }
 
+  /** how far the kid's train's nose is ahead of its pose (its first unit's
+   * centre sits at the arc point) */
+  kidNose(): number {
+    const u = this.kid?.spec.units[0];
+    return u ? u.len / 2 - u.back : 0;
+  }
+
   /** the next station ahead of the kid's train: world position + gap */
   nextStation(skip = 0): { x: number; z: number; gap: number } | null {
     const k = this.kid;

@@ -186,24 +186,33 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
   return p;
 }
 
+/** a siren lamp flashes between its lit and dim colour (`userData.lit` /
+ * `userData.dim`); `userData.always` keeps it showing while off (a lamp
+ * built onto the vehicle, not an overlay on the model's own paint) */
+export interface SirenLamps { red: THREE.Mesh[]; blue: THREE.Mesh[] }
+
+const LIT = { red: 0xff2a1a, blue: 0x4a8cff }, DIM = { red: 0x3a1010, blue: 0x10183a };
+
 /**
- * The red and blue lamps of a Car Kit model's roof light bar, as flash
- * overlays: the faces near the top of the model that sample the palette's
- * bottom-row red / blue swatches (probed: u 0.25-0.375 red, 0.375-0.5 blue,
- * v > 0.75), copied into two meshes laid a hair over them. null when the
- * model has none (the game's own light bar is used instead).
+ * The lamps of a Car Kit model's roof light bar, as flash overlays: the faces
+ * near the top of the model that sample the palette's bottom-row red / blue
+ * swatches (probed: u 0.25-0.375 red, 0.375-0.5 blue, v > 0.75), copied into
+ * meshes laid a hair over them. `red` flashes on one beat and `blue` on the
+ * other; a model with lamps of one colour only (the fire truck's and the
+ * ambulance's are all blue) flashes its left and right halves in turn —
+ * asking for both colours sent them the game's invented roof bar. null when
+ * the model has none.
  */
-export function sirenLampsOf(root: THREE.Object3D): { red: THREE.Mesh[]; blue: THREE.Mesh[] } | null {
+export function sirenLampsOf(root: THREE.Object3D): SirenLamps | null {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const band = box.max.y - (box.max.y - box.min.y) * 0.2;
-  const red: THREE.Mesh[] = [], blue: THREE.Mesh[] = [];
-  const mkMat = (color: number): THREE.MeshBasicMaterial => new THREE.MeshBasicMaterial({
-    color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
-  });
+  const midX = (box.min.x + box.max.x) / 2;
   const meshes: THREE.Mesh[] = [];
   root.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
   const v = new THREE.Vector3();
+  // every lamp face: its mesh, colour, side and corners (mesh-local)
+  const faces: Array<{ m: THREE.Mesh; kind: 'red' | 'blue'; left: boolean; pts: number[] }> = [];
   for (const m of meshes) {
     const g = m.geometry as THREE.BufferGeometry;
     const pos = g.attributes.position as THREE.BufferAttribute, uv = g.attributes.uv as THREE.BufferAttribute | undefined;
@@ -211,31 +220,66 @@ export function sirenLampsOf(root: THREE.Object3D): { red: THREE.Mesh[]; blue: T
     const idx = g.index;
     const n = idx ? idx.count : pos.count;
     const at = (k: number): number => (idx ? idx.getX(k) : k);
-    const out: Record<'red' | 'blue', number[]> = { red: [], blue: [] };
     for (let t = 0; t + 2 < n; t += 3) {
-      let u = 0, w = 0, y = 0;
+      let u = 0, w = 0, x = 0, y = 0;
       for (let k = 0; k < 3; k++) {
         const i = at(t + k);
         u += uv.getX(i) / 3; w += uv.getY(i) / 3;
-        y += v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).y / 3;
+        v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        x += v.x / 3; y += v.y / 3;
       }
       if (y < band || w < 0.75) continue;
       const kind = u >= 0.25 && u < 0.375 ? 'red' : u >= 0.375 && u < 0.5 ? 'blue' : null;
       if (!kind) continue;
-      for (let k = 0; k < 3; k++) { const i = at(t + k); out[kind].push(pos.getX(i), pos.getY(i), pos.getZ(i)); }
-    }
-    for (const kind of ['red', 'blue'] as const) {
-      if (!out[kind].length) continue;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(out[kind], 3));
-      const lamp = new THREE.Mesh(geo, mkMat(kind === 'red' ? 0xff3b30 : 0x3f7bff));
-      lamp.visible = false;
-      lamp.renderOrder = 1;
-      m.add(lamp);
-      (kind === 'red' ? red : blue).push(lamp);
+      const pts: number[] = [];
+      for (let k = 0; k < 3; k++) { const i = at(t + k); pts.push(pos.getX(i), pos.getY(i), pos.getZ(i)); }
+      faces.push({ m, kind, left: x < midX, pts });
     }
   }
-  return red.length && blue.length ? { red, blue } : null;
+  if (!faces.length) return null;
+  const both = faces.some(f => f.kind === 'red') && faces.some(f => f.kind === 'blue');
+  const out: SirenLamps = { red: [], blue: [] };
+  // group the faces per mesh and beat, one overlay each
+  const groups = new Map<string, { m: THREE.Mesh; beat: 'red' | 'blue'; colour: 'red' | 'blue'; pts: number[] }>();
+  for (const f of faces) {
+    const beat = both ? f.kind : f.left ? 'red' : 'blue';
+    const key = `${f.m.uuid}:${beat}`;
+    let gr = groups.get(key);
+    if (!gr) groups.set(key, gr = { m: f.m, beat, colour: f.kind, pts: [] });
+    gr.pts.push(...f.pts);
+  }
+  for (const gr of groups.values()) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(gr.pts, 3));
+    const lamp = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: LIT[gr.colour], polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
+    }));
+    lamp.userData.lit = LIT[gr.colour];
+    lamp.userData.dim = DIM[gr.colour];
+    lamp.visible = false;
+    lamp.renderOrder = 1;
+    gr.m.add(lamp);
+    out[gr.beat].push(lamp);
+  }
+  return out;
+}
+
+/** a helicopter's own siren lamps: two small domes on the sides of its belly
+ * band (red left, blue right on the police one; both blue on the medical
+ * one), part of the model rather than a bar on its roof */
+export function heliSirenLamps(car: THREE.Object3D, police: boolean): SirenLamps {
+  const out: SirenLamps = { red: [], blue: [] };
+  for (const [side, colour] of [[1, police ? 'red' : 'blue'], [-1, 'blue']] as Array<[number, 'red' | 'blue']>) {
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: DIM[colour], toneMapped: false }));
+    lamp.position.set(side * 0.8, 1.08, 1.25);
+    lamp.scale.set(0.6, 1, 1.3);
+    lamp.userData.lit = LIT[colour];
+    lamp.userData.dim = DIM[colour];
+    lamp.userData.always = true;
+    car.add(lamp);
+    out[side > 0 ? 'red' : 'blue'].push(lamp);
+  }
+  return out;
 }
 
 /** begin the flash-and-resume sequence (bump or stuck). The caller sets

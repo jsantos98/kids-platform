@@ -16,7 +16,7 @@ export const SUNSET = DAWN + DAYTIME + DUSK;
 /** the sun clears the horizon mid-dawn and meets it again mid-dusk */
 export const SUN_RISE = DAWN * 0.5, SUN_SET = DAWN + DAYTIME + DUSK * 0.5;
 /** the shadow light never lies lower than this (rad), however low the sun */
-export const LIGHT_MIN_ELEV = (42 * Math.PI) / 180;
+export const LIGHT_MIN_ELEV = (30 * Math.PI) / 180;
 /** the moon's phases: new, crescent, quarter, gibbous, full, and back */
 export const MOON_PHASES = 8;
 

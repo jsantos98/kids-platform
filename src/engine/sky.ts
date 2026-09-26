@@ -97,6 +97,14 @@ function meteorTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** how far a sky body has risen over the skyline, 0 … 1: it fades in
+ * between 4 and 14 deg up (y = sin of its elevation) */
+const RISE0 = Math.sin((4 * Math.PI) / 180), RISE1 = Math.sin((14 * Math.PI) / 180);
+function rise(y: number): number {
+  const f = Math.min(1, Math.max(0, (y - RISE0) / (RISE1 - RISE0)));
+  return f * f * (3 - 2 * f);
+}
+
 const hash1 = (n: number): number => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
 export class Sky {
@@ -125,7 +133,7 @@ export class Sky {
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(DOME_R, 32, 16), this.domeMat);
     scene.add(this.dome);
     if (showSun) {
-      this.sun = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff4d6, fog: false, toneMapped: false }));
+      this.sun = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff4d6, fog: false, toneMapped: false, transparent: true, depthWrite: false }));
       scene.add(this.sun);
     }
     this.moon = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, fog: false, depthWrite: false, toneMapped: false }));
@@ -172,17 +180,22 @@ export class Sky {
     this.dome.position.set(cx, 0, cz);
     // the sun, while it's up
     if (this.sun) {
-      this.sun.visible = d.sunDir[1] > -0.06;
+      // (rising and setting it fades in over the skyline, 4-14 deg up: low
+      // down, fogged-out buildings cut shapes out of it)
+      const up = rise(d.sunDir[1]);
+      this.sun.visible = up > 0.01;
+      (this.sun.material as THREE.MeshBasicMaterial).opacity = up;
       this.sun.position.set(cx + d.sunDir[0] * SUN_R, d.sunDir[1] * SUN_R, cz + d.sunDir[2] * SUN_R);
       (this.sun.material as THREE.MeshBasicMaterial).color.setHex(d.sunColor);
     }
     // the moon, in tonight's phase (the new moon stays a faint disc)
-    this.moon.visible = d.moonDir[1] > -0.06 && d.night > 0.05;
+    const moonUp = rise(d.moonDir[1]);
+    this.moon.visible = moonUp > 0.01 && d.night > 0.05;
     if (this.moon.visible) {
       const tex = (this.moonTex[d.moonPhase] ??= moonTexture(d.moonPhase));
       const mm = this.moon.material as THREE.SpriteMaterial;
       if (mm.map !== tex) { mm.map = tex; mm.needsUpdate = true; }
-      mm.opacity = Math.min(1, d.night * 1.4);
+      mm.opacity = Math.min(1, d.night * 1.4) * moonUp;
       this.moon.position.set(cx + d.moonDir[0] * MOON_R, d.moonDir[1] * MOON_R, cz + d.moonDir[2] * MOON_R);
     }
     // clouds drift with the wind, wrapped round the centre; lit by the day

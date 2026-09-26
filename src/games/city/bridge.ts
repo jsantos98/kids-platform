@@ -118,14 +118,12 @@ export function buildBridge(bx: number, by: number, ox: number, oz: number): Bui
     if (lamp) bakeTpl(B, lamp, lx, 0.1, lz, rot, 5.5);
   }
 
-  // the picnic island: grass slab with a sand rim
+  // the picnic island: a sand slab with the grass on top, 6 m in from its
+  // rim (their tops at different heights — coplanar, they z-fought)
   const iw = ISLE.x2 - ISLE.x1, id = ISLE.z2 - ISLE.z1;
   const icx = (ISLE.x1 + ISLE.x2) / 2, icz = (ISLE.z1 + ISLE.z2) / 2;
-  B.box(iw, 0.1, id, GRASS, icx, 0.05, icz);
-  B.box(iw, 0.1, 6, BEACH, icx, 0.05, ISLE.z1 + 3);
-  B.box(iw, 0.1, 6, BEACH, icx, 0.05, ISLE.z2 - 3);
-  B.box(6, 0.1, id, BEACH, ISLE.x1 + 3, 0.05, icz);
-  B.box(6, 0.1, id, BEACH, ISLE.x2 - 3, 0.05, icz);
+  B.box(iw, 0.08, id, BEACH, icx, 0.04, icz);
+  B.box(iw - 12, 0.12, id - 12, GRASS, icx, 0.06, icz);
 
   // the lighthouse, on the island's far corner: a white tower with red
   // bands, its gallery, the lamp room and a red cap (G10: its lamp and

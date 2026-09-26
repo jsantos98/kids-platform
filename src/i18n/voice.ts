@@ -6,6 +6,7 @@
 // The texts come from the dictionaries: change one and re-run the script
 // (tools/check-i18n.ts fails on a clip recorded from an older text).
 import { t, getLang, speechVoice, type Key } from './index.js';
+import { RACE_CARS } from '../games/raceCars.js';
 
 /** the garage's play modes (registry.ts), whose names it says */
 export const SPOKEN_MODES = ['truck', 'police', 'ambulance', 'heliMedical', 'heliPolice', 'plane', 'boat', 'train', 'race'] as const;
@@ -17,6 +18,14 @@ export function voiceLines(): Record<string, string> {
     const title = t(`mode.${m}.title` as Key);
     out[`mode-${m}`] = title;
     out[`go-${m}`] = t('garage.letsGo', { title });
+  }
+  // the race cars' carousel: its call, each car, off we go, and back
+  out['pick-car'] = t('cars.blurb');
+  out['back'] = t('cars.back');
+  for (const c of RACE_CARS) {
+    const title = t(`car.${c.id}` as Key);
+    out[`car-${c.id}`] = title;
+    out[`gocar-${c.id}`] = t('garage.letsGo', { title });
   }
   return out;
 }

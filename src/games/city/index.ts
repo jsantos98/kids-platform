@@ -51,6 +51,7 @@ import { riverFor } from '../../worlds/riverRoute.js';
 import { Minimap } from './minimap.js';
 import { loadTotals, saveTotals } from './state.js';
 import { LoadingScreen, nextFrame } from './loading.js';
+import { raceCar } from '../raceCars.js';
 import { t as tr, applyI18n, ordinal, numberLocale, type Key } from '../../i18n/index.js';
 
 applyI18n('city.pageTitle');
@@ -154,7 +155,12 @@ groundFollower.receiveShadow = true;
 scene.add(groundFollower);
 
 // ---- player vehicle ----
-const V = MODE.vehicle;
+// (the race: the car picked in the garage — ?car=, the F1 by default — on the
+// kart's physics; every car races the same, only the model differs)
+const RACE_CAR = raceCar(q.get('car'));
+const V = MODE.spawn === 'race'
+  ? { ...MODE.vehicle, glb: `/${RACE_CAR.glb}`, glbLen: RACE_CAR.len, glbYaw: RACE_CAR.yaw }
+  : MODE.vehicle;
 const airborne = V.kind === 'heli' || V.kind === 'plane';
 // the race starts on race island (0,0); every other mode on island (1,0)
 const START = MODE.spawn === 'race' ? { bx: 0, by: 0 } : { bx: 1, by: 0 };
@@ -474,7 +480,7 @@ function applyCity(c: CityRef): void {
   if (MODE.spawn === 'race') {
     race?.dispose();
     const T = raceTrackFor(c.bx, c.by);
-    race = T ? new Race(scene, T, c.ox, c.oz) : null;
+    race = T ? new Race(scene, T, c.ox, c.oz, RACE_CAR) : null;
     if (race && raceTrackFor(c.bx, c.by) && T && T.inZone(player.state.x - c.ox, player.state.z - c.oz, 40)) {
       Object.assign(player.state, race.reset(), { v: 0 });
     } else race?.reset();

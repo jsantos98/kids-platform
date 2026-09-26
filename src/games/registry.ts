@@ -83,6 +83,6 @@ export const GAMES: GameEntry[] = [
   entry({
     id: 'race', icon: '🏎️', color: '#e8743b',
     controls: { drive: 'race', siren: false },
-    url: mode('race'), model: { glb: 'assets/kenney/toycar/vehicle-racer.glb', len: 4, yaw: Math.PI },
+    url: mode('race'), model: { glb: 'assets/kenney/race.glb', len: 4.4 },
   }),
 ];

@@ -52,6 +52,8 @@
     box-shadow: 0 5px 0 rgba(74, 80, 88, .16);
     transition: transform .38s cubic-bezier(.3, 1.35, .5, 1), opacity .3s, box-shadow .3s;
   }
+  /* (a race car's tile: its picture, drawn from its model) */
+  .tile .pic { width: 92%; height: 92%; object-fit: contain; pointer-events: none; user-select: none; }
   .tile.sel {
     box-shadow: 0 0 0 7px var(--c), 0 0 38px 10px color-mix(in srgb, var(--c) 55%, transparent), 0 8px 0 rgba(74, 80, 88, .2);
     animation: breathe 1.6s ease-in-out infinite;

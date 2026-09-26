@@ -25,6 +25,24 @@ export const PT: Record<Key, string> = {
   'garage.letsGo': '{title}. Vamos lá!',
   'garage.language': 'Língua',
 
+  // os carros de corrida (raceCars.ts), escolhidos depois da corrida na garagem
+  'cars.blurb': 'Escolhe o teu carro de corrida!',
+  'cars.back': 'Voltar',
+  'cars.backBlurb': 'Voltar aos veículos',
+  'car.f1': 'Fórmula 1',
+  'car.future': 'Carro do Futuro',
+  'car.kartPurple': 'Kart Roxo',
+  'car.kartPink': 'Kart Cor-de-Rosa',
+  'car.kartYellow': 'Kart Amarelo',
+  'car.kartGreen': 'Kart Verde',
+  'car.kartBrown': 'Kart Castanho',
+  'car.racer': 'Carro Verde',
+  'car.speedster': 'Carro Veloz',
+  'car.racerLow': 'Carro Baixinho',
+  'car.vintage': 'Carro Antigo',
+  'car.drag': 'Dragster',
+  'car.monster': 'Camião Monstro',
+
   // ---- os modos de jogo ----
   'mode.truck.title': 'Camião dos Bombeiros',
   'mode.truck.blurb': 'Apaga os fogos e salva os gatinhos!',

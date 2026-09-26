@@ -40,7 +40,7 @@ and carries on from a spot just behind.
 | ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
 | 🚤 Boat | Sail round the island through the buoys |
 | 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off |
-| 🏎️ Kart race | Three laps against three AI karts on a race island |
+| 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
 
 | | |
 |---|---|

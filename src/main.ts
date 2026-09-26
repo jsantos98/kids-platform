@@ -3,26 +3,66 @@
 // press the pedal (or any button) to drive off. The chosen vehicle sits on
 // a turntable on a little island; its name is shown big (and spoken, for
 // kids who don't read yet). Keys and the mouse work too.
+// Choosing the race opens a second carousel, the same way: the race car
+// (raceCars.ts), with a "back" tile first — the wheel's way back.
 import * as THREE from 'three';
 import { createStage, mat } from './engine/stage.js';
 import { spawnVehicle } from './engine/assets.js';
 import { makeHelicopter, makePlane, makeTree, makeConifer, makeCloud } from './kit/index.js';
 import { rng } from './engine/rng.js';
 import { GAMES, type GameEntry } from './games/registry.js';
+import { RACE_CARS, DEFAULT_CAR, type RaceCar } from './games/raceCars.js';
 import { keysHtml } from './games/keys.js';
 import { loadTotals } from './games/city/state.js';
-import { applyI18n, getLang, setLang, LANGS } from './i18n/index.js';
+import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/index.js';
 import { speak, preloadVoice } from './i18n/voice.js';
 
 applyI18n('garage.pageTitle');
 preloadVoice();
 
 const PICK_KEY = 'garage.pick';
-let sel = Math.max(0, GAMES.findIndex(g => g.id === (localStorage.getItem(PICK_KEY) ?? '')));
+const CAR_KEY = 'garage.car';
+const store = {
+  get: (k: string): string => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } },
+  set: (k: string, v: string): void => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+
+// ---- what the carousel shows: the play modes, or the race cars ----
+interface Item {
+  /** the list's own id ('back' for the way back) */
+  id: string;
+  readonly title: string;
+  readonly blurb: string;
+  color: string;
+  /** a tile's emoji (the modes; the cars show a picture of themselves) */
+  icon: string;
+  /** the turntable model (none for the way back) */
+  model: GameEntry['model'] | null;
+  /** its spoken name, and the line when it's picked (voice.ts clip ids) */
+  sayId: string;
+  goId: string;
+}
+const RACE = GAMES.find(g => g.id === 'race')!;
+const modeItems: Item[] = GAMES.map(g => ({
+  id: g.id, get title() { return g.title; }, get blurb() { return g.blurb; }, color: g.color, icon: g.icon,
+  model: g.model, sayId: `mode-${g.id}`, goId: `go-${g.id}`,
+}));
+const carItems: Item[] = [
+  { id: 'back', get title() { return tr('cars.back'); }, get blurb() { return tr('cars.backBlurb'); }, color: '#8a93a0',
+    icon: '↩', model: null, sayId: 'back', goId: 'back' },
+  ...RACE_CARS.map((c: RaceCar): Item => ({
+    id: c.id, get title() { return tr(`car.${c.id}` as Key); }, get blurb() { return tr('cars.blurb'); }, color: c.color,
+    icon: '🏎️', model: { glb: c.glb, len: c.len, yaw: c.yaw }, sayId: `car-${c.id}`, goId: `gocar-${c.id}`,
+  })),
+];
+
+let stage: 'modes' | 'cars' = 'modes';
+let list = modeItems;
+let sel = Math.max(0, modeItems.findIndex(g => g.id === store.get(PICK_KEY)));
 
 // ---- the scene: a little island with a turntable, the sea round it ----
-const stage = createStage({ ground: false, fogNear: 60, fogFar: 260, sunPos: [30, 60, 40], shadowSpan: 26 });
-const { scene, camera, renderer } = stage;
+const scn = createStage({ ground: false, fogNear: 60, fogFar: 260, sunPos: [30, 60, 40], shadowSpan: 26 });
+const { scene, camera, renderer } = scn;
 const sea = new THREE.Mesh(new THREE.CircleGeometry(400, 64), mat(0x7cc6e0));
 sea.rotation.x = -Math.PI / 2;
 sea.position.y = -0.6;
@@ -70,7 +110,6 @@ camera.position.set(0, 6.2, 15.5);
 camera.lookAt(0, -0.6, 0);
 
 // ---- the vehicles: loaded once, shown one at a time on the turntable ----
-const models: Array<THREE.Group | null> = GAMES.map(() => null);
 /** scale a model to `len` m long, standing on y = 0 */
 function fit(g: THREE.Object3D, len: number): THREE.Group {
   const box = new THREE.Box3().setFromObject(g);
@@ -82,64 +121,121 @@ function fit(g: THREE.Object3D, len: number): THREE.Group {
   w.add(g);
   return w;
 }
-function makeModel(e: GameEntry): Promise<THREE.Group> {
-  const m = e.model;
+function makeModel(m: NonNullable<Item['model']>): Promise<THREE.Group> {
   if (m.glb) return spawnVehicle(m.glb, { len: m.len, yaw: m.yaw ?? 0 });
   const g = m.make === 'plane' ? makePlane()
     : makeHelicopter(m.make === 'heliPolice' ? { body: 0x5a7fb5, band: 0xfaf7ef } : { body: 0xfaf7ef, band: 0xe25c5c });
   return Promise.resolve(fit(g, m.len));
 }
-GAMES.forEach((e, i) => {
-  makeModel(e).then(g => {
-    g.traverse(o => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    g.visible = false;
-    g.scale.setScalar(0.001);
-    table.add(g);
-    models[i] = g;
-  }).catch(() => {});
-});
-/** each model's pop-in: 0 (gone) .. 1 (shown), and where it's heading */
-const pop = GAMES.map(() => 0);
-const flies = (i: number): boolean => GAMES[i].model.make !== undefined;
+/** the turntable models by `<stage>:<id>`, and each one's pop-in (0 gone .. 1 shown) */
+const models = new Map<string, THREE.Group>();
+const pop = new Map<string, number>();
+const keyOf = (it: Item): string => `${list === carItems ? 'cars' : 'modes'}:${it.id}`;
+function loadModels(items: Item[], stageName: string): void {
+  for (const it of items) {
+    const k = `${stageName}:${it.id}`;
+    if (!it.model || models.has(k) || pop.has(k)) continue;
+    pop.set(k, 0);
+    makeModel(it.model).then(g => {
+      g.traverse(o => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      g.visible = false;
+      g.scale.setScalar(0.001);
+      table.add(g);
+      models.set(k, g);
+      if (stageName === 'cars') thumbnail(it.id, g);
+    }).catch(() => {});
+  }
+}
+loadModels(modeItems, 'modes');
+const flies = (it: Item): boolean => it.model?.make !== undefined;
+
+// ---- the race cars' tiles: a picture of each car, drawn from its model ----
+const thumbs = new Map<string, string>();
+let thumbR: THREE.WebGLRenderer | null = null;
+let thumbS: THREE.Scene | null = null;
+let thumbC: THREE.PerspectiveCamera | null = null;
+function thumbnail(id: string, model: THREE.Group): void {
+  try {
+    if (!thumbR) {
+      thumbR = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+      thumbR.setSize(192, 192, false);
+      thumbR.outputColorSpace = renderer.outputColorSpace;
+      thumbS = new THREE.Scene();
+      thumbS.add(new THREE.HemisphereLight(0xffffff, 0xb8c4cc, 2.2));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+      sun.position.set(4, 8, 6);
+      thumbS.add(sun);
+      thumbC = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    }
+    const g = model.clone(true);
+    g.visible = true;
+    g.scale.setScalar(1);
+    g.position.set(0, 0, 0);
+    g.rotation.y = -0.7;
+    thumbS!.add(g);
+    // frame it: three-quarters from the front, filling the tile
+    const box = new THREE.Box3().setFromObject(g);
+    const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
+    const d = r / Math.sin((thumbC!.fov * Math.PI) / 360) * 0.92;
+    thumbC!.position.set(c.x + d * 0.25, c.y + d * 0.42, c.z + d * 0.87);
+    thumbC!.lookAt(c);
+    thumbR!.render(thumbS!, thumbC!);
+    thumbs.set(id, thumbR!.domElement.toDataURL('image/png'));
+    thumbS!.remove(g);
+    if (stage === 'cars') buildTiles();
+  } catch { /* no picture: the tile keeps its emoji */ }
+}
 
 // ---- the carousel ----
 const carousel = document.getElementById('carousel')!;
-const tiles = GAMES.map((e, i) => {
-  const t = document.createElement('div');
-  t.className = 'tile';
-  t.textContent = e.icon;
-  t.style.setProperty('--c', e.color);
-  t.addEventListener('click', () => { if (i === sel) go(); else choose(i); });
-  carousel.append(t);
-  return t;
-});
-const lastOff = GAMES.map(() => 0);
+let tiles: HTMLElement[] = [];
+let lastOff: number[] = [];
+function buildTiles(): void {
+  tiles = list.map((e, i) => {
+    const t = document.createElement('div');
+    t.className = 'tile';
+    const pic = stage === 'cars' ? thumbs.get(e.id) : undefined;
+    if (pic) {
+      const img = document.createElement('img');
+      img.src = pic;
+      img.alt = '';
+      img.className = 'pic';
+      t.append(img);
+    } else t.textContent = e.icon;
+    t.style.setProperty('--c', e.color);
+    t.addEventListener('click', () => { if (i === sel) go(); else choose(i); });
+    return t;
+  });
+  carousel.replaceChildren(...tiles);
+  lastOff = list.map(() => 0);
+  layout(true);
+}
 const nameT = document.querySelector('#name .t') as HTMLElement;
 const nameB = document.querySelector('#name .b') as HTMLElement;
 const keysEl = document.getElementById('keys')!;
-function layout(): void {
-  const n = GAMES.length, half = Math.floor(n / 2);
-  const gap = Math.min(innerWidth / (n + 0.5), innerHeight * 0.21);
+function layout(jump = false): void {
+  const n = list.length, half = Math.floor(n / 2);
+  const gap = Math.min(innerWidth / (Math.min(n, 11) + 0.5), innerHeight * 0.21);
   tiles.forEach((t, i) => {
     const off = ((i - sel + n + half) % n) - half;
     const a = Math.abs(off);
     // a tile wrapping round from one end to the other jumps, it doesn't fly across
-    t.classList.toggle('jump', Math.abs(off - lastOff[i]) > half);
+    t.classList.toggle('jump', jump || Math.abs(off - lastOff[i]) > half);
     lastOff[i] = off;
     const s = a === 0 ? 1.35 : a === 1 ? 0.95 : Math.max(0.55, 0.95 - (a - 1) * 0.13);
     t.style.transform = `translateX(${off * gap}px) translateY(${a === 0 ? -6 : a * 4}px) scale(${s})`;
-    t.style.opacity = String(a === 0 ? 1 : Math.max(0.35, 1 - a * 0.16));
+    t.style.opacity = String(a === 0 ? 1 : a > 5 ? 0 : Math.max(0.35, 1 - a * 0.16));
     t.style.zIndex = String(10 - a);
     t.classList.toggle('sel', a === 0);
   });
   requestAnimationFrame(() => tiles.forEach(t => t.classList.remove('jump')));
 }
 function showName(): void {
-  const e = GAMES[sel];
-  nameT.textContent = `${e.icon} ${e.title}`;
+  const e = list[sel];
+  nameT.textContent = stage === 'modes' ? `${e.icon} ${e.title}` : e.id === 'back' ? `↩ ${e.title}` : e.title;
   nameB.textContent = e.blurb;
-  // (the keys the chosen vehicle answers to in the game)
-  keysEl.innerHTML = keysHtml(e);
+  // (the keys the chosen vehicle answers to in the game; any race car: the race's)
+  keysEl.innerHTML = keysHtml(stage === 'modes' ? GAMES[sel] : RACE);
   // (restart the pop)
   nameT.style.animation = 'none';
   void nameT.offsetWidth;
@@ -150,16 +246,29 @@ function showName(): void {
 /** say a line in the chosen language: its recorded clip (src/i18n/voice.ts) */
 function say(id: string): Promise<void> { return speak(id); }
 function choose(i: number): void {
-  const n = GAMES.length;
+  const n = list.length;
   sel = ((i % n) + n) % n;
-  try { localStorage.setItem(PICK_KEY, GAMES[sel].id); } catch { /* private mode */ }
+  if (stage === 'modes') store.set(PICK_KEY, list[sel].id);
+  else if (list[sel].id !== 'back') store.set(CAR_KEY, list[sel].id);
   layout();
   showName();
-  say(`mode-${GAMES[sel].id}`);
+  say(list[sel].sayId);
 }
-addEventListener('resize', layout);
-layout();
-showName();
+/** show a carousel: the modes, or the race cars (the car picked last time first) */
+function enter(next: 'modes' | 'cars'): void {
+  stage = next;
+  list = next === 'modes' ? modeItems : carItems;
+  sel = next === 'modes'
+    ? Math.max(0, modeItems.findIndex(g => g.id === 'race'))
+    : Math.max(1, carItems.findIndex(c => c.id === (store.get(CAR_KEY) || DEFAULT_CAR)));
+  if (next === 'cars') loadModels(carItems, 'cars');
+  buildTiles();
+  showName();
+  // (the wheel is re-armed: the press that got here doesn't also choose)
+  ready = false;
+  say(next === 'cars' ? 'pick-car' : list[sel].sayId);
+}
+addEventListener('resize', () => layout(true));
 
 // ---- the language: Português (the default) or English, for every page ----
 const langBox = document.getElementById('lang')!;
@@ -181,7 +290,7 @@ function pickLang(l: 'pt' | 'en'): void {
   preloadVoice();
   drawLang();
   showName();
-  say(`mode-${GAMES[sel].id}`);
+  say(list[sel].sayId);
 }
 drawLang();
 
@@ -195,16 +304,21 @@ drawLang();
 let going = false;
 function go(): void {
   if (going) return;
+  const e = list[sel];
+  // the race: first its car; the way back from the cars: the modes again
+  if (stage === 'modes' && e.id === 'race') { enter('cars'); return; }
+  if (stage === 'cars' && e.id === 'back') { enter('modes'); return; }
   going = true;
-  const said = say(`go-${GAMES[sel].id}`);
+  const said = say(e.goId);
   const wipe = document.getElementById('wipe')!;
-  wipe.textContent = GAMES[sel].icon;
+  wipe.textContent = stage === 'cars' ? '🏁' : e.icon;
   wipe.classList.add('on');
+  const url = stage === 'cars' ? `${RACE.url}&car=${e.id}` : GAMES[sel].url;
   // (off to the game once the wipe is in and the line has been said — 5 s at most;
   // the longest line, Raquel's "Helicóptero de Salvamento. Vamos lá!", is 4.3 s)
   const wiped = new Promise(r => setTimeout(r, 650));
   const most = new Promise(r => setTimeout(r, 5000));
-  void Promise.race([Promise.all([wiped, said]), most]).then(() => { location.href = GAMES[sel].url; });
+  void Promise.race([Promise.all([wiped, said]), most]).then(() => { location.href = url; });
 }
 document.getElementById('go')!.addEventListener('click', go);
 renderer.domElement.addEventListener('click', go);
@@ -212,6 +326,7 @@ renderer.domElement.addEventListener('click', go);
 // ---- keys ----
 addEventListener('keydown', e => {
   if (e.code === 'KeyL') pickLang(getLang() === 'pt' ? 'en' : 'pt');
+  else if ((e.code === 'Escape' || e.code === 'Backspace') && stage === 'cars') enter('modes');
   else if (e.code === 'ArrowLeft' || e.code === 'KeyA') choose(sel - 1);
   else if (e.code === 'ArrowRight' || e.code === 'KeyD') choose(sel + 1);
   else if (['Enter', 'Space', 'ArrowUp', 'KeyW', 'NumpadEnter'].includes(e.code)) { e.preventDefault(); go(); }
@@ -221,7 +336,7 @@ addEventListener('keydown', e => {
 // any button to go. Nothing counts until the wheel has been seen at rest,
 // so a pedal already held down when the page opens doesn't start a game ----
 const wheelIcon = document.getElementById('wheel') as unknown as SVGElement;
-let armed = false, stepT = 0, ready = false, lastSteer = 0;
+let armed = false, stepT = 0, ready = false;
 function pollWheel(dt: number): void {
   const gp = navigator.getGamepads?.()[0];
   if (!gp) { wheelIcon.style.transform = ''; return; }
@@ -238,9 +353,10 @@ function pollWheel(dt: number): void {
     stepT -= dt;
     if (stepT <= 0) { choose(sel + Math.sign(steer)); stepT = 0.42; }
   }
-  lastSteer = steer;
 }
-void lastSteer;
+
+buildTiles();
+showName();
 
 // ---- the frame loop ----
 const clock = new THREE.Clock();
@@ -251,27 +367,30 @@ renderer.setAnimationLoop(() => {
   pollWheel(dt);
   table.rotation.y += dt * 0.45;
   // frame the chosen vehicle by its size (a kart close, the train further back)
+  const cur = list[sel];
   {
-    const len = GAMES[sel].model.len, up = flies(sel) ? 1.6 : 0;
+    const len = cur.model?.len ?? 4, up = flies(cur) ? 1.6 : 0;
     const d = 5.5 + len * 0.95, h = 2.6 + len * 0.3 + up;
     camera.position.x += (0 - camera.position.x) * Math.min(1, dt * 3);
     camera.position.y += (h - camera.position.y) * Math.min(1, dt * 3);
     camera.position.z += (d - camera.position.z) * Math.min(1, dt * 3);
     camera.lookAt(0, -0.2 + up * 0.8, 0);
   }
-  models.forEach((m, i) => {
-    if (!m) return;
-    const want = i === sel ? 1 : 0;
-    pop[i] += (want - pop[i]) * Math.min(1, dt * (want ? 7 : 12));
-    m.visible = pop[i] > 0.01;
+  const want = keyOf(cur);
+  for (const [k, m] of models) {
+    const on = k === want ? 1 : 0;
+    const p = (pop.get(k) ?? 0) + (on - (pop.get(k) ?? 0)) * Math.min(1, dt * (on ? 7 : 12));
+    pop.set(k, p);
+    m.visible = p > 0.01;
     // a little overshoot as it pops in
-    const e = pop[i], s = want ? e + Math.sin(e * Math.PI) * 0.12 : e;
+    const s = on ? p + Math.sin(p * Math.PI) * 0.12 : p;
     m.scale.setScalar(Math.max(0.001, s));
-    m.position.y = 0.5 + (flies(i) ? 2 + Math.sin(t * 1.6) * 0.35 : 0) + (1 - e) * 1.5;
-    if (going && i === sel) m.position.z += dt * 30;
-  });
+    const it = k.startsWith('modes:') ? modeItems.find(x => `modes:${x.id}` === k) : undefined;
+    m.position.y = 0.5 + (it && flies(it) ? 2 + Math.sin(t * 1.6) * 0.35 : 0) + (1 - p) * 1.5;
+    if (going && k === want) m.position.z += dt * 30;
+  }
   // the helicopters' rotors turn, the plane's propeller spins
-  const m = models[sel];
+  const m = models.get(want);
   if (m) {
     m.traverse(o => {
       if (o.userData.mainRotor) (o.userData.mainRotor as THREE.Object3D).rotation.y = t * 22;

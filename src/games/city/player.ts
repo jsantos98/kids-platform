@@ -20,7 +20,8 @@ export interface VehicleConfig {
   /** GLB swapped in when loaded ('' = procedural only) */
   glb: string;
   glbLen: number;
-  /** the model's own turn to face +z (the Toy Car Kit's karts face -z) */
+  /** the model's own turn to face +z (a kit that models its vehicles facing
+   * -z, like the Toy Car Kit, needs π — R15) */
   glbYaw?: number;
   kind: MoveKind;
   /** airborne: ignores collisions, the camera rides at its altitude */
@@ -45,10 +46,6 @@ export interface VehicleConfig {
   /** model scale (procedural aircraft are drawn small) */
   scale?: number;
 }
-
-/** the Toy Car Kit models its vehicles facing -z (front wheels at -z,
- * probed from the GLBs — R15); every vehicle here drives along +z */
-export const TOYCAR_YAW = Math.PI;
 
 const groundCar = (make: () => THREE.Group, glb: string, glbLen: number, over: Partial<VehicleConfig> = {}): VehicleConfig => ({
   make, glb, glbLen, kind: 'ground', fly: false,
@@ -107,11 +104,12 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 9, steerMax: 0, cabF: 3.5, cabY: 3.1,
     front: 4.5, halfW: 1.6, frontR: 1.6,
   },
-  kart: groundCar(() => makeCar({ body: 0xe25c5c }), '/assets/kenney/toycar/vehicle-racer.glb', 4, {
-    glbYaw: TOYCAR_YAW,
+  // the race car: the Car Kit's F1 (race.glb, facing +z like the rest of
+  // the kit), long and low — 4.4 m by 2.1 m, wheels 2.6 m apart
+  kart: groundCar(() => makeCar({ body: 0xe25c5c }), '/assets/kenney/race.glb', 4.4, {
     accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
-    camBack: 10, camUp: 4.6, highBack: 12, highUp: 11,
-    wheelbase: 2.4, steerMax: 0.6, cabF: 1.6, cabY: 1.5, front: 1.4, halfW: 0.9, frontR: 0.9,
+    camBack: 10, camUp: 4.2, highBack: 12, highUp: 11,
+    wheelbase: 2.6, steerMax: 0.6, cabF: 1.2, cabY: 1.2, front: 2.2, halfW: 1.05, frontR: 1.0,
   }),
 };
 

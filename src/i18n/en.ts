@@ -24,6 +24,24 @@ export const EN = {
   'garage.letsGo': "{title}. Let's go!",
   'garage.language': 'Language',
 
+  // the race cars (raceCars.ts), picked after the race in the garage
+  'cars.blurb': 'Pick your race car!',
+  'cars.back': 'Back',
+  'cars.backBlurb': 'Back to the vehicles',
+  'car.f1': 'Formula 1',
+  'car.future': 'Future Racer',
+  'car.kartPurple': 'Purple Kart',
+  'car.kartPink': 'Pink Kart',
+  'car.kartYellow': 'Yellow Kart',
+  'car.kartGreen': 'Green Kart',
+  'car.kartBrown': 'Brown Kart',
+  'car.racer': 'Green Racer',
+  'car.speedster': 'Speedster',
+  'car.racerLow': 'Low Racer',
+  'car.vintage': 'Vintage Racer',
+  'car.drag': 'Dragster',
+  'car.monster': 'Monster Truck',
+
   // ---- the play modes (garage + game) ----
   'mode.truck.title': 'Fire Truck',
   'mode.truck.blurb': 'Put out fires and rescue cats!',

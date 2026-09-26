@@ -6,13 +6,12 @@
 // laps count however the kart gets round.
 import * as THREE from 'three';
 import { spawnVehicle } from '../../engine/assets.js';
-import { TOYCAR_YAW } from './player.js';
 import { TRACK_HALF, type RaceTrack } from '../../worlds/raceIsland.js';
+import { rivalsFor, type RaceCar } from '../raceCars.js';
 
 export const LAPS = 3;
 const COUNTDOWN = 3.5;
 const CHEER = 7;
-const AI_GLBS = ['/assets/kenney/toycar/vehicle-speedster.glb', '/assets/kenney/toycar/vehicle-racer-low.glb', '/assets/kenney/toycar/vehicle-vintage-racer.glb'];
 const AI_LANE = [-3.5, 3.5, 0];
 const AI_SKILL = [1.0, 0.95, 0.9];
 /** the AI karts' top speed: below the kid's kart flat out (15 m/s) */
@@ -55,14 +54,17 @@ export class Race {
   private finals = 0;
   private finalPlace = 0;
 
-  constructor(private scene: THREE.Scene, readonly track: RaceTrack, readonly ox: number, readonly oz: number) {
+  /** `kid`: the car the kid picked in the garage; the rivals are three others
+   * from the line-up (raceCars.ts), one from each family, varied per island */
+  constructor(private scene: THREE.Scene, readonly track: RaceTrack, readonly ox: number, readonly oz: number, kid: RaceCar) {
+    const rivals = rivalsFor(kid, Math.round(ox * 7 + oz * 13));
     for (let i = 0; i < 3; i++) {
       const group = new THREE.Group();
       // a bright box until the kit kart streams in
       const stub = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 3.6), new THREE.MeshLambertMaterial({ color: [0xe25c5c, 0x3f7bff, 0xf2c14e][i] }));
       stub.position.y = 0.6;
       group.add(stub);
-      spawnVehicle(AI_GLBS[i], { len: 4, yaw: TOYCAR_YAW }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
+      spawnVehicle(`/${rivals[i].glb}`, { len: rivals[i].len, yaw: rivals[i].yaw }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
       scene.add(group);
       this.ai.push({ group, s: 0, lat: 0, v: 0, place: 0 });
     }

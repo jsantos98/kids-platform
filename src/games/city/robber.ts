@@ -207,6 +207,18 @@ export class Robber {
           // waits for this one, and waiting for it too, nobody would move)
           if ((dn < IN + 7 && c.v > 0.5) || (dn < 32 && toward > 0.7 && c.v > 1.5)) busy = true;
         }
+        if (Math.abs(dot) <= 0.5) {
+          // crossing its way (on a junction, round a ring): braked for where
+          // it stands across the lane ahead — only ones going its way or
+          // coming at it were, and pushing onto a roundabout it drove into
+          // the side of one crossing in front of it (seed 144795619, island (3,2))
+          const across = Math.sqrt(1 - dot * dot);
+          const extLat = (c.len / 2) * across + Math.abs(dot), extAlong = (c.len / 2) * Math.abs(dot) + across;
+          if (ahead > 0 && ahead < 30 && Math.abs(latOwn) < HALF_W + extLat + 0.5) {
+            target = Math.min(target, Math.sqrt(Math.max(0, 12 * (ahead - extAlong - HALF_L - 1.5))));
+          }
+          continue;
+        }
         if (dot < -0.5) {
           // coming the other way: in the oncoming lane ahead it bars an
           // overtake; in its corridor (out overtaking) it is braked for

@@ -62,6 +62,8 @@ export interface Chaser extends Threat { pushy: boolean }
 interface Car {
   /** seconds stopped on its curve for a getaway car in its way (G7) */
   yieldT?: number;
+  /** seconds held by the last word against a getaway car (G7) */
+  deepT?: number;
   /** its place in the fleet (a fixed order, for ties) */
   id: number;
   edge: number;
@@ -148,6 +150,9 @@ const rightOf = (hx: number, hz: number): { x: number; z: number } => ({ x: -hz,
 export class IslandCars {
   readonly cars: Car[] = [];
   private graph: StreetGraph;
+  /** whether two turns through a junction cross or come close (keyed by
+   * node and both turns; the geometry never changes) */
+  private conflicts = new Map<string, boolean>();
   /** one instanced mesh per model (the stand-in until the model arrives) */
   private meshes: THREE.InstancedMesh[] = [];
 
@@ -267,6 +272,24 @@ export class IslandCars {
     return this.turnPath(c, node, next);
   }
 
+  /** whether a car coming in on `inA` (dir `dA`) and turning into `outA`
+   * would cross or come close (3.5 m, a car's width and a margin) to one
+   * turning from `inB` into `outB` at the junction — each keeps to its own
+   * right-hand lane, so two turns between the same two streets the opposite
+   * ways, or two right turns, never meet */
+  private turnsMeet(node: SNode, inA: number, dA: 1 | -1, outA: number, inB: number, dB: 1 | -1, outB: number): boolean {
+    const key = `${node.id}:${inA}.${dA}>${outA}:${inB}.${dB}>${outB}`;
+    let m = this.conflicts.get(key);
+    if (m === undefined) {
+      const g = this.graph;
+      const a = junctionPath(g, g.edges[inA], dA, node, g.edges[outA]).pts;
+      const b = junctionPath(g, g.edges[inB], dB, node, g.edges[outB]).pts;
+      m = a.some(p => b.some(q => (p.x - q.x) ** 2 + (p.z - q.z) ** 2 < 3.5 * 3.5));
+      this.conflicts.set(key, m);
+    }
+    return m;
+  }
+
   /** the curve through a junction (junctionPath.ts, shared with the getaway
    * cars): a Bezier through an ordinary one, round the ring of a roundabout */
   private turnPath(c: Car, node: SNode, next: SEdge): NonNullable<Car['round']> {
@@ -321,6 +344,8 @@ export class IslandCars {
     const slotOf = new Map<Car, { key: number; i: number }>();
     /** the in-streets of the cars now on each junction's curves */
     const onJunction = new Map<number, number[]>();
+    /** the cars now on each junction's curves */
+    const curveCars = new Map<number, Array<{ edge: number; dir: 1 | -1; out: number; s: number; car: Car }>>();
     const add = (key: number, s: number, car: Car): void => {
       let l = lanes.get(key);
       if (!l) lanes.set(key, l = []);
@@ -333,6 +358,9 @@ export class IslandCars {
         add(laneKey(next.id, nd), c.round.out - (c.round.cum[c.round.cum.length - 1] - c.round.s), c);
         let j = onJunction.get(c.round.node);
         if (!j) onJunction.set(c.round.node, j = []);
+        let cc = curveCars.get(c.round.node);
+        if (!cc) curveCars.set(c.round.node, cc = []);
+        cc.push({ edge: c.edge, dir: c.dir, out: c.round.next, s: c.round.s, car: c });
         j.push(c.edge);
       } else add(laneKey(c.edge, c.dir), c.s, c);
     }
@@ -370,7 +398,23 @@ export class IslandCars {
       return v;
     };
     /** metres to the car ahead (Infinity: a free road) */
-    const gapAhead = (c: Car): number => {
+    const gapAhead = (c: Car): number => Math.min(laneGap(c), turnGap(c));
+    /** the car ahead that came from this car's own lane and has started its
+     * turn — into another street than this one's, so in no lane of this
+     * one's: stopped at the start of its curve, the car behind drove through
+     * it (a getaway car held turning cars, seed 144795619, island (3,2)) */
+    const turnGap = (c: Car): number => {
+      const node = c.round ? c.round.node : this.endNode(c).id;
+      const mine = c.round ? c.round.s : -(g.edges[c.edge].len - (g.nodes[node].plaza ? ROUND_IN : TURN_IN) - c.s);
+      let gap = Infinity;
+      for (const o of curveCars.get(node) ?? []) {
+        if (o.car === c) continue;
+        if (o.edge === c.edge && o.dir === c.dir && o.s > mine) gap = Math.min(gap, o.s - mine - lenAdj(c, o.car));
+
+      }
+      return gap;
+    };
+    const laneGap = (c: Car): number => {
       const sl = slotOf.get(c)!;
       const l = lanes.get(sl.key)!;
       // (measured as between two 4.4 m cars: a longer one ahead or behind
@@ -489,8 +533,13 @@ export class IslandCars {
             if (!(d1 > 0.2 && d1 > d0 + 0.005)) return false;
             const behind = (r.x - c.x) * Math.sin(c.h) + (r.z - c.z) * Math.cos(c.h) < 0;
             const away = Math.hypot(r.x - q.x - this.ox, r.z - q.z - this.oz) > Math.hypot(r.x - c.x, r.z - c.z);
-            return !(r.v < 0.3 && behind && away && d1 < 0.6);
+            // (nor, held 1.5 s against one standing still, a graze past it —
+            // the getaway car won't drive into this one either, and on a
+            // roundabout's ring the two stood for good: seed 144795619,
+            // island (3,2))
+            return !(r.v < 0.3 && d1 < 0.6 && ((behind && away) || (c.deepT ?? 0) > 1.5));
           });
+          c.deepT = deeper ? (c.deepT ?? 0) + dt : 0;
           if (deeper) c.v = 0;
         }
         c.round.s += c.v * dt;
@@ -545,19 +594,24 @@ export class IslandCars {
               // where traffic may stop at the junction ahead: a roundabout's
               // give-way, a junction without lights, a red — or a green that
               // runs out before this car gets to the stop line
+              // (everybody ahead beyond the crossing may queue there, this
+              // car at the back of it)
+              let q = 0;
+              for (let j = sl.i + 1; j < l.length; j++) if (!l[j].car.round && l[j].s > sC) q += l[j].car.len + 2.6;
               let hold = Infinity;
-              if (end.plaza) hold = e.len - ROUND_IN;
-              else if (end.signalized) {
+              if (end.signalized) {
                 const need = (e.len - STOP_LINE - c.s) / Math.max(3, c.speed * 0.9) + 0.5;
                 if (!green || greenLeft(end.x, end.z, elapsed, g.phaseOf(end, e)) < need) hold = e.len - STOP_LINE;
-              } else if (!end.mouth && end.edges.length >= 3) hold = e.len - TURN_IN;
-              if (hold < Infinity) {
-                // (everybody ahead beyond the crossing may queue there, this
-                // car at the back of it)
-                let q = 0;
-                for (let j = sl.i + 1; j < l.length; j++) if (!l[j].car.round && l[j].s > sC) q += l[j].car.len + 2.6;
-                reach = Math.min(reach, hold - q);
+              } else if ((end.plaza || (!end.mouth && end.edges.length >= 3))
+                && (q > 0 || onJunction.has(end.id))) {
+                // (a give-way holds a car only while somebody is on the
+                // junction or queued for it: counted always, a crossing 12 m
+                // short of a junction without lights left no room for any car
+                // past its far boom, and they waited there for good — seed
+                // 144795619, island (1,0))
+                hold = e.len - (end.plaza ? ROUND_IN : TURN_IN);
               }
+              if (hold < Infinity) reach = Math.min(reach, hold - q);
               if (reach < clearAt) vTarget = Math.min(vTarget, Math.max(0, dStop * 1.4));
             }
           }
@@ -569,14 +623,23 @@ export class IslandCars {
         let holdAt = Infinity;
         if (end.plaza) {
           const E = this.lanePoint(e, c.dir, e.len - ROUND_IN);
+          // (a getaway car on the ring too: entering in front of one, a car
+          // T-boned it and the two stood for good — seed 144795619, island
+          // (3,2))
           const busy = this.cars.some(o => o !== c && o.round && o.round.node === end.id
-            && Math.hypot(o.x - this.ox - E.x, o.z - this.oz - E.z) < 11);
+            && Math.hypot(o.x - this.ox - E.x, o.z - this.oz - E.z) < 11)
+            || chasers.some(r => Math.hypot(r.x - this.ox - E.x, r.z - this.oz - E.z) < 11);
           if (busy) holdAt = e.len - ROUND_IN - 0.05;
         } else if (!end.signalized && !end.mouth && end.edges.length >= 3) {
           // (a getaway car moving onto or across the junction counts too —
           // it has right of way; one standing at its edge waits for the
           // traffic, and the traffic doesn't wait for it: nobody deadlocks)
-          const busy = (onJunction.get(end.id) ?? []).some(inEdge => inEdge !== c.edge)
+          // (only a car whose way crosses or comes close to this one's: the
+          // car turning back the way this one came, in the other lane, held
+          // it, and a circle of such waits round a short street with a level
+          // crossing in it stood for good — seed 5, island (2,2))
+          const busy = (curveCars.get(end.id) ?? []).some(o => o.edge !== c.edge
+              && this.turnsMeet(end, c.edge, c.dir, c.next, o.edge, o.dir, o.out))
             || chasers.some(r => r.v > 0.5 && Math.hypot(r.x - end.x - this.ox, r.z - end.z - this.oz) < TURN_IN + 4);
           if (busy) holdAt = e.len - TURN_IN - 0.05;
         }
@@ -594,7 +657,22 @@ export class IslandCars {
           const nd: 1 | -1 = next.a === end.id ? 1 : -1;
           const nl = lanes.get(laneKey(next.id, nd));
           const f = nl && nl.length && nl[0].car !== c ? nl[0] : null;
-          if (f && f.s - f.car.len / 2 - 2.6 < TURN_IN + c.len / 2 + 0.5) {
+          let full = !!f && f.s - f.car.len / 2 - 2.6 < TURN_IN + c.len / 2 + 0.5;
+          // (nor unless it fits short of a level crossing just beyond, should
+          // the queue ahead stop there: the car ahead stopped at the
+          // crossing, this one stood on the curve behind it, the cross
+          // traffic waited for it — and the same at the junction at the
+          // street's other end, all four for good: seed 2024, island (1,0))
+          if (!full && rail) for (const cr of next.crossings) {
+            const stop = (nd > 0 ? cr.s : next.len - cr.s) - CROSSING_BOOM - 1.2;
+            if (stop > 60) continue;
+            let room = stop;
+            for (const q of nl ?? []) if (q.car !== c && q.s < stop + 1) room -= q.car.len + 2.6;
+            // (a crossing so near that no car fits short of it: wait only
+            // while somebody is between the junction and it)
+            if (room < Math.min(stop, TURN_IN + c.len + 0.5)) full = true;
+          }
+          if (full) {
             // (waiting short of this street's crosswalk there, not on its
             // stripes — the walkers waited 100 s for a car holding on them;
             // one already past that point has committed and goes on)

@@ -4,7 +4,7 @@
 // caused it must be fixed before commit.
 import { WORLD_CHUNKS, ISLAND } from '../src/worlds/world.js';
 import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
-import { cityPlanFor, clearCityPlanCache, builtD, polePoints, type CityPlan, type CityBlock } from '../src/worlds/cityPlan.js';
+import { cityPlanFor, clearCityPlanCache, builtD, polePoints, SIGNAL_CLEAR, type CityPlan, type CityBlock } from '../src/worlds/cityPlan.js';
 import { inBlock } from '../src/worlds/blocks.js';
 import { coastFor, type Coast } from '../src/worlds/coast.js';
 import type { RailNet } from '../src/worlds/railRoute.js';
@@ -91,7 +91,7 @@ let worstFill = 1;
 const BLOCK_GIANT = 150000;
 let giantBlocks = 0, biggestBlock = 0;
 let districtFaults = 0;
-let polesInLots = 0;
+let polesInLots = 0, lightsByCrossing = 0;
 let raceFaults = 0;
 let workerFaults = 0;
 let graphFaults = 0;
@@ -521,10 +521,20 @@ for (const [bx, by] of cells) {
       console.log(`  R33 detail: city ${bx},${by} ${b.district} block at (${b.cx.toFixed(0)},${b.cz.toFixed(0)}) only ${(f * 100).toFixed(0)}% built`);
     }
   }
-  // R6: no traffic-light pole stands in a lot
+  // R6: no traffic-light pole stands in a lot, and no junction with lights
+  // has a level crossing within SIGNAL_CLEAR on an arm
   for (const n of plan.nodes) {
     if (!n.signalized) continue;
     for (const p of polePoints(plan.edges, n)) if (occ.claims(p.x, p.z, 0.4, LOT)) polesInLots++;
+    for (const c of plan.crossings) {
+      if (!n.edges.includes(c.edge)) continue;
+      const e = plan.edges[c.edge];
+      const d = e.a === n.id ? c.s : e.len - c.s;
+      if (d < SIGNAL_CLEAR) {
+        lightsByCrossing++;
+        console.log(`  R6 detail: city ${bx},${by} lights at (${n.x.toFixed(0)},${n.z.toFixed(0)}) with a level crossing ${d.toFixed(1)} m out`);
+      }
+    }
   }
   const mean = (a: number[]): number => a.reduce((p, q) => p + q, 0) / (a.length || 1);
   const rings = ['downtown', 'urban', 'residential'].filter(k => ringD[k].length).map(k => mean(ringD[k]));
@@ -692,6 +702,7 @@ if (giantBlocks > 0) fail('R37', `${giantBlocks} blocks over ${BLOCK_GIANT / 100
 if (thinBlocks > 0) fail('R33', `${thinBlocks} built blocks under 55% built over (worst ${(worstFill * 100).toFixed(0)}%)`);
 if (raceFaults > 0) fail('R32', `${raceFaults} race-island faults (circuit missing / open / off the middle / repeated, apron built on, track by a street, rail or river in it, lots, mouths)`);
 if (polesInLots > 0) fail('R6', `${polesInLots} traffic-light poles stand inside a lot`);
+if (lightsByCrossing > 0) fail('R6', `${lightsByCrossing} junctions with lights have a level crossing within ${SIGNAL_CLEAR} m`);
 if (districtFaults > 0) fail('R33', `${districtFaults} district placement faults (rings from the centre, industry by the rail)`);
 if (graphFaults > 0) fail('R1', `${graphFaults} street-graph faults (edges/crossings/connectivity/dead ends disagree with the plan)`);
 if (roadGaps > 0) fail('R35', `${roadGaps} street segments not covered end to end by road pieces`);

@@ -59,6 +59,14 @@ export interface CityBlock extends Block {
  * board either way round, and 8 m more (R16) */
 export const STATION_CLEAR = 56;
 
+/** how far a junction with traffic lights keeps from every level crossing on
+ * its arms (m): its stop line is STOP_LINE (18.5 m) out, so a car stopped at
+ * the red stood on a crossing 18.6 m from the node — and the traffic's
+ * keep-the-crossing-clear rule then let one car a cycle over it, and the
+ * queue backed up through the junction behind (seed 912064659, island
+ * (1,0)); at 40 m two cars wait at the red clear of the far boom (R6) */
+export const SIGNAL_CLEAR = 40;
+
 export interface Lot {
   /** bldg: a kit building (commercial, or works in industry); house: a
    * suburban house; trees: a tree row; parking; garden: lawn, fence, trees;
@@ -567,7 +575,12 @@ function buildPlan(bx: number, by: number): CityPlan {
   for (const n of nodes) {
     // lights where roads cross AND people live around them
     const built = [[-12, -12], [12, -12], [-12, 12], [12, 12]].every(([dx, dz]) => builtD(districtAt(n.x + dx, n.z + dz)));
-    n.signalized = n.edges.length >= 3 && !n.plaza && built;
+    const crossingNear = crossings.some(c => {
+      if (!n.edges.includes(c.edge)) return false;
+      const e = edges[c.edge];
+      return (e.a === n.id ? c.s : e.len - c.s) < SIGNAL_CLEAR;
+    });
+    n.signalized = n.edges.length >= 3 && !n.plaza && built && !crossingNear;
     n.reach = padReach(n.edges.map(id => armHeading(n, id)), n.square, n.plaza);
   }
   const reachAt = (n: PNode, id: number): number => n.reach[n.edges.indexOf(id)] ?? ROAD_HALF;

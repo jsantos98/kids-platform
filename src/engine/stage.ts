@@ -153,6 +153,11 @@ export function makeSceneDressing(scene: THREE.Scene, {
   Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 400 });
   sun.shadow.bias = -0.0002;
   sun.shadow.normalBias = 0.04;
+  // soft, filtered shadows (VSM, blurred): with hard-edged PCF a vehicle
+  // driving over the fixed shadow texels crawled with grain — its own
+  // shadow's cells showing on its body and its outline stepping cell to cell
+  sun.shadow.radius = 4;
+  sun.shadow.blurSamples = 8;
   scene.add(sun);
   scene.add(sun.target);
   sky.update(still, 0, 0, 0);
@@ -217,7 +222,7 @@ export function createStage(opts: StageOptions = {}): Stage {
   renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean
   renderer.toneMappingExposure = 1.06;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();

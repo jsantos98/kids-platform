@@ -26,6 +26,11 @@ import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
 import { CITY_PITCH, citySeed } from '../../worlds/cityGrid.js';
 import { deckAt } from '../../worlds/causeway.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
+import { CROSSING_WARN_DIST as CROSSING_WARN } from './transit.js';
+
+/** how long before a train reaches a level crossing its booms come down (s):
+ * time for a car already past the stop line to drive out (R13) */
+export const CROSSING_LEAD = 10;
 /** may the railway reach into island (bx, by) this frame? The game gates
  * it on the world worker having delivered the island (islandReady), so a
  * train never builds an island mid-frame; left open, everything builds on
@@ -535,9 +540,61 @@ export class Railway {
     return best;
   }
 
-  /** is a level crossing's warning on (train within `warn` m) at time t */
-  warns(bx: number, by: number, c: Crossing, warn: number, t = this.time): boolean {
-    return this.distTo(bx, by, c.line, c.d, t) < warn;
+  /** is a level crossing's warning on at time t (R13) — the one rule the
+   * booms, the cars and the walkers all follow: from when a train within
+   * `warn` m will reach the crossing within `lead` s until its tail is 2 m
+   * past it. A train standing at a platform or a signal short of it doesn't
+   * hold it down, nor one already going away: counting any train within
+   * 60 m either side kept a crossing by a station down 59 s a minute, and a
+   * street between two junctions and that crossing gridlocked (seed
+   * 144795619, island (3,2)). Positions are the timetable's, a pure function
+   * of the clock, so "will it get there" is read `lead` s ahead. */
+  crossingWarns(bx: number, by: number, line: number, d: number, t = this.time, warn = CROSSING_WARN, lead = CROSSING_LEAD): boolean {
+    const kind: LineKind = line === 0 ? 'ns' : 'ew';
+    const seg = segment(bx, by, kind);
+    const sD = seg.dir > 0 ? d : seg.route.total - d;
+    const id: LineId = { kind, idx: kind === 'ns' ? bx : by };
+    const len = this.spec(id).length;
+    const reserved = this.kid && lineKey(this.kid.line) === lineKey(id);
+    const near: number[] = [0];
+    if (sD < len + 80) near.push(-1);
+    if (sD > seg.route.total - 80) near.push(1);
+    if (!reserved) {
+      for (const k of near) {
+        const [ibx, iby] = stepIsland(kind, bx, by, k);
+        if (k !== 0 && !gate(ibx, iby)) continue;
+        const sg = k === 0 ? seg : segment(ibx, iby, kind);
+        const off = k === 0 ? 0 : k < 0 ? -sg.route.total : seg.route.total;
+        const later = trainsOn(sg, t + lead);
+        for (const tr of trainsOn(sg, t)) {
+          const head = tr.s + off, tail = head - len;
+          if (tail - 2 > sD) continue;                 // gone past
+          if (head >= sD) return true;                  // on it
+          if (sD - head >= warn) continue;              // still far off
+          // near: down only if it will be there within `lead` s (a train
+          // off the end of this segment by then has run over the crossing)
+          const f = later.find(o => o.n === tr.n);
+          if (!f || f.s + off >= sD - 3) return true;
+        }
+      }
+    }
+    const kd = this.kid;
+    if (kd && lineKey(kd.line) === lineKey(id)) {
+      const di = kind === 'ns' ? kd.by - by : kd.bx - bx;
+      if (Math.abs(di) <= 1) {
+        const off = di === 0 ? 0 : di < 0 ? -segment(kd.bx, kd.by, kind).route.total : seg.route.total;
+        const head = kd.s + off, tail = head - kd.spec.length;
+        // (the kid drives it: down while it's on the crossing, close to it,
+        // or near and moving toward it)
+        if (tail - 2 <= sD && (head >= sD || sD - head < 20 || (sD - head < warn && kd.v > 0.5))) return true;
+      }
+    }
+    return false;
+  }
+
+  /** is a level crossing's warning on at time t */
+  warns(bx: number, by: number, c: Crossing, t = this.time): boolean {
+    return this.crossingWarns(bx, by, c.line, c.d, t);
   }
 
   /** every train standing at one of island (bx, by)'s platforms right now

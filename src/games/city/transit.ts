@@ -361,7 +361,7 @@ export class Transit {
   /** true while a train is near enough that the barriers close and the
    * lamps warn (the car AI holds at the same distance) */
   blocked(inst: CityInst, c: Crossing, rail: Railway): boolean {
-    return rail.distTo(inst.bx, inst.by, c.line, c.d) < CROSSING_WARN_DIST;
+    return rail.crossingWarns(inst.bx, inst.by, c.line, c.d);
   }
 
   /** at night a lit crossing lamp glows here (G10) */

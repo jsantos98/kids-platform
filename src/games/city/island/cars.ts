@@ -15,7 +15,7 @@ import { citySeed } from '../../../worlds/cityGrid.js';
 import { SCALE } from '../../../worlds/world.js';
 import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../../../worlds/streetGraph.js';
 import { lightState, greenLeft, STOP_LINE } from '../lights.js';
-import { CROSSING_WARN_DIST, CROSSING_BOOM } from '../transit.js';
+import { CROSSING_BOOM } from '../transit.js';
 import type { Threat } from './walkers.js';
 import { junctionPath, lanePoint, alongPath, LANE, ROUND_IN, TURN_IN } from './junctionPath.js';
 import { crosswalksFor } from '../../../worlds/crosswalks.js';
@@ -510,7 +510,7 @@ export class IslandCars {
             // stop with the nose 1.2 m short of the boom line (the old 10.5 m
             // left the nose past the boom, between the barriers)
             const dStop = sC - CROSSING_BOOM - 1.2 - c.len / 2 - c.s;
-            if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, elapsed) < CROSSING_WARN_DIST) {
+            if (rail.crossingWarns(this.bx, this.by, cr.c.line, cr.c.d, elapsed)) {
               // (already past the stop point when the warning starts — or
               // caught inside by a queue — never stay on the crossing: drive
               // on until the tail is clear of the far boom, a red light
@@ -565,6 +565,29 @@ export class IslandCars {
           const busy = (onJunction.get(end.id) ?? []).some(inEdge => inEdge !== c.edge)
             || chasers.some(r => r.v > 0.5 && Math.hypot(r.x - end.x - this.ox, r.z - end.z - this.oz) < TURN_IN + 4);
           if (busy) holdAt = e.len - TURN_IN - 0.05;
+        }
+        // don't block a junction without lights: start across it only when
+        // the whole car fits in the street it turns into, past the curve — two junctions
+        // without lights 33 m apart gridlocked, each one's curves holding
+        // cars that waited for room on the short street between them while
+        // that street's cars waited for the junctions to clear (seed
+        // 144795619, island (3,2))
+        // (at lights a car caught in the middle clears on the next change,
+        // and holding there too made long waits: without lights nothing ever
+        // breaks the circle)
+        if (!end.plaza && !end.mouth && !end.signalized && end.edges.length >= 3) {
+          const next = g.edges[c.next];
+          const nd: 1 | -1 = next.a === end.id ? 1 : -1;
+          const nl = lanes.get(laneKey(next.id, nd));
+          const f = nl && nl.length && nl[0].car !== c ? nl[0] : null;
+          if (f && f.s - f.car.len / 2 - 2.6 < TURN_IN + c.len / 2 + 0.5) {
+            // (waiting short of this street's crosswalk there, not on its
+            // stripes — the walkers waited 100 s for a car holding on them;
+            // one already past that point has committed and goes on)
+            const cw = cws.at(end.id, e.id);
+            const short = cw ? e.len - cw.far - 1.2 - c.len / 2 : e.len - TURN_IN - 0.05;
+            if (c.s <= short + 0.3) holdAt = Math.min(holdAt, short);
+          }
         }
         if (holdAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (holdAt - c.s) * 1.4));
         // a crosswalk with somebody waiting at it or on it: stop with the nose

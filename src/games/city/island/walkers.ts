@@ -222,7 +222,7 @@ export class IslandWalkers {
    * out of the way of (or null), `rail` the trains they wait for at level
    * crossings (null: none), `viewer` decides who is drawn */
   update(dt: number, t: number, rail: Railway | null, threat: Threat | null, viewer: THREE.Vector3 | null, draw: boolean,
-         cars: Array<{ x: number; z: number; v?: number }> | null = null): void {
+         cars: Array<{ x: number; z: number; v?: number; h?: number }> | null = null): void {
     const g = this.graph;
     const used = this.meshes.map(() => 0);
     const cws = crosswalksFor(this.bx, this.by);
@@ -252,7 +252,12 @@ export class IslandWalkers {
             if (dx * dx + dz * dz > r * r) return false;
             const along = Math.abs(dx * cw.lx + dz * cw.lz), lat = Math.abs(dx * -cw.lz + dz * cw.lx);
             const onStripes = along < 1.5 + 2.6 && lat < 7.5;
-            return onStripes || (c.v ?? 1) > 1;
+            // (a moving car counts only heading along the street being
+            // crossed — at lights the traffic streaming straight along the
+            // other street on the same green never meets the stripes, and a
+            // walker waited 90 s for it)
+            const toward = c.h === undefined ? 1 : Math.abs(Math.sin(c.h) * cw.lx + Math.cos(c.h) * cw.lz);
+            return onStripes || ((c.v ?? 1) > 1 && toward > 0.45);
           });
           if (N.signalized) P.go = lightState(N.x, N.z, t) === P.walkPhase && !blocks(12);
           else {
@@ -261,6 +266,11 @@ export class IslandWalkers {
           }
           P.waited += dt;
           waiting = !P.go;
+          // (40 s at the kerb and still no way over — a car stuck on the
+          // stripes behind a queue at a level crossing, a stream of traffic —
+          // they give up and walk on the other way, from the spot they stand
+          // on: nobody waits at a kerb for good)
+          if (!P.go && P.waited > 40) { w.path = null; reverse(); }
         }
         const dx = P.to.x - P.x, dz = P.to.z - P.z, dist = Math.hypot(dx, dz);
         if (P.go) {
@@ -346,7 +356,8 @@ export class IslandWalkers {
           for (const cr of e.crossings) {
             const ahead = (cr.s - w.s) * w.dir;
             if (ahead < -5 || ahead > 10) continue;
-            if (rail.distTo(this.bx, this.by, cr.c.line, cr.c.d, t) >= WALK_WARN) continue;
+            // (the crossing's own warning, a little earlier: walkers are slow)
+            if (!rail.crossingWarns(this.bx, this.by, cr.c.line, cr.c.d, t, WALK_WARN, 14)) continue;
             if (ahead > 5) waiting = true;
             else pace = 3;
           }

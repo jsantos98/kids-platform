@@ -54,6 +54,11 @@ export interface CityBlock extends Block {
   district: District;
 }
 
+/** how far along its line a station keeps from every level crossing (m):
+ * the longest train (a loco and four wagons, ~45 m) standing at its stop
+ * board either way round, and 8 m more (R16) */
+export const STATION_CLEAR = 56;
+
 export interface Lot {
   /** bldg: a kit building (commercial, or works in industry); house: a
    * suburban house; trees: a tree row; parking; garden: lawn, fence, trees;
@@ -798,7 +803,8 @@ function buildPlan(bx: number, by: number): CityPlan {
     });
   }
 
-  // ---- 7. train stations: straight, quiet stretches away from crossings,
+  // ---- 7. train stations: straight, quiet stretches away from crossings
+  // (STATION_CLEAR along the line),
   // the diamond and the river — up to two per line, well apart ----
   const stations: Station[] = [];
   {
@@ -815,7 +821,11 @@ function buildPlan(bx: number, by: number): CityPlan {
         if (!coast.inLand(p.x, p.z, 25)) continue;
         if (river.distTo(p.x, p.z) < 18) continue;
         if (Math.abs(d - rail.diamond.d[li]) < 60) continue;
-        if (crossings.some(c => (c.line === li && Math.abs(c.d - d) < 24) || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
+        // (a train standing at the platform — its head at the stop board, its
+        // body up to 45 m behind, either way round — covers no level
+        // crossing: one stood on a crossing through every dwell and the
+        // streets round it gridlocked, seed 7 island (1,0))
+        if (crossings.some(c => (c.line === li && Math.abs(c.d - d) < STATION_CLEAR) || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
         if (rail.lines.some((o, oi) => oi !== li && o.near(p.x, p.z, 20))) continue;
         if (stations.some(st => Math.hypot(st.x - p.x, st.z - p.z) < 60)) continue;
         // the platform (3.5 m off the track) stays off every street

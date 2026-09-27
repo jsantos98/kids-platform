@@ -8,16 +8,25 @@
 // fleeing from a police car that keeps after them half the time, dashing off
 // now and then — and it fails if a getaway car ever drives through a car
 // (one inside the other, deeper than a graze, for over half a second).
-// Run: npx tsx tools/check-traffic.ts [baseSeed] [--robbers]
+// The timetable trains run too (--no-rail leaves them out), so the cars and
+// walkers meet the level crossings' warnings as they do in the game — run
+// without them, the check never saw a crossing gridlock the streets round
+// it; --island=bx,by picks the island(s) (default 1,0 and 2,2; repeat the
+// flag for more).
+// Run: npx tsx tools/check-traffic.ts [baseSeed] [--robbers] [--no-rail] [--island=bx,by]
 import * as THREE from 'three';
 import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
 import { IslandCars } from '../src/games/city/island/cars.js';
 import { IslandWalkers } from '../src/games/city/island/walkers.js';
 import { Robber } from '../src/games/city/robber.js';
 import { overlapDepth } from '../src/games/city/island/obb.js';
+import { Railway } from '../src/games/city/railway.js';
 
 const base = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 7) | 0;
 const withRobbers = process.argv.includes('--robbers');
+const railway = process.argv.includes('--no-rail') ? null : new Railway(new THREE.Scene());
+const picked = process.argv.filter(a => a.startsWith('--island=')).map(a => a.slice(9).split(',').map(Number) as [number, number]);
+const ISLANDS: Array<readonly [number, number]> = picked.length ? picked : [[1, 0], [2, 2]];
 setCityBase(base);
 const DT = 0.05, STEPS = 3600, STILL = 60;
 /** a getaway car's body touching a car's (m), and for how long one may stay
@@ -26,7 +35,7 @@ const DT = 0.05, STEPS = 3600, STILL = 60;
 const GRAZE = 0.6, THROUGH = 0.5;
 let fails = 0;
 
-for (const [bx, by] of [[1, 0], [2, 2]] as const) {
+for (const [bx, by] of ISLANDS) {
   const t0 = performance.now();
   const ox = bx * CITY_PITCH, oz = by * CITY_PITCH;
   const scene = new THREE.Scene();
@@ -46,7 +55,7 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
   for (let k = 0; k < STEPS; k++) {
     t += DT;
     const chasers = robbers.map(r => r.chaser()!).filter(Boolean);
-    cars.update(DT, t, null, null, false, walkers.walkers, null, chasers);
+    cars.update(DT, t, railway, null, false, walkers.walkers, null, chasers);
     robbers.forEach((r, i) => {
       // (the police 30 m behind it in odd 20 s spells — it flees, the traffic
       // makes way — and far off otherwise; a dash every 25 s)
@@ -76,7 +85,7 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
       if (Math.hypot(r.x - robberPos[i][0], r.z - robberPos[i][1]) > 0.5) { robberPos[i] = [r.x, r.z]; robberMoved[i] = t; }
       robberStill = Math.max(robberStill, t - robberMoved[i]);
     });
-    walkers.update(DT, t, null, null, null, false, cars.cars);
+    walkers.update(DT, t, railway, null, null, false, cars.cars);
     cars.cars.forEach((c, i) => {
       if (Math.hypot(c.x - cPos[i][0], c.z - cPos[i][1]) > 0.5) { cPos[i] = [c.x, c.z]; cMove[i] = t; }
       stillCar = Math.max(stillCar, t - cMove[i]);

@@ -102,6 +102,8 @@ let lineOverlap = 0;
 let diamondClashes = 0;
 let teleports = 0;
 let tailgates = 0;
+/** level crossings a timetable train stands on (R16) */
+let blockedCrossings = 0;
 let lowDecks = 0;
 let narrowArms = 0;
 let shortEdges = 0;
@@ -597,6 +599,16 @@ for (const [bx, by] of cells) {
         if (bad) { tailgates++; console.log(`  R31 detail: city ${bx},${by} ${kind} trains closer than 60 m at t=${t}`); break; }
       }
     }
+    // R16: no train stands on a level crossing — at a platform or a signal
+    // (the slowest train running over one covers it for well under 25 s)
+    for (const c of cityPlanFor(bx, by).crossings) {
+      let on = 0, worst = 0;
+      for (let t = 0; t < HEADWAY * 2; t += 0.5) {
+        on = rw.distTo(bx, by, c.line, c.d, t) === 0 ? on + 0.5 : 0;
+        worst = Math.max(worst, on);
+      }
+      if (worst > 25) { blockedCrossings++; console.log(`  R16 detail: city ${bx},${by} a train stands on the level crossing at (${c.x.toFixed(0)},${c.z.toFixed(0)}) for ${worst} s`); }
+    }
   }
   for (const kind of ['ns', 'ew'] as const) {
     const chain = [-2, -1, 0, 1, 2].map(k => (kind === 'ns' ? [0, k] : [k, 0]) as [number, number]);
@@ -690,6 +702,7 @@ if (diamondFaults > 0) fail('R31', `${diamondFaults} islands whose two lines don
 if (diamondClashes > 0) fail('R31', `${diamondClashes} islands where two timetable trains share the diamond`);
 if (lowDecks > 0) fail('R29', `${lowDecks} boat-lane points run under a causeway deck too low to clear`);
 if (tailgates > 0) fail('R31', `${tailgates} lines where timetable trains tailgate each other`);
+if (blockedCrossings > 0) fail('R16', `${blockedCrossings} level crossings a timetable train stands on`);
 if (teleports > 0) fail('R30', `${teleports} timetable train heads jumped (trains must flow continuously across portals)`);
 if (lineOverlap > 0) fail('R31', `${lineOverlap} islands whose two lines lie on each other away from the diamond`);
 

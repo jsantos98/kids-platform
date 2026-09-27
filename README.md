@@ -54,11 +54,11 @@ and carries on from a spot just behind.
 
 | | |
 |---|---|
-| ![Fire truck](docs/screenshots/fire-truck.jpg) | ![Police chase](docs/screenshots/police.jpg) |
-| ![Rescue helicopter over downtown](docs/screenshots/helicopter.jpg) | ![The train](docs/screenshots/train.jpg) |
-| ![Kart race](docs/screenshots/race.jpg) | ![Hose scene](docs/screenshots/scene-fire.jpg) |
-| ![The city at night](docs/screenshots/night.jpg) | ![Sunset from the plane](docs/screenshots/sunset.jpg) |
-| ![The race at night](docs/screenshots/race-night.jpg) | |
+| ![Fire truck driving to a burning building](docs/screenshots/fire-truck.jpg) | ![Police chase](docs/screenshots/police.jpg) |
+| ![Rescue helicopter over downtown](docs/screenshots/helicopter.jpg) | ![The city at night](docs/screenshots/night.jpg) |
+| ![Kart race](docs/screenshots/race.jpg) | ![The train at a station](docs/screenshots/train.jpg) |
+| ![Sunset from the plane](docs/screenshots/sunset.jpg) | |
+| ![The race at night](docs/screenshots/race-night.jpg) | ![Smoke from two fires over the town at dusk](docs/screenshots/smoke-dusk.jpg) |
 
 Reaching a call opens its **mission scene** — a street built from the same
 kits as the city, with the very house, car or tree the call showed on fire,
@@ -69,7 +69,11 @@ people at the windows) and watch the ladder rise, steer the stretcher round
 cones, puddles and a dog while picking up hearts, hold the helicopter against
 the wind over the person, or chase the robber across a town square.
 
-![Winch scene](docs/screenshots/scene-winch.jpg)
+| | |
+|---|---|
+| ![Fire: the hose](docs/screenshots/scene-fire.jpg) | ![Cat: the ladder truck at night](docs/screenshots/scene-cat-night.jpg) |
+| ![Burning building at dusk](docs/screenshots/scene-rescue-dusk.jpg) | ![The stretcher run](docs/screenshots/scene-run.jpg) |
+| ![The winch at sea](docs/screenshots/scene-winch.jpg) | ![Caught: the foot chase](docs/screenshots/scene-chase.jpg) |
 
 ## How to play
 

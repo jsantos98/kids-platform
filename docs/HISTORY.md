@@ -5,6 +5,29 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-27 — the calls in the city, and every line in Benedita's voice
+
+**The calls show what's wrong.** Driving round the island you can now tell a
+call by looking: a building on the corner burning at its windows and roof, a
+car or a tree on fire, a cat stuck up a tree, someone hurt sitting on the
+pavement. Fires send up a column of smoke you can see over the roofs from
+across town, and they crackle as you drive up.
+
+![The fire truck driving to a burning building](history/2026-09-27-calls/truck-burning-building.jpg)
+
+| | |
+|---|---|
+| ![A cat up a tree on the corner](history/2026-09-27-calls/truck-cat-tree.jpg) | ![Smoke from two fires at dusk](history/2026-09-27-calls/smoke-at-dusk.jpg) |
+
+**Every line in Benedita's voice.** The new lines (a flame flaring up, the cat
+moving, the hearts, the chase, "Segura bem!", the train's brake and missed
+station) were each recorded in twelve takes and picked by ear. Four of them
+were being asked for under the wrong name, so the computer's own (Brazilian)
+voice read out the name instead; that is fixed, and a check now makes sure
+every line the narrator can say has a recording.
+
+---
+
 ## 2026-09-27 — the mission scenes, rebuilt
 
 The mission scenes were the one part of the game still made of grey boxes and

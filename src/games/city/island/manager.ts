@@ -84,6 +84,16 @@ export class IslandManager {
     return out;
   }
 
+  /** every walker of the awake islands within r of (x, z) (world) */
+  walkersNear(x: number, z: number, r: number): Array<{ x: number; z: number }> {
+    const out: Array<{ x: number; z: number }> = [];
+    for (const s of this.sims.values()) {
+      if (!s.active) continue;
+      for (const w of s.walkers.walkers) if (Math.abs(w.x - x) < r && Math.abs(w.z - z) < r) out.push({ x: w.x, z: w.z });
+    }
+    return out;
+  }
+
   /** a push that keeps a ground vehicle (world x, z, radius r) out of every
    * awake island's cars, or null — nobody drives through anybody (G8) */
   bump(x: number, z: number, r: number): { dx: number; dz: number } | null {

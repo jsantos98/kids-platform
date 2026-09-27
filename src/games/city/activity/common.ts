@@ -21,6 +21,9 @@ export interface ActivityState {
   /** big prompt text */
   prompt: string;
   done: boolean;
+  /** over without a win (only the chase: the robber got away, and the chase
+   * goes on in the world) */
+  lost?: boolean;
 }
 
 /** a moment in a scene that the game gives a sound (and maybe a word) */
@@ -40,7 +43,8 @@ export type SceneCue =
   | 'doors'      // the ambulance doors open
   | 'caught'     // the robber is caught
   | 'cuffs'      // handcuffs click
-  | 'flutter';   // pigeons fly up
+  | 'flutter'    // pigeons fly up
+  | 'escaped';   // the robber got away
 
 /** a sound a scene keeps going while it wants it */
 export type SceneLoop = 'pump' | 'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle';

@@ -445,14 +445,22 @@ export class IslandCars {
         // (a getaway car where this curve goes — it bends, and a look along
         // the car's heading missed one it swung into): stop short
         // (near its way it waits, and after 2.5 s goes on — the getaway car
-        // may be waiting for it in turn; right in its way it never goes on)
+        // may be waiting for it in turn; right in its way it goes on after
+        // 3 s only if the getaway car is standing still: it was, held at the
+        // junction's edge, and the two stood for good — the last word below
+        // still never lets it into the getaway car)
         let yielded = false;
         if (chasers.length) {
           const L = c.round.cum[c.round.cum.length - 1];
           for (const ds of [2, 4.5, 7]) {
             const q = alongPath(c.round, Math.min(L, c.round.s + ds));
-            const d = Math.min(...chasers.map(r => Math.hypot(r.x - q.x - this.ox, r.z - q.z - this.oz)));
-            if (d < 2.4 || (d < 3 && (c.yieldT ?? 0) < 2.5)) { vT = Math.min(vT, Math.sqrt(Math.max(0, 10 * (ds - 2.2)))); yielded = true; break; }
+            let d = Infinity, still = false;
+            for (const r of chasers) {
+              const dr = Math.hypot(r.x - q.x - this.ox, r.z - q.z - this.oz);
+              if (dr < d) { d = dr; still = r.v < 0.3; }
+            }
+            const y = c.yieldT ?? 0;
+            if ((d < 2.4 && (!still || y < 3)) || (d < 3 && y < 2.5)) { vT = Math.min(vT, Math.sqrt(Math.max(0, 10 * (ds - 2.2)))); yielded = true; break; }
           }
         }
         c.yieldT = yielded ? (c.yieldT ?? 0) + dt : 0;
@@ -473,9 +481,15 @@ export class IslandCars {
         if (chasers.length && c.v > 0) {
           const L = c.round.cum[c.round.cum.length - 1];
           const q = alongPath(c.round, Math.min(L, c.round.s + c.v * dt));
+          // (except driving on away from one standing behind it, its tail only
+          // grazing it: the getaway car may not follow into it either, and the
+          // two stood for good — seed 4242, island (2,2))
           const deeper = chasers.some(r => {
             const d0 = boxDepth(c.x, c.z, c.h, c.len / 2, r), d1 = boxDepth(q.x + this.ox, q.z + this.oz, q.h, c.len / 2, r);
-            return d1 > 0.2 && d1 > d0 + 0.005;
+            if (!(d1 > 0.2 && d1 > d0 + 0.005)) return false;
+            const behind = (r.x - c.x) * Math.sin(c.h) + (r.z - c.z) * Math.cos(c.h) < 0;
+            const away = Math.hypot(r.x - q.x - this.ox, r.z - q.z - this.oz) > Math.hypot(r.x - c.x, r.z - c.z);
+            return !(r.v < 0.3 && behind && away && d1 < 0.6);
           });
           if (deeper) c.v = 0;
         }

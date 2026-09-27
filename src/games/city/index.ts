@@ -809,6 +809,7 @@ function sceneCue(c: SceneCue): void {
     case 'caught': break; // (the win's cheer says it)
     case 'cuffs': audio.sceneShot('cuffs'); break;
     case 'flutter': audio.sceneShot('pigeons', 0.7); break;
+    case 'escaped': audio.boing(); narrator.say('dashed'); break;
   }
 }
 
@@ -1072,7 +1073,7 @@ const tick = (): void => {
   // (each keeps its own progress; a caught one is replaced 3 s after its scene)
   robbers.forEach((rb, k) => {
     if (rb.active) {
-      rb.update(dt, elapsed, st.x, st.z, director.busy, islands.carsNear(rb.x, rb.z, 40));
+      rb.update(dt, elapsed, st.x, st.z, director.busy, islands.carsNear(rb.x, rb.z, 40), islands.walkersNear(rb.x, rb.z, 20), railway);
       const lit = V.kind === 'heli'
         ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * SPOT_AHEAD), rb.z - (st.z + Math.cos(st.heading) * SPOT_AHEAD)) < SPOT_R + SPOT_GRACE
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
@@ -1090,9 +1091,11 @@ const tick = (): void => {
         mode = 'activity';
         const seed = robberCount + k;
         narrator.say('chaseRun');
-        director.start(() => new ChaseActivity(seed, V.kind === 'heli'), () => {
-          earnStar(tr('chase.caught'), player.car.position.clone());
+        director.start(() => new ChaseActivity(seed, V.kind === 'heli'), won => {
           mode = 'drive';
+          // (got away in the scene: the chase goes on, it dashing off)
+          if (!won) { rb.escape(); return; }
+          earnStar(tr('chase.caught'), player.car.position.clone());
           robberWait[k] = 3;
         }, () => narrator.say('caught'));
       }

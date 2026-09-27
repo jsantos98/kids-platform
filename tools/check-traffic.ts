@@ -63,7 +63,7 @@ for (const [bx, by] of ISLANDS) {
       const px = chase ? r.x - Math.sin(h) * 30 : ox + 2000, pz = chase ? r.z - Math.cos(h) * 30 : oz + 2000;
       if (Math.floor((t - DT) / 25) !== Math.floor(t / 25)) r.startle();
       const near = cars.cars.filter(c => Math.abs(c.x - r.x) < 40 && Math.abs(c.z - r.z) < 40).map(c => ({ id: c.id, x: c.x, z: c.z, h: c.h, len: c.len, dodge: c.dodge, v: c.v, turning: !!c.round }));
-      r.update(DT, t, px, pz, false, near);
+      r.update(DT, t, px, pz, false, near, walkers.walkers.filter(w => Math.abs(w.x - r.x) < 20 && Math.abs(w.z - r.z) < 20), railway);
       // a getaway car inside a car's footprint (turned boxes, 0.2 m grace)
       const fx = Math.sin(h), fz = Math.cos(h);
       robberFrames++;

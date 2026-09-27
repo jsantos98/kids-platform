@@ -170,6 +170,8 @@ export const PT: Record<Key, string> = {
   'scene.runIn': 'PARA DENTRO DA AMBULÂNCIA!',
   'scene.chaseRun': 'LEVA O POLÍCIA ATÉ AO LADRÃO!',
   'scene.chaseLight': 'MANTÉM A LUZ NO LADRÃO!',
+  'scene.escaped': '💨 FUGIU! VAI ATRÁS DELE!',
+  'scene.timeLeft': '⏱ {n}',
 
   // ---- os dioramas ----
   'diorama.firetruck': 'Camião dos Bombeiros — Salvamento na Cidade',

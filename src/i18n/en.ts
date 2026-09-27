@@ -169,6 +169,8 @@ export const EN = {
   'scene.runIn': 'INTO THE AMBULANCE!',
   'scene.chaseRun': 'STEER THE OFFICER TO THE ROBBER!',
   'scene.chaseLight': 'KEEP THE LIGHT ON THE ROBBER!',
+  'scene.escaped': '💨 GOT AWAY! AFTER HIM!',
+  'scene.timeLeft': '⏱ {n}',
 
   // ---- the concept dioramas ----
   'diorama.firetruck': 'Fire Truck — City Rescue',

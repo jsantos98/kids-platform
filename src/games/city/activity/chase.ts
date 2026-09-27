@@ -7,7 +7,10 @@
 // steers the searchlight's spot instead: officers on the ground run to
 // wherever it shines, and the robber is caught once kept in it for 3 s in
 // all (it never drains). Always over in a few seconds more than it takes a
-// child to line up: the robber only ever slows.
+// child to line up: the robber only ever slows. Not caught in ESCAPE_T s
+// (the wheel held away from them) the robber gets away off the square — the
+// last 10 s counted down on the prompt — and the chase goes on in the world
+// (`lost`): a scene is never a place to get stuck in.
 import * as THREE from 'three';
 import { rng, type Rng } from '../../../engine/rng.js';
 import { t as tr } from '../../../i18n/index.js';
@@ -26,6 +29,10 @@ const FOUNTAIN = { x: 0, z: FRONT_Z - 12, r: 3.4 };
 const RANGE = 12;
 const LIGHT_R = 2.4;
 const TREES = ['tree-default', 'tree-oak', 'tree-fat'];
+/** seconds to catch the robber before they get away */
+export const ESCAPE_T = 25;
+/** seconds of the robber running off before the scene ends */
+const ESCAPE_RUN = 1.8;
 
 interface Pigeon { obj: THREE.Group; home: THREE.Vector3; fly: number; vx: number; vz: number }
 
@@ -43,6 +50,8 @@ export class ChaseActivity implements Activity {
   private goal = new THREE.Vector3();
   private t = 0;
   private caught = false;
+  /** seconds since the robber got away (-1: they haven't) */
+  private gone = -1;
   private progress = 0;
   private spot = new THREE.Vector3(0, 0.15, FRONT_Z - 6);
   private heli: THREE.Group | null = null;
@@ -179,7 +188,23 @@ export class ChaseActivity implements Activity {
     this.set.night = inp.night ?? 0;
     this.t += dt;
     const rp = this.robber.root.position;
-    if (!this.caught) {
+    if (!this.caught && this.gone < 0 && this.t >= ESCAPE_T) {
+      // away they go: off the square on the far side from whoever is after them
+      this.gone = 0;
+      const chaser = this.fromHeli ? this.spot.x : this.officers[0]?.root.position.x ?? 0;
+      this.goal.set(chaser > rp.x ? -SQ_X - 14 : SQ_X + 14, 0.12, SQ_Z1 - 4);
+      this.cues.push('escaped');
+    }
+    if (this.gone >= 0) {
+      this.gone += dt;
+      const d = this.goal.clone().sub(rp);
+      d.y = 0;
+      if (d.length() > 0.3) {
+        this.robber.root.rotation.y = Math.atan2(d.x, d.z);
+        rp.addScaledVector(d.normalize(), 6 * dt);
+      }
+      this.robber.play('sprint');
+    } else if (!this.caught) {
       // the robber runs for the goal, round the fountain, picking a new one on arrival
       const d = this.goal.clone().sub(rp);
       d.y = 0;
@@ -201,7 +226,9 @@ export class ChaseActivity implements Activity {
       // the officer: the wheel steers across, the chase up the square is theirs
       const o = this.officers[0], op = o.root.position;
       // (the officer sets off a moment after the robber: "Hey! Stop!")
-      if (!this.caught && this.t > 0.8) {
+      if (this.gone >= 0) {
+        if (o.clip !== 'idle') o.play('idle');
+      } else if (!this.caught && this.t > 0.8) {
         const tx = steer * RANGE;
         const nx = op.x + Math.max(-5.5 * dt, Math.min(5.5 * dt, tx - op.x));
         const lined = Math.abs(op.x - rp.x) < 1.2;
@@ -229,7 +256,7 @@ export class ChaseActivity implements Activity {
       this.beam.rotateX(-Math.PI / 2);
       this.disc.position.set(to.x, 0.2, to.z);
       const lit = Math.hypot(rp.x - to.x, rp.z - to.z) < LIGHT_R + 0.6;
-      if (!this.caught && lit) this.progress = Math.min(1, this.progress + dt / 3);
+      if (!this.caught && this.gone < 0 && lit) this.progress = Math.min(1, this.progress + dt / 3);
       (this.disc.material as THREE.MeshBasicMaterial).opacity = lit ? 0.75 : 0.5;
       // the officers run to wherever it shines (at the robber once caught)
       this.officers.forEach((o, k) => {
@@ -243,7 +270,7 @@ export class ChaseActivity implements Activity {
           if (o.clip !== 'sprint' && !this.caught) o.play('sprint');
         } else if (!this.caught && o.clip !== 'idle') o.play('idle');
       });
-      if (!this.caught && this.progress >= 1) this.catch();
+      if (!this.caught && this.gone < 0 && this.progress >= 1) this.catch();
     }
     // pigeons: up they go when someone runs by, then settle back down
     let flush = false;
@@ -271,15 +298,19 @@ export class ChaseActivity implements Activity {
     const on = Math.floor(elapsed * 6) % 2 === 0;
     (this.lamps[0].material as THREE.MeshBasicMaterial).color.setHex(on ? 0xff3b30 : 0x3a1010);
     (this.lamps[1].material as THREE.MeshBasicMaterial).color.setHex(on ? 0x10183a : 0x3f7bff);
-    this.icon.visible = !this.caught;
+    this.icon.visible = !this.caught && this.gone < 0;
     this.icon.position.copy(rp).add(new THREE.Vector3(0, 2.8 + Math.sin(elapsed * 4) * 0.15, 0));
     this.loops.delete('steps');
     if (!this.caught) this.loops.add('steps');
     this.set.update(dt);
+    const left = Math.ceil(ESCAPE_T - this.t);
+    const ask = this.fromHeli ? tr('scene.chaseLight') : tr('scene.chaseRun');
     return {
       progress: this.caught ? 1 : this.progress,
-      prompt: this.caught ? tr('scene.caught') : this.fromHeli ? tr('scene.chaseLight') : tr('scene.chaseRun'),
+      prompt: this.caught ? tr('scene.caught') : this.gone >= 0 ? tr('scene.escaped')
+        : left <= 10 ? `${ask} ${tr('scene.timeLeft', { n: left })}` : ask,
       done: this.caught,
+      lost: this.gone >= ESCAPE_RUN,
     };
   }
 

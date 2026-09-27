@@ -12,6 +12,9 @@
 // away from them), then tires for DASH_REST s before it can dash again — a
 // bump is part of the chase, not its end. The police helicopter's
 // searchlight startles it the same way once it has been lit SPOT_T s.
+// Hunted it breaks the traffic rules — runs the reds, overtakes on the wrong
+// side of the road — but never the trains' or the people's: it stops for a
+// level crossing that warns and for anybody on the road.
 import * as THREE from 'three';
 import { nightLights } from './nightLights.js';
 import { rng, type Rng } from '../../engine/rng.js';
@@ -23,6 +26,8 @@ import { makeIconSprite, GOAL_ICON } from './guide3d.js';
 import type { Chaser } from './island/cars.js';
 import type { TrafficCar } from './island/manager.js';
 import { overlapDepth } from './island/obb.js';
+import { CROSSING_BOOM } from './transit.js';
+import type { Railway } from './railway.js';
 
 export const CATCH_R = 9;
 export const CATCH_T = 4;
@@ -66,6 +71,12 @@ export class Robber {
   private off = 0;
   /** the heading of the lane it drives (its body turns after it, smoothed) */
   private pathH = 0;
+  /** seconds held at a junction for the traffic on it */
+  private waitT = 0;
+  /** hunted, out in the oncoming lane overtaking a car */
+  private overtaking = false;
+  private bx = 0;
+  private by = 0;
   private marker: THREE.Sprite;
 
   constructor(private scene: THREE.Scene) {
@@ -91,7 +102,10 @@ export class Robber {
   spawn(bx: number, by: number, ox: number, oz: number, px: number, pz: number, seed: number,
         avoid: Array<{ x: number; z: number }> = [], traffic: ReadonlyArray<{ x: number; z: number }> = []): void {
     this.graph = graphFor(bx, by);
+    this.bx = bx; this.by = by;
     this.ox = ox; this.oz = oz;
+    this.overtaking = false;
+    this.off = 0;
     this.r = rng(seed);
     const g = this.graph;
     const ok = g.edges.filter(e => {
@@ -138,7 +152,8 @@ export class Robber {
 
   /** drive on; (px, pz) = the police (world); `traffic` = the island's cars
    * near it */
-  update(dt: number, elapsed: number, px: number, pz: number, frozen = false, traffic: readonly TrafficCar[] = []): void {
+  update(dt: number, elapsed: number, px: number, pz: number, frozen = false, traffic: readonly TrafficCar[] = [],
+         walkers: ReadonlyArray<{ x: number; z: number }> = [], rail: Railway | null = null): void {
     if (!this.active || !this.graph || !this.edge) return;
     const d = Math.hypot(this.x - px, this.z - pz);
     if (this.dashT > 0) {
@@ -152,22 +167,35 @@ export class Robber {
     // followed, braking early enough to stop 2.5 m behind it (v² = 2·a·d); a
     // car going its way that pulls over for it (fleeing, the traffic makes
     // way) is passed, the getaway car swinging out toward the centre line
-    // until it is by; and at a junction it waits its turn, like the traffic,
-    // while a car from another street is on it
-    let pass = false;
+    // until it is by. It runs red lights and, HUNTED (the police near, or
+    // dashing), doesn't queue: it overtakes a slow car on the wrong side of
+    // the road while the oncoming lane is clear. It still waits at a junction
+    // while a car from another street is moving across it (taking junctions
+    // whoever was on them, it and the traffic stood waiting for each other),
+    // stops for a level crossing that warns and for anybody on the road.
+    let pass = false, hold = false;
     const g0 = this.graph;
+    const hunted = this.flee;
+    // (along its lane, not its body: coming out of a junction the body
+    // still points round the corner and the car ahead fell outside)
+    const h = this.pathH, fx = Math.sin(h), fz = Math.cos(h);
     {
-      // (along its lane, not its body: coming out of a junction the body
-      // still points round the corner and the car ahead fell outside)
-      const h = this.pathH, fx = Math.sin(h), fz = Math.cos(h);
       const e = this.edge, node = g0.nodes[this.dir > 0 ? e.b : e.a];
       const IN = node.plaza ? ROUND_IN : TURN_IN;
       const toCurve = this.curve ? Infinity : (this.dir > 0 ? e.len - this.s : this.s) - IN;
       const nx = node.x + this.ox, nz = node.z + this.oz;
       let busy = false;
+      /** the nearest car ahead in its own lane; a car coming the other way in
+       * the oncoming lane ahead; one in its own lane alongside */
+      let blocker: TrafficCar | null = null, blockAhead = Infinity, oncoming = false, alongside = false;
       for (const c of traffic) {
         const dx = c.x - this.x, dz = c.z - this.z;
-        const same = Math.sin(c.h) * fx + Math.cos(c.h) * fz > 0.5;
+        const dot = Math.sin(c.h) * fx + Math.cos(c.h) * fz;
+        const same = dot > 0.5;
+        const ahead = dx * fx + dz * fz, lat = dx * fz - dz * fx;
+        // (lat is + to its left, toward the centre line: its own lane's centre
+        // is at −off, the oncoming lane's at 2·LANE − off)
+        const latOwn = lat + this.off, latOnc = lat + this.off - 2 * LANE;
         // (looking as far ahead as it needs to stop — a dash needs ~19 m —
         // for a car from another street on the junction, or heading into it
         // fast enough to be there by the time it is)
@@ -179,29 +207,74 @@ export class Robber {
           // waits for this one, and waiting for it too, nobody would move)
           if ((dn < IN + 7 && c.v > 0.5) || (dn < 32 && toward > 0.7 && c.v > 1.5)) busy = true;
         }
+        if (dot < -0.5) {
+          // coming the other way: in the oncoming lane ahead it bars an
+          // overtake; in its corridor (out overtaking) it is braked for
+          if (Math.abs(latOnc) < 2.6 && ahead > -8 && ahead < 70) oncoming = true;
+          if (ahead > 0 && Math.abs(lat) < HALF_W + 1.3) target = Math.min(target, Math.sqrt(Math.max(0, 12 * (ahead - c.len / 2 - HALF_L - 4))));
+          continue;
+        }
         if (!same) continue;
-        const ahead = dx * fx + dz * fz, lat = dx * fz - dz * fx;
+        if (Math.abs(latOwn) < 2.4) {
+          if (ahead > 0 && ahead < 45 && ahead < blockAhead) { blocker = c; blockAhead = ahead; }
+          if (ahead > -(c.len / 2 + HALF_L + 2) && ahead < c.len / 2 + HALF_L + 4) alongside = true;
+        }
         if (ahead < -8 || ahead > 40 || Math.abs(lat) > 4) continue;
         // (a pass only where there's room to finish it before the junction:
         // swinging back in for the curve beside the car, the two met; and
         // once beside one it stays out until it is by)
         if (c.dodge > 1 && (toCurve > 25 || this.off > 0.2)) pass = true;
-        if (this.off > 0.2 && ahead > -(c.len / 2 + HALF_L + 1) && ahead < c.len / 2 + HALF_L) pass = true;
+        // (on into a junction too: easing back in on the curve, it turned
+        // into the car it had just come by)
+        if (this.off > 0.2 && ahead > -(c.len / 2 + HALF_L + 1) && ahead < c.len / 2 + HALF_L) { pass = true; hold = true; }
         if (ahead > 0 && Math.abs(lat) < HALF_W + 1.3) target = Math.min(target, Math.sqrt(Math.max(0, 12 * (ahead - c.len / 2 - HALF_L - 2.5))));
       }
       // (held 5 m short of its curve: a car's turn swinging wide clipped it
       // closer in)
-      if (busy) target = Math.min(target, Math.sqrt(Math.max(0, 12 * (toCurve - 5))));
+      // (4 s at most: a stream across it starved it for good, and a car
+      // turning beside it waited for it in turn — then it edges in; the
+      // traffic gives way to it and the last word still keeps it out of cars)
+      this.waitT = busy && this.v < 0.5 ? this.waitT + dt : busy ? this.waitT : 0;
+      if (busy && this.waitT < 4) target = Math.min(target, Math.sqrt(Math.max(0, 12 * (toCurve - 5))));
+      // hunted, a slow car ahead that isn't pulling over: out into the
+      // oncoming lane while it is clear and there's room before the junction,
+      // back in once past it (or for the junction, or a car coming)
+      if (hunted && !this.curve) {
+        const slow = !!blocker && blockAhead < 26 && blocker.dodge < 1 && blocker.v < target - 1;
+        if (!this.overtaking && slow && !oncoming && toCurve > 45) this.overtaking = true;
+        else if (this.overtaking && (!alongside || toCurve < 14 || (oncoming && this.off < 3))) this.overtaking = false;
+      } else if (!this.curve) this.overtaking = false;
     }
-    const offT = pass && !this.curve ? PASS_OFF : 0;
+    // a level crossing that warns (R13): stop with the nose 1.2 m short of the
+    // boom line, like the traffic; one already past it drives on off it
+    if (rail && !this.curve) {
+      const e = this.edge;
+      const sMe = this.dir > 0 ? this.s : e.len - this.s;
+      for (const cr of e.crossings) {
+        const sC = this.dir > 0 ? cr.s : e.len - cr.s;
+        if (sC + CROSSING_BOOM + HALF_L + 0.5 <= sMe) continue;
+        const dStop = sC - CROSSING_BOOM - 1.2 - HALF_L - sMe;
+        if (dStop > -2.5 && dStop < 40 && rail.crossingWarns(this.bx, this.by, cr.c.line, cr.c.d, elapsed)) {
+          target = Math.min(target, Math.sqrt(Math.max(0, 12 * dStop)));
+        }
+      }
+    }
+    // anybody on the road ahead — at a crosswalk, crossing: it brakes for them
+    for (const w of walkers) {
+      const dx = w.x - this.x, dz = w.z - this.z;
+      const a = dx * fx + dz * fz, l = dx * fz - dz * fx;
+      if (a > 0 && a < 16 && Math.abs(l) < 2.3) target = Math.min(target, Math.sqrt(Math.max(0, 12 * (a - HALF_L - 1.8))));
+    }
+    const offT = this.overtaking ? 2 * LANE : (pass && !this.curve) || hold ? PASS_OFF : 0;
     // (sideways only while it rolls forward — easing back in at a standstill
     // it slid into the truck it stood beside)
-    const lat = Math.min(1.5, 0.35 * this.v) * dt;
+    const lat = Math.min(this.overtaking || this.off > PASS_OFF + 0.2 ? 3.5 : 1.5, 0.45 * this.v) * dt;
     this.off += Math.max(-lat, Math.min(lat, offT - this.off));
     this.v += Math.max(-8 * dt, Math.min((dash ? 9 : 3) * dt, target - this.v));
     // (where it was: a step that would put it inside a car is taken back)
     const before = { edge: this.edge, dir: this.dir, s: this.s, curve: this.curve ? { ...this.curve } : null };
-    const touching = new Set(traffic.filter(c => this.depthIn(c) > 0.3));
+    const x0 = this.x, z0 = this.z;
+    const was = new Map(traffic.map(c => [c, this.depthIn(c)] as const));
     // along the street to the junction's curve, round it (junctionPath.ts —
     // the curve the traffic takes), on along the next street
     let left = this.v * dt;
@@ -228,10 +301,16 @@ export class Robber {
       this.curve = { ...junctionPath(g, e, this.dir, node, next), s: 0, next, node: node.id };
     }
     this.place(elapsed, dt);
-    // the last word (G7): never into a car it wasn't already touching — the
-    // step is taken back and it stands this frame (one it touches it may
-    // drive on out of, or they'd stand locked together)
-    if (traffic.some(c => !touching.has(c) && this.depthIn(c) > 0.3)) {
+    // the last word (G7): never into a car it wasn't already touching, nor
+    // deeper than a graze into one it is — the step is taken back and it
+    // stands this frame (one it touches it may drive on out of, or they'd
+    // stand locked together — nor, pulling away from it, would its body's
+    // swing round a curve free it)
+    if (traffic.some(c => {
+      const d0 = was.get(c)!, d1 = this.depthIn(c);
+      if (d0 <= 0.3) return d1 > 0.3;
+      return d1 > 0.6 && d1 > d0 + 0.005 && Math.hypot(c.x - this.x, c.z - this.z) <= Math.hypot(c.x - x0, c.z - z0);
+    })) {
       this.edge = before.edge; this.dir = before.dir; this.s = before.s; this.curve = before.curve;
       this.v = 0;
       this.place(elapsed, 0);
@@ -325,4 +404,15 @@ export class Robber {
   }
 
   hide(): void { this.active = false; this.group.visible = false; }
+
+  /** it got away in the caught scene: back on the road where it was, its
+   * catching progress gone, dashing off (G7 — the chase goes on) */
+  escape(): void {
+    this.active = true;
+    this.group.visible = true;
+    this.caught = 0;
+    this.litT = 0;
+    this.restT = 0;
+    this.dashT = DASH_T;
+  }
 }

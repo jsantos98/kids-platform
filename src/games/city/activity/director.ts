@@ -1,6 +1,7 @@
 // The mission director: arriving at a call fades the world out and a focused
 // mini-scene in (hose, ladders, stretcher run, winch, the chase); when the activity is done it
-// celebrates for a moment, then fades back to the world. The world keeps
+// celebrates for a moment, then fades back to the world (a scene that ends
+// without a win — the robber got away — fades straight back). The world keeps
 // simulating the whole time — only its rendering is swapped out.
 import * as THREE from 'three';
 import type { Activity, ActivityInput } from './common.js';
@@ -26,7 +27,8 @@ export class Director {
   private t = 0;
   private act: Activity | null = null;
   private make: (() => Activity) | null = null;
-  private onDone: (() => void) | null = null;
+  private onDone: ((won: boolean) => void) | null = null;
+  private won = false;
   private onWin: (() => void) | null = null;
   private last = { prompt: '', progress: 0 };
   /** the wheel as it was when the activity finished: held there during the
@@ -54,9 +56,11 @@ export class Director {
 
   /** fade out of the world into a new activity; `win` fires the moment it is
    * won (the cheering belongs there, over the scene's own celebration, not
-   * after the fade back), `done` once the player is back in the world */
-  start(make: () => Activity, done: () => void, win?: () => void): void {
+   * after the fade back), `done` once the player is back in the world —
+   * `won` false when the scene ended without a win (`lost`) */
+  start(make: () => Activity, done: (won: boolean) => void, win?: () => void): void {
     if (this.busy) return;
+    this.won = false;
     this.make = make;
     this.onDone = done;
     this.onWin = win ?? null;
@@ -85,8 +89,14 @@ export class Director {
         this.step(dt, elapsed, inp);
         if (this.t >= FADE) { this.phase = 'play'; this.t = 0; }
         break;
-      case 'play':
-        if (this.step(dt, elapsed, inp)) {
+      case 'play': {
+        const end = this.step(dt, elapsed, inp);
+        if (end === 'lost') {
+          this.frozen = { steer: 0 };
+          this.phase = 'back';
+          this.t = 0;
+        } else if (end) {
+          this.won = true;
           this.frozen = { ...inp };
           this.act!.celebrate();
           this.onWin?.();
@@ -97,6 +107,7 @@ export class Director {
           this.t = 0;
         }
         break;
+      }
       case 'reward':
         this.act!.update(dt, elapsed, this.frozen);
         this.last.prompt = tr('scene.wellDone');
@@ -108,7 +119,7 @@ export class Director {
         if (this.t >= FADE) {
           this.act!.dispose();
           this.act = null;
-          this.onDone?.();
+          this.onDone?.(this.won);
           this.onDone = null;
           this.phase = 'return';
           this.t = 0;
@@ -129,10 +140,11 @@ export class Director {
     };
   }
 
-  /** run the activity one frame; true when it just finished */
-  private step(dt: number, elapsed: number, inp: ActivityInput): boolean {
+  /** run the activity one frame; true when it was just won, 'lost' when it
+   * just ended without a win */
+  private step(dt: number, elapsed: number, inp: ActivityInput): boolean | 'lost' {
     const s = this.act!.update(dt, elapsed, inp);
     this.last = { prompt: s.prompt, progress: s.progress };
-    return s.done;
+    return s.done || (s.lost ? 'lost' : false);
   }
 }

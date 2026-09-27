@@ -8,7 +8,12 @@
 //     is ever lost for good, nothing gets stuck;
 //   · nobody at the wheel: a game that needs steering must not win as fast
 //     as the perfect player (the stretcher rolls by itself, so the run is
-//     exempt).
+//     exempt);
+//   · the chase only (the one scene that can end without a win — the robber
+//     gets away and the chase goes on in the world): the wheel held hard
+//     away from the robber must end the scene, lost, by the escape time —
+//     trying to fail got a child stuck in it for good. Every other scene
+//     never ends lost.
 // Every frame the camera and the prompt must be sane (no NaN, no empty
 // prompt), and a scene must dispose cleanly.
 //   npx tsx tools/check-scenes.ts
@@ -19,9 +24,9 @@ import { CatLadderActivity } from '../src/games/city/activity/catLadder.js';
 import { RescueLadderActivity } from '../src/games/city/activity/rescueLadder.js';
 import { RunActivity } from '../src/games/city/activity/run.js';
 import { WinchActivity } from '../src/games/city/activity/winch.js';
-import { ChaseActivity } from '../src/games/city/activity/chase.js';
+import { ChaseActivity, ESCAPE_T } from '../src/games/city/activity/chase.js';
 
-interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean }
+interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean; escapes?: boolean }
 
 const CASES: Case[] = [
   { name: 'fire: house', make: s => new HoseActivity(s, 'house'), limit: 30, steers: true },
@@ -34,8 +39,8 @@ const CASES: Case[] = [
   { name: 'winch: meadow', make: s => new WinchActivity(s, undefined, 'meadow'), limit: 15, steers: true },
   { name: 'winch: roof', make: s => new WinchActivity(s, undefined, 'roof'), limit: 15, steers: true },
   { name: 'winch: sea', make: s => new WinchActivity(s, undefined, 'sea'), limit: 15, steers: true },
-  { name: 'caught: police car', make: s => new ChaseActivity(s, false), limit: 15, steers: true },
-  { name: 'caught: helicopter', make: s => new ChaseActivity(s, true), limit: 15, steers: true },
+  { name: 'caught: police car', make: s => new ChaseActivity(s, false), limit: 15, steers: true, escapes: true },
+  { name: 'caught: helicopter', make: s => new ChaseActivity(s, true), limit: 15, steers: true, escapes: true },
 ];
 const SEEDS = [1, 2, 3, 7, 11, 42];
 const DT = 1 / 60;
@@ -43,8 +48,9 @@ const DT = 1 / 60;
 let fails = 0;
 const fail = (m: string): void => { fails++; if (fails < 40) console.log('  FAIL ' + m); };
 
-/** play a scene with a player; the seconds it took to win (Infinity: not in `max`) */
-function play(make: () => Activity, player: (a: Activity, t: number) => number, max: number, label: string): number {
+/** play a scene with a player; the seconds it took to win (Infinity: not in
+ * `max`; −seconds: it ended without a win then) */
+function play(make: () => Activity, player: (a: Activity, t: number) => number, max: number, label: string, mayLose = false): number {
   const a = make();
   let t = 0;
   try {
@@ -55,6 +61,10 @@ function play(make: () => Activity, player: (a: Activity, t: number) => number, 
       if (!Number.isFinite(p.x + p.y + p.z)) { fail(`${label}: the camera went to NaN at ${t.toFixed(1)} s`); return NaN; }
       if (!Number.isFinite(s.progress) || s.progress < 0 || s.progress > 1) { fail(`${label}: progress ${s.progress} at ${t.toFixed(1)} s`); return NaN; }
       if (!s.prompt) { fail(`${label}: no prompt at ${t.toFixed(1)} s`); return NaN; }
+      if (s.lost && !s.done) {
+        if (!mayLose) { fail(`${label}: the scene ended lost at ${t.toFixed(1)} s`); return NaN; }
+        return -t;
+      }
       if (s.done) {
         // the celebration runs on the frozen wheel: it must not blow up either
         a.celebrate();
@@ -80,8 +90,16 @@ for (const c of CASES) {
     const label = `${c.name} (seed ${seed})`;
     const tAim = play(() => c.make(seed), a => a.aim(), c.limit, label + ', perfect player');
     if (tAim === Infinity) fail(`${label}: the perfect player didn't win within ${c.limit} s`);
-    const tKid = play(() => c.make(seed), child(seed), c.limit * 3, label + ', a child');
-    if (tKid === Infinity) fail(`${label}: a child swinging the wheel didn't win within ${c.limit * 3} s — stuck, or lost?`);
+    const tKid = play(() => c.make(seed), child(seed), c.limit * 3, label + ', a child', c.escapes);
+    if (tKid === Infinity || tKid < 0) fail(`${label}: a child swinging the wheel didn't win within ${c.limit * 3} s — stuck, or lost?`);
+    if (c.escapes) {
+      // the wheel held hard over, away from the robber (whichever side that is)
+      const away = (a: Activity): number => (a.aim() > 0 ? -1 : 1);
+      const tAway = play(() => c.make(seed), away, ESCAPE_T + 4, label + ', holding away', true);
+      // (it may still win — the robber ran into the officer — but it must end)
+      if (tAway === Infinity) fail(`${label}: the wheel held away from the robber and the scene never ended — stuck`);
+      else console.log(`${label.padEnd(34)} held away: ${tAway > 0 ? 'caught anyway' : 'got away'}, the scene over at ${Math.abs(tAway).toFixed(1)} s`);
+    }
     const tIdle = c.steers ? play(() => c.make(seed), () => 0, c.limit, label + ', nobody') : Infinity;
     if (c.steers && Number.isFinite(tAim) && tIdle < tAim * 1.5) fail(`${label}: won with nobody at the wheel in ${tIdle.toFixed(1)} s (the perfect player took ${tAim.toFixed(1)} s)`);
     times.push(tAim); kids.push(tKid); idle.push(tIdle);
@@ -91,4 +109,4 @@ for (const c of CASES) {
 }
 
 if (fails) { console.log(`FAIL — ${fails} problem(s) in the mission scenes (G4)`); process.exit(1); }
-console.log('PASS — every mission scene can be won, can\'t be lost, and asks for the wheel (G4)');
+console.log('PASS — every mission scene can be won, can\'t be lost (the chase ends, the chase going on), and asks for the wheel (G4)');

@@ -39,19 +39,19 @@ import { IslandPrefetch } from './prefetch.js';
 import { exportBakedTemplates } from '../../engine/assets.js';
 import { buildIslandData, islandReady, installIslandData, type IslandData } from '../../worlds/islandData.js';
 import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
-import { CaughtActivity } from './activity/caught.js';
+import { ChaseActivity } from './activity/chase.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { Railway, lineDir, setIslandGate } from './railway.js';
 import { Missions, callIcon } from './missions.js';
 import { makeSirenBar } from '../../kit/props.js';
 import { Director } from './activity/director.js';
-import type { Activity } from './activity/common.js';
+import type { Activity, CallLook, SceneCue } from './activity/common.js';
 import { HoseActivity, type FireVariant } from './activity/hose.js';
 import { CatLadderActivity, type CatVariant } from './activity/catLadder.js';
 import { RescueLadderActivity } from './activity/rescueLadder.js';
-import { StretcherActivity } from './activity/stretcher.js';
-import { WinchActivity } from './activity/winch.js';
+import { RunActivity } from './activity/run.js';
+import { WinchActivity, type WinchVariant } from './activity/winch.js';
 import type { Objective } from './missions.js';
 import { Particles } from './particles.js';
 import { Transit } from './transit.js';
@@ -769,12 +769,47 @@ let statTime = 0, elapsed = 0;
 let day = dayState(0, START_PHASE, MOON_BASE);
 
 /** the scene for a call: hose (fires), ladders (cats, burning buildings),
- * stretcher (ambulance) or winch (medical helicopter) */
+ * the stretcher run (ambulance) or the winch (medical helicopter) — each
+ * showing the very thing the call showed in the city (its `look`) */
 function sceneFor(o: Objective): Activity {
-  if (o.type === 'fire') return new HoseActivity(o.seed, o.variant as FireVariant);
-  if (o.type === 'cat') return new CatLadderActivity(o.seed, o.variant as CatVariant);
-  if (o.type === 'rescue') return new RescueLadderActivity(o.seed);
-  return V.kind === 'heli' ? new WinchActivity(o.seed) : new StretcherActivity(o.seed);
+  const look = o.look;
+  if (o.type === 'fire') return new HoseActivity(o.seed, o.variant as FireVariant, look);
+  if (o.type === 'cat') return new CatLadderActivity(o.seed, o.variant as CatVariant, look);
+  if (o.type === 'rescue') return new RescueLadderActivity(o.seed, look);
+  return V.kind === 'heli' ? new WinchActivity(o.seed, look, (q.get('variant') as WinchVariant | null) ?? undefined) : new RunActivity(o.seed, look);
+}
+
+/** a `look` from a kit template's name (the ?scene= dev path) */
+function lookFromName(name: string | null): CallLook | undefined {
+  if (!name) return undefined;
+  const kind = name.startsWith('car-') ? 'car' : name.startsWith('tree-') ? 'tree' : 'building';
+  return { kind, model: name };
+}
+
+/** a scene's moment: its sound, and now and then a word from the narrator */
+let heartsSaid = false;
+function sceneCue(c: SceneCue): void {
+  switch (c) {
+    case 'hit': audio.sceneShot('sizzle', 0.8); break;
+    case 'out': audio.sceneShot('sizzle'); audio.ding(); narrator.say('gate'); break;
+    case 'pop': narrator.say('flame'); break;
+    case 'last': narrator.say('gateLast'); break;
+    case 'meow': audio.sceneShot('meow'); break;
+    case 'catMoved': audio.sceneShot('meow'); narrator.say('catMoved'); break;
+    case 'aboard': audio.star(); narrator.say('hold'); break;
+    case 'safe': audio.star(); break;
+    case 'cheer': audio.sceneShot('crowd-cheer', 0.8); break;
+    case 'heart':
+      audio.sceneShot('heart');
+      if (!heartsSaid) { heartsSaid = true; narrator.say('hearts'); }
+      break;
+    case 'bump': audio.thud(); break;
+    case 'bark': audio.sceneShot('dog-bark'); audio.thud(); break;
+    case 'doors': audio.doorChime(); break;
+    case 'caught': break; // (the win's cheer says it)
+    case 'cuffs': audio.sceneShot('cuffs'); break;
+    case 'flutter': audio.sceneShot('pigeons', 0.7); break;
+  }
 }
 
 /** fade into a call's scene; when it's done the call is answered */
@@ -813,12 +848,14 @@ function openCall(o: Objective): void {
   const sq = q.get('scene');
   if (sq === 'caught') {
     mode = 'activity';
-    director.start(() => new CaughtActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
+    director.start(() => new ChaseActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
   }
   if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient') {
     const o = missions.objectives[0] ?? null;
     const fake = {
       ...(o ?? {}), type: sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
+      // (&look=house-c | bldg-f | car-taxi | tree-oak: the thing the call showed)
+      look: lookFromName(q.get('look')),
       seed: Number(q.get('sceneSeed') ?? 7),
     } as Objective;
     if (o) missions.objectives.splice(0, 1, fake);
@@ -1052,7 +1089,8 @@ const tick = (): void => {
         rb.hide();
         mode = 'activity';
         const seed = robberCount + k;
-        director.start(() => new CaughtActivity(seed, V.kind === 'heli'), () => {
+        narrator.say('chaseRun');
+        director.start(() => new ChaseActivity(seed, V.kind === 'heli'), () => {
           earnStar(tr('chase.caught'), player.car.position.clone());
           mode = 'drive';
           robberWait[k] = 3;
@@ -1207,7 +1245,10 @@ const tick = (): void => {
   const gp = navigator.getGamepads?.()[0];
   if (gp && Math.abs(gp.axes[0]) > 0.08) aimIn = gp.axes[0];
   if (aimIn === 0 && Math.abs(pointerX()) > 0.05) aimIn = pointerX();
-  const view = director.update(dt, elapsed, { steer: Math.max(-1, Math.min(1, aimIn)) });
+  const view = director.update(dt, elapsed, { steer: Math.max(-1, Math.min(1, aimIn)), night: day.night });
+  // (the scene's moments: their sounds and words)
+  const act = director.activity;
+  if (act) { for (const c of act.cues) sceneCue(c); act.cues.length = 0; }
   // (halfway through a mission's scene: "almost there!")
   if (!view.scene) saidAlmost = false;
   else if (activeCall && director.playing && !saidAlmost && view.progress >= 0.55 && view.progress < 0.95) { saidAlmost = true; narrator.say('almost'); }
@@ -1230,6 +1271,8 @@ const tick = (): void => {
   const { o: near, d: nd } = missions.nearest(st.x, st.z);
   // the medical helicopter's winch reels in unless it's lifting someone
   if (winch && !(near && near.type === 'patient' && nd < 9)) winch.update(dt, 1.2, V.scale ?? 1);
+  // (the calls' flames, smoke and people)
+  missions.update(dt, camera, day.night);
   for (const o of missions.objectives) {
     if (!o.marker) continue;
     // hover the call's icon over it; the tall beacon pillar does the
@@ -1436,6 +1479,10 @@ const tick = (): void => {
     engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : undefined,
     rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
   });
+  // (a scene's own loops — the ladder's whir, the winch, running feet — and
+  // in the city a burning call crackling as the kid comes near it)
+  audio.setSceneLoops(view.scene && act ? act.loops : null);
+  if (!view.scene) audio.fireNear(missions.fireNear(st.x, st.z));
   audio.setMusic(musicNow(day.night, !!view.scene, dt));
   // (the tracks likely next, fetched ahead: a mission's scene, the chase, the night)
   if (elapsed > 4) {

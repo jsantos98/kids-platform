@@ -44,7 +44,7 @@ and carries on from a spot just behind.
 |---|---|
 | 🚒 Fire truck | Drive to fires and cats in trees; spray the hose, raise the ladder |
 | 🚓 Police car | Chase the getaway cars — bump one and it dashes off; stay right behind it to catch it |
-| 🚑 Ambulance | Drive to people who need help and steer the stretcher into the ambulance |
+| 🚑 Ambulance | Drive to people who need help, then steer the stretcher run round the bumps and back to the ambulance |
 | 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up |
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
 | ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
@@ -60,9 +60,14 @@ and carries on from a spot just behind.
 | ![The city at night](docs/screenshots/night.jpg) | ![Sunset from the plane](docs/screenshots/sunset.jpg) |
 | ![The race at night](docs/screenshots/race-night.jpg) | |
 
-Reaching a call opens its **mission scene**. The wheel is the only input
-there: sweep the hose over the flames, slide the ladder to the cat, or hold
-the winch hook over the person.
+Reaching a call opens its **mission scene** — a street built from the same
+kits as the city, with the very house, car or tree the call showed on fire,
+animated crews and onlookers, cartoon flames, smoke and water. The wheel is the
+only input there, and nothing can be lost: sweep the hose over flames that
+flare up one after another, drive the ladder truck under the cat (or the
+people at the windows) and watch the ladder rise, steer the stretcher round
+cones, puddles and a dog while picking up hearts, hold the helicopter against
+the wind over the person, or chase the robber across a town square.
 
 ![Winch scene](docs/screenshots/scene-winch.jpg)
 
@@ -207,7 +212,8 @@ npx tsx tools/plan-hash.ts            # for refactors: the cities must not chang
 |---|---|
 | `index.html`, `src/main.ts` | the garage (launcher) |
 | `play/city.html`, `src/games/city/` | the game: modes, player physics, missions, guide arrow, robbers, race, trains, sea, HUD, loading |
-| `src/games/city/activity/` | the mission scenes (hose, cat ladder, rescue ladder, stretcher, winch, caught) |
+| `src/games/city/activity/` | the mission scenes (hose, cat ladder, rescue ladder, stretcher run, winch, foot chase) on a kit-built street set (`set.ts`), the aerial ladder truck, the crews' hats |
+| `src/games/city/fx/` | cartoon fire, smoke and steam, the hose's water jet, star and heart bursts |
 | `src/games/city/island/` | each island's traffic and walkers |
 | `src/worlds/` | the world generators: coast, streets, rail, river, blocks and lots, occupancy grid, chunk baking, and the world and chunk workers |
 | `src/engine/` | shared engine: palette, stage, vertex-colour batching, Kenney model loader, audio, wheel and keyboard input |

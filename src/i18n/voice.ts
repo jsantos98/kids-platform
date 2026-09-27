@@ -41,10 +41,10 @@ export function voiceLines(): Record<string, string> {
  * volume to it): a win or a finished mission `excited`, a gate `cheer`, a
  * bump `warm` and gentle, everything else `lively` */
 export type Mood = 'excited' | 'cheer' | 'lively' | 'warm';
-const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station|spotted|closing|race-up)/;
+const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station|spotted|closing|race-up|chaseRun)/;
 export function voiceMood(id: string): Mood {
   if (EXCITED.test(id)) return 'excited';
-  if (/^say-(gate|race-count|race-place4|race-lastLap|race-lead|almost)/.test(id)) return 'cheer';
+  if (/^say-(gate|race-count|race-place4|race-lastLap|race-lead|almost|flame|catMoved|hearts|hold)/.test(id)) return 'cheer';
   if (/^say-(oops|race-down|missed)/.test(id)) return 'warm';
   return 'lively';
 }

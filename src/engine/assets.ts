@@ -7,15 +7,20 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const gltfCache = new Map<string, Promise<THREE.Group>>();
+const gltfCache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>>();
 
-export function loadGLB(url: string): Promise<THREE.Group> {
+/** a glTF's scene and its animation clips (cached per URL; clone to use) */
+export function loadGLTF(url: string): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }> {
   if (!gltfCache.has(url)) {
     gltfCache.set(url, new Promise((resolve, reject) => {
-      new GLTFLoader().load(url, gltf => resolve(gltf.scene), undefined, reject);
+      new GLTFLoader().load(url, gltf => resolve({ scene: gltf.scene, animations: gltf.animations }), undefined, reject);
     }));
   }
   return gltfCache.get(url)!;
+}
+
+export function loadGLB(url: string): Promise<THREE.Group> {
+  return loadGLTF(url).then(g => g.scene);
 }
 
 export interface SpawnOptions {

@@ -72,6 +72,18 @@ export const SFX = {
   'train-horn': { prompt: 'friendly passenger train horn, two-tone, short toot toot', seconds: 2, loop: false },
   'car-horn': { prompt: 'small car horn, a short polite double beep beep', seconds: 1, loop: false },
   'splash': { prompt: 'car driving through a shallow river, a big water splash', seconds: 1, loop: false },
+  // the mission scenes (G4): their moments (one-shots) and what keeps going (loops)
+  'sizzle': { prompt: 'water from a hose hitting a fire, a quick hissing sizzle of steam, short', seconds: 1.2, loop: false },
+  'meow': { prompt: 'a cute little cat meowing once, friendly and small', seconds: 1, loop: false },
+  'crowd-cheer': { prompt: 'a small crowd of people cheering and clapping happily, short, friendly', seconds: 2.5, loop: false },
+  'heart': { prompt: 'a soft bubbly pop, picking up a collectible heart in a kids video game, cute and short', seconds: 0.6, loop: false },
+  'dog-bark': { prompt: 'a small friendly dog barking twice, woof woof', seconds: 1, loop: false },
+  'cuffs': { prompt: 'metal handcuffs clicking shut, two quick clicks', seconds: 0.8, loop: false },
+  'pigeons': { prompt: 'a few pigeons flapping their wings and flying off together', seconds: 1.5, loop: false },
+  'fire-crackle': { prompt: 'a fire crackling and roaring softly, wood popping, steady, seamless loop', seconds: 5, loop: true },
+  'ladder-whir': { prompt: 'hydraulic motor of a fire truck aerial ladder extending, steady mechanical whir and hum, seamless loop', seconds: 4, loop: true },
+  'winch': { prompt: 'electric rescue winch on a helicopter reeling a cable, steady whirring motor hum, seamless loop', seconds: 4, loop: true },
+  'footsteps': { prompt: 'a few people running on a pavement, quick steady footsteps, seamless loop', seconds: 4, loop: true },
 } satisfies Record<string, SfxDef>;
 
 export type SfxId = keyof typeof SFX;

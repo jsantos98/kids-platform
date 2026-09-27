@@ -99,6 +99,30 @@ export function fitBuilding(tpls: readonly BakedTemplate[], w: number, d: number
   return best[Math.min(best.length - 1, Math.floor(v * best.length))];
 }
 
+const SHOP_NAMES = [...'abcdefghijklmn'].map(b => 'bldg-' + b);
+const HOUSE_NAMES = [...'abcdefghijklmnopqrstu'].map(b => 'house-' + b);
+
+/** the building a lot carries — the one the chunk baker bakes there (a City
+ * Kit shop on a town `bldg` lot, a Suburban house on a `house` lot, R33) —
+ * by its template name, with its scale, the centre of its footprint, its
+ * half extents and its roof; null where the lot has none (a garden, a
+ * court, a works yard, an industrial lot). The mission calls read it (G2):
+ * a house fire burns at the real house, and its scene shows the same one. */
+export function lotBuilding(lot: Lot, industrial: boolean): { name: string; s: number; x: number; z: number; ry: number; hx: number; hz: number; top: number } | null {
+  if (lot.kind !== 'bldg' && lot.kind !== 'house') return null;
+  if (lot.kind === 'bldg' && industrial) return null;
+  const house = lot.kind === 'house';
+  const names = (house ? HOUSE_NAMES : SHOP_NAMES).filter(n => bakedModel(n));
+  const fit = fitBuilding(names.map(n => bakedModel(n)!), lot.w, lot.d, lot.v, house ? 0.86 : 0.94);
+  if (!fit) return null;
+  const name = names.find(n => bakedModel(n) === fit.tpl)!;
+  const hx = (fit.tpl.size.x * fit.s) / 2, hz = (fit.tpl.size.z * fit.s) / 2;
+  // (a house stands on the front of its lot, a shop in the middle)
+  const off = house ? lot.d / 2 - hz - 0.5 : 0;
+  const c = Math.cos(lot.ry), sn = Math.sin(lot.ry);
+  return { name, s: fit.s, x: lot.x + off * sn, z: lot.z + off * c, ry: lot.ry, hx, hz, top: fit.tpl.size.y * fit.s + (house ? 0.12 : 0.1) };
+}
+
 function bakeModel(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number, ry: number, s: number, s3: [number, number, number] | null = null): void {
   _ke.set(0, ry, 0);
   _kq.setFromEuler(_ke);
@@ -770,7 +794,9 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       if (tpls.length) {
         // occasionally an industrial lot is a big tank (true size too)
         const tank = industrial && TPL.indTanks.length && r() < 0.22;
-        const fit = fitBuilding(tank ? TPL.indTanks : tpls, lot.w, lot.d, lot.v);
+        // (a town building: the one lotBuilding names, so the calls agree)
+        const town = !industrial ? lotBuilding(lot, false) : null;
+        const fit = town ? { tpl: bakedModel(town.name)!, s: town.s } : industrial ? fitBuilding(tank ? TPL.indTanks : tpls, lot.w, lot.d, lot.v) : null;
         if (!fit) {
           // (no building fits this lot at its true size: a works yard / a
           // paved court instead of a stretched or shrunk one)
@@ -835,9 +861,10 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
   function bakeHouse(lot: Lot): void {
     // a house at its true size, or a garden where none fits (a small lot held
     // a 2 m "dog house")
-    const fit = TPL.houses.length ? fitBuilding(TPL.houses, lot.w, lot.d, lot.v, 0.86) : null;
-    if (!fit) { bakeGarden(lot); return; }
-    const { tpl, s } = fit;
+    // (the house lotBuilding names, so the calls agree)
+    const b = TPL.houses.length ? lotBuilding(lot, false) : null;
+    if (!b) { bakeGarden(lot); return; }
+    const tpl = bakedModel(b.name)!, s = b.s;
     // the house on the front of the lot, a strip of lawn behind
     const hd = (tpl.size.z * s) / 2;
     const p = lotPt(lot, 0, lot.d / 2 - hd - 0.5);

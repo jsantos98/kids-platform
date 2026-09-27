@@ -1,15 +1,44 @@
 // Missions: emergency calls spawning around the player — fires (a house, a
 // tree or a car), cats (up a tree or on a ledge), people in a burning
 // building, patients — with the nearest-call lookup for the guidance and the
-// markers + beacons over each call. Arriving at a call opens its mission
-// scene (activity/); `variant` and `seed` decide what that scene looks like.
+// markers + beacons over each call. Every call shows the real thing (G2):
+// the house on the corner burning at its windows and roof under a column of
+// smoke you can see over the roofs, a car parked at the kerb on fire, a
+// burning tree, the cat up a tree (or on a building's ledge), someone hurt
+// sitting on the pavement with a friend waving — and its `look` hands the
+// same house, car or tree to the call's scene (activity/), which `variant`
+// and `seed` decide the rest of.
 import * as THREE from 'three';
-import { C } from '../../engine/palette.js';
-import { makeCatTree, makeFire, makePerson } from '../../kit/index.js';
 import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
+import { bakedModel } from '../../engine/assets.js';
+import { templateToMesh } from '../../engine/baked.js';
+import { person, pet, type Rig } from '../../engine/rig.js';
 import { graphFor, type StreetGraph, type SNode } from '../../worlds/streetGraph.js';
-import { cityPlanFor } from '../../worlds/cityPlan.js';
+import { cityPlanFor, type District } from '../../worlds/cityPlan.js';
+import { lotBuilding } from '../../worlds/cityChunk.js';
 import { makeBeacon, makeIconSprite } from './guide3d.js';
+import { FireSystem, type Fire } from './fx/fire.js';
+import { SmokeSystem, type SmokeEmitter } from './fx/smoke.js';
+import type { CallLook } from './activity/common.js';
+import type { SetDistrict } from './activity/set.js';
+
+const TREES = ['tree-oak', 'tree-default', 'tree-fat', 'tree-detailed'];
+const CARS = ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'];
+
+/** a street set's district for the city's district at a call */
+function setDistrict(d: District): SetDistrict {
+  return d === 'downtown' ? 'downtown' : d === 'urban' || d === 'industrial' ? 'urban' : d === 'residential' ? 'residential' : 'park';
+}
+
+/** a kit template as a mesh (null when not baked) */
+function kitMesh(name: string, s: number): THREE.Mesh | null {
+  const tpl = bakedModel(name);
+  if (!tpl) return null;
+  const m = templateToMesh(tpl);
+  m.scale.setScalar(s);
+  m.castShadow = true;
+  return m;
+}
 
 export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue';
 
@@ -26,8 +55,13 @@ export interface Objective {
   /** seeds the mission scene's layout */
   seed: number;
   group: THREE.Group;
-  flames?: THREE.Mesh[];
-  smoke?: THREE.Mesh[];
+  /** its flames and smoke column (a fire or a burning building) */
+  fires: Fire[];
+  smoke: SmokeEmitter | null;
+  /** the animated cat / people at it */
+  rigs: Rig[];
+  /** what it showed, for its scene */
+  look?: CallLook;
   pos: THREE.Vector3;
   progress: number;
   need: number;
@@ -67,7 +101,33 @@ export class Missions {
 
   /** `calls` is the rotation of emergency kinds this mode answers (the
    * fire truck: fire, fire, cat; the ambulance: patients...) */
-  constructor(private scene: THREE.Scene, readonly calls: ObjectiveType[] = ['fire', 'fire', 'cat']) {}
+  /** the calls' flames and smoke (one system each for the whole city) */
+  private fireFx: FireSystem;
+  private smokeFx: SmokeSystem;
+
+  constructor(private scene: THREE.Scene, readonly calls: ObjectiveType[] = ['fire', 'fire', 'cat']) {
+    this.fireFx = new FireSystem(scene, 200, 60);
+    this.smokeFx = new SmokeSystem(scene, 220);
+  }
+
+  /** step the calls' fire, smoke and animated characters */
+  update(dt: number, camera: THREE.Camera, night: number): void {
+    this.fireFx.night = night;
+    this.smokeFx.light = 1 - night * 0.55;
+    this.fireFx.update(dt, camera);
+    this.smokeFx.update(dt, camera);
+    for (const o of this.objectives) for (const r of o.rigs) r.update(dt);
+  }
+
+  /** how loud a burning call crackles for the kid at (x, z): 0 … 1 */
+  fireNear(x: number, z: number): number {
+    let best = 0;
+    for (const o of this.objectives) {
+      if (!o.fires.length) continue;
+      best = Math.max(best, 1 - Math.hypot(o.pos.x - x, o.pos.z - z) / 60);
+    }
+    return best;
+  }
 
   private bx = 0;
   private by = 0;
@@ -179,44 +239,140 @@ export class Missions {
     const need = type === 'patient' ? Math.min(2.5 + diff * 0.15, 4)
       : type === 'fire' ? Math.min(5.5 + diff * 0.3, 9)
       : Math.min(3 + diff * 0.2, 5);
-    let group: THREE.Group;
-    let flames: THREE.Mesh[] | undefined;
-    let smoke: THREE.Mesh[] | undefined;
     const variant = type === 'fire' ? (['house', 'tree', 'car'] as const)[(r() * 3) | 0]
       : type === 'cat' ? (r() < 0.5 ? 'tree' : 'building') : '';
     const seed = chunkSeed(this.ox + this.index, this.oz, 0x5ce7e);
-    if (type === 'rescue') {
-      // smoke and flames with somebody waving for help beside them
-      const f = makeFire();
-      group = f.group;
-      flames = f.flames;
-      smoke = f.smoke;
-      const who = makePerson({ shirt: C.yellow, pants: C.dark });
-      who.position.set(-1.6, 0, 0.6);
-      group.add(who);
-    } else if (type === 'fire') {
-      const f = makeFire();
-      group = f.group;
-      flames = f.flames;
-      smoke = f.smoke;
-    } else if (type === 'patient') {
-      // a person waving for help on the ground (winched up by the helicopter)
-      group = makePerson({ shirt: C.orange, pants: C.dark, cap: C.white });
-      group.position.set(0, 0.15, 0);
-      group.rotation.y = r() * Math.PI * 2;
-    } else {
-      group = makeCatTree(r);
-    }
+    const group = new THREE.Group();
     group.position.copy(pos);
-    group.position.y = pos.y;
     this.scene.add(group);
+    const fires: Fire[] = [];
+    let smoke: SmokeEmitter | null = null;
+    const rigs: Rig[] = [];
+    const cxl = pos.x - this.ox, czl = pos.z - this.oz;
+    const district = setDistrict(plan.districtAt(cxl, czl));
+    let look: CallLook = { kind: 'none', district };
+    // (the way from the corner back to its junction: what faces the road)
+    const toNode = new THREE.Vector3(-ox2, 0, -oz2).normalize();
+    type Front = { name: string; x: number; z: number; nx: number; nz: number; tx: number; tz: number; hx: number; top: number };
+    // the real building on this corner: the nearest whose front looks this way
+    const building = (): Front | null => {
+      let best: Front | null = null, bd = 26;
+      for (let cx = Math.floor(cxl / 64) - 1; cx <= Math.floor(cxl / 64) + 1; cx++) {
+        for (let cz = Math.floor(czl / 64) - 1; cz <= Math.floor(czl / 64) + 1; cz++) {
+          for (const lot of plan.lots(cx, cz)) {
+            const b = lotBuilding(lot, plan.districtAt(lot.x, lot.z) === 'industrial');
+            if (!b || b.top < 4) continue;
+            const nx = Math.sin(b.ry), nz = Math.cos(b.ry);
+            const fx = b.x + nx * b.hz, fz = b.z + nz * b.hz;
+            const d = Math.hypot(fx - cxl, fz - czl);
+            if (d < bd && (cxl - fx) * nx + (czl - fz) * nz > -2) {
+              bd = d;
+              best = { name: b.name, x: fx + this.ox, z: fz + this.oz, nx, nz, tx: Math.cos(b.ry), tz: -Math.sin(b.ry), hx: b.hx, top: b.top };
+            }
+          }
+        }
+      }
+      return best;
+    };
+    const burnCar = (): void => {
+      const name = CARS[(r() * CARS.length) | 0];
+      const tpl = bakedModel(name);
+      const m = kitMesh(name, tpl ? 4.3 / Math.max(tpl.size.x, tpl.size.z) : 1);
+      if (m) {
+        m.rotation.y = Math.atan2(toNode.x, toNode.z) + Math.PI / 4;
+        m.position.y = 0.05;
+        group.add(m);
+      }
+      fires.push(this.fireFx.add({ x: pos.x, y: 0.9, z: pos.z, size: 1.3, spreadX: 0.8, spreadZ: 0.8, tongues: 7, seed: seed % 97 }));
+      fires.push(this.fireFx.add({ x: pos.x + 0.9, y: 1.5, z: pos.z - 0.4, size: 0.9, seed: seed % 89 }));
+      smoke = this.smokeFx.add({ x: pos.x, y: 2.2, z: pos.z, rate: 2.6, size0: 1.2, size1: 6, rise: 2.4, life: 7, jitter: 0.8, dark: 0.85 });
+      look = { kind: 'car', model: name, district };
+    };
+    const burnBuilding = (b: Front): void => {
+      // flames at its windows on the street side, one on the roof, smoke over it
+      for (let k = 0; k < 3; k++) {
+        const along = (k - 1) * b.hx * 0.55, up = b.top * (0.3 + 0.25 * ((k + (seed & 1)) % 3));
+        fires.push(this.fireFx.add({ x: b.x + b.tx * along + b.nx * 0.5, y: up, z: b.z + b.tz * along + b.nz * 0.5, size: 1.3, seed: seed % 71 + k }));
+      }
+      fires.push(this.fireFx.add({ x: b.x - b.nx * 1.8, y: b.top, z: b.z - b.nz * 1.8, size: 1.8, spreadX: 0.8, tongues: 8, seed: seed % 53 }));
+      smoke = this.smokeFx.add({ x: b.x - b.nx * 3, y: b.top + 1, z: b.z - b.nz * 3, rate: 3, size0: 2, size1: 8, rise: 2.8, life: 9, jitter: 2, dark: 0.85 });
+      look = { kind: 'building', model: b.name, district };
+    };
+    let treeR = 2;
+    const tree = (burning: boolean): number => {
+      const name = TREES[(r() * TREES.length) | 0];
+      const s = 6 + r();
+      const m = kitMesh(name, s);
+      const h = (bakedModel(name)?.size.y ?? 1.2) * s;
+      treeR = (bakedModel(name)?.size.x ?? 0.6) * s * 0.45;
+      if (m) { m.rotation.y = r() * 6; m.position.y = 0.1; group.add(m); }
+      if (burning) {
+        // on the canopy's skin, on the side the road sees
+        const face = Math.atan2(toNode.z, toNode.x);
+        for (let k = 0; k < 3; k++) {
+          const a = face + (k - 1) * 0.9;
+          fires.push(this.fireFx.add({ x: pos.x + Math.cos(a) * treeR, y: h * (0.5 + 0.12 * ((k + 1) % 3)), z: pos.z + Math.sin(a) * treeR, size: 1.5, seed: seed % 61 + k }));
+        }
+        smoke = this.smokeFx.add({ x: pos.x, y: h, z: pos.z, rate: 2.6, size0: 1.5, size1: 7, rise: 2.5, life: 8, jitter: 1, dark: 0.8 });
+      }
+      look = { kind: 'tree', model: name, district };
+      return h;
+    };
+    if (type === 'fire' || type === 'rescue') {
+      const b = variant === 'house' || type === 'rescue' ? building() : null;
+      if (b) burnBuilding(b);
+      else if (variant === 'tree') tree(true);
+      else burnCar();
+      if (type === 'rescue') {
+        // somebody on the pavement waving for help
+        const who = person(seed % 12, 1.7);
+        who.root.position.set(toNode.x * 1.5, 0, toNode.z * 1.5);
+        who.root.rotation.y = Math.atan2(toNode.x, toNode.z);
+        who.play('interact-right', { speed: 1.4 });
+        group.add(who.root);
+        rigs.push(who);
+      }
+    } else if (type === 'patient') {
+      // hurt, sitting on the pavement; a friend waving the ambulance down
+      const who = person(seed % 12, 1.65);
+      who.root.rotation.y = Math.atan2(toNode.x, toNode.z);
+      who.play('sit');
+      const friend = person((seed + 5) % 12, 1.7);
+      friend.root.position.set(toNode.z * 1.3 + toNode.x * 0.6, 0, -toNode.x * 1.3 + toNode.z * 0.6);
+      friend.root.rotation.y = Math.atan2(toNode.x, toNode.z);
+      friend.play('interact-right', { speed: 1.4 });
+      group.add(who.root, friend.root);
+      rigs.push(who, friend);
+    } else {
+      // the cat: up a tree on the corner, or on the ledge of the building there
+      const cat = pet('cat', 0.8);
+      cat.play('idle');
+      const b = variant === 'building' ? building() : null;
+      if (b) {
+        const y = Math.min(b.top * 0.5, 6.5);
+        const ledge = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 0.9), new THREE.MeshLambertMaterial({ color: 0xeceae4 }));
+        ledge.position.set(b.x + b.nx * 0.4 - pos.x, y - 0.1, b.z + b.nz * 0.4 - pos.z);
+        ledge.rotation.y = Math.atan2(b.nx, b.nz);
+        group.add(ledge);
+        cat.root.position.set(b.x + b.nx * 0.45 - pos.x, y, b.z + b.nz * 0.45 - pos.z);
+        cat.root.rotation.y = Math.atan2(b.nx, b.nz);
+        look = { kind: 'building', model: b.name, district };
+      } else {
+        const h = tree(false);
+        // (on the canopy's underside, on the road's side, in plain sight)
+        cat.root.position.set(toNode.x * treeR * 1.05, h * 0.42, toNode.z * treeR * 1.05);
+        cat.root.rotation.y = Math.atan2(toNode.x, toNode.z);
+      }
+      group.add(cat.root);
+      rigs.push(cat);
+    }
     const marker = makeIconSprite(callIcon(type));
     marker.position.set(pos.x, 5.4, pos.z);
     this.scene.add(marker);
     const beacon = makeBeacon(type === 'fire' || type === 'rescue' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
     beacon.position.set(pos.x, 0, pos.z);
     this.scene.add(beacon);
-    this.objectives.push({ type, variant, seed, group, flames, smoke, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
+    this.objectives.push({ type, variant, seed, group, fires, smoke, rigs, look, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
     this.index++;
   }
 
@@ -224,6 +380,9 @@ export class Missions {
     const i = this.objectives.indexOf(o);
     if (i >= 0) this.objectives.splice(i, 1);
     this.scene.remove(o.group);
+    for (const f of o.fires) this.fireFx.remove(f);
+    // (its smoke stops; the puffs already up drift off and fade)
+    if (o.smoke) this.smokeFx.remove(o.smoke);
     if (o.marker) this.scene.remove(o.marker);
     this.scene.remove(o.beacon);
   }

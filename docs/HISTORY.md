@@ -5,6 +5,47 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-27 — the mission scenes, rebuilt
+
+The mission scenes were the one part of the game still made of grey boxes and
+cones on endless grass. Now each is a street built from the city's own kits —
+road tiles, pavements, lamps, houses and shops at their real size, trees,
+parked cars, people watching behind the tape — with the very house, car or
+tree the call showed on fire in the city.
+
+![Before](history/2026-09-27-scenes/before.jpg)
+
+**The games, rethought** (still the wheel only, still impossible to lose):
+- **Fire:** a firefighter holds the hose; flames flare up one after another in
+  the windows, the roof, the bonnet or the branches, hiss and steam under the
+  water, and the last one is a big one.
+- **Cat:** drive the ladder truck under the cat — its aerial ladder swings
+  round and rises, the cat hops into the basket, rides down and runs to the
+  child waiting for it. The cat is playful and changes trees once or twice.
+- **Burning building:** the same ladder truck, people waving from balconies.
+- **Ambulance:** a stretcher run up the street and back, round cones, puddles
+  and a trotting dog, picking up hearts; the ambulance doors swing open.
+- **Winch:** a meadow, a rooftop or a swimmer at sea, in a gusty wind.
+- **Caught:** a short foot chase across a town square (or the searchlight
+  from the police helicopter).
+
+Characters move now (the Kenney characters' own animations: running,
+cheering, sitting, waving), crews wear helmets and caps, and the fire, smoke
+and water are cartoon effects of their own. In the city every call shows the
+real thing: the building on the corner burning under a column of smoke you can
+see across town, a burning car or tree, the cat up its tree, someone hurt
+sitting on the pavement. New sounds (sizzle, meow, crowd cheer, ladder
+hydraulics, winch, footsteps, crackling fire) and new narrator lines.
+
+| | |
+|---|---|
+| ![Fire](history/2026-09-27-scenes/fire-house.jpg) | ![Cat at night](history/2026-09-27-scenes/cat-night.jpg) |
+| ![Burning building at dusk](history/2026-09-27-scenes/rescue-dusk.jpg) | ![Stretcher run](history/2026-09-27-scenes/run.jpg) |
+| ![Winch at sea](history/2026-09-27-scenes/winch.jpg) | ![Foot chase](history/2026-09-27-scenes/chase.jpg) |
+| ![A burning building in the city](history/2026-09-27-scenes/city-burning-building.jpg) | ![A cat up a tree in the city](history/2026-09-27-scenes/city-cat.jpg) |
+
+---
+
 ## 2026-09-27 — a Portuguese voice, music, and a truer city
 
 **A voice from Portugal.** The narrator is now Benedita (ElevenLabs), a

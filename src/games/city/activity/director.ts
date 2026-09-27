@@ -1,5 +1,5 @@
 // The mission director: arriving at a call fades the world out and a focused
-// mini-scene in (hose, ladder, stretcher, winch); when the activity is done it
+// mini-scene in (hose, ladders, stretcher run, winch, the chase); when the activity is done it
 // celebrates for a moment, then fades back to the world. The world keeps
 // simulating the whole time — only its rendering is swapped out.
 import * as THREE from 'three';
@@ -45,6 +45,9 @@ export class Director {
 
   /** the scene is being played (not fading, not celebrating) */
   get playing(): boolean { return this.phase === 'play'; }
+
+  /** the scene showing now (its cues and loops for the game's sound) */
+  get activity(): Activity | null { return this.act; }
 
   /** the pump is running in the current scene */
   get pumping(): boolean { return this.phase === 'play' && !!this.act?.pumping; }

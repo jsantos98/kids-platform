@@ -100,7 +100,7 @@ export class GameAudio {
   /** the recordings, as they load */
   private samples = new Map<SfxId, AudioBuffer>();
   /** the recorded loops playing (each silent until asked for) */
-  private loops = new Map<SfxId, { src: AudioBufferSourceNode; gain: GainNode }>();
+  private loops = new Map<string, { src: AudioBufferSourceNode; gain: GainNode }>();
   // ---- the music ----
   private musicBus: GainNode | null = null;
   private musicOn = true;
@@ -137,9 +137,10 @@ export class GameAudio {
     }
   }
 
-  /** a recorded loop, started silent once (null: not loaded) */
-  private loopOf(id: SfxId, dest?: AudioNode): { src: AudioBufferSourceNode; gain: GainNode } | null {
-    let l = this.loops.get(id);
+  /** a recorded loop, started silent once (null: not loaded); `key` keeps a
+   * second voice of the same recording apart (a scene's rotor, not the kid's) */
+  private loopOf(id: SfxId, dest?: AudioNode, key: string = id): { src: AudioBufferSourceNode; gain: GainNode } | null {
+    let l = this.loops.get(key);
     if (l) return l;
     const buf = this.samples.get(id);
     if (!buf || !this.ac) return null;
@@ -151,7 +152,7 @@ export class GameAudio {
     src.connect(gain); gain.connect(dest ?? this.sfx!);
     src.start();
     l = { src, gain };
-    this.loops.set(id, l);
+    this.loops.set(key, l);
     return l;
   }
 
@@ -617,6 +618,42 @@ export class GameAudio {
     g.gain.value = 1 / (1 + dist / fade);
     p.connect(g); g.connect(this.sfx!);
     return p;
+  }
+
+  // ---- the mission scenes (G4) ----
+
+  /** a scene's moment: a sizzle, a meow, a cheer… (a chime where there's no recording) */
+  sceneShot(id: 'sizzle' | 'meow' | 'crowd-cheer' | 'heart' | 'dog-bark' | 'cuffs' | 'pigeons', gain = 1): void {
+    if (!this.ac || this.shot(id, gain)) return;
+    const t = this.ac.currentTime;
+    if (id === 'sizzle') this.hiss(t, 0.5, 0.35, 'highpass', 3000);
+    else if (id === 'pigeons') this.hiss(t, 0.4, 0.2, 'bandpass', 900);
+    else if (id === 'cuffs') { this.click(0.4); this.hiss(t + 0.12, 0.05, 0.4, 'bandpass', 2400); }
+    else this.note(id === 'meow' ? 700 : 988, t, 0.2, 0.15, 'triangle', undefined, id === 'meow' ? 520 : 1318);
+  }
+
+  /** the loops a scene wants going (the rest fade out); null: none */
+  setSceneLoops(on: ReadonlySet<'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'pump'> | null): void {
+    if (!this.ac) return;
+    const want: Array<[SfxId, boolean, number]> = [
+      ['ladder-whir', !!on?.has('ladder'), 0.45],
+      ['winch', !!on?.has('winch'), 0.45],
+      ['footsteps', !!on?.has('steps'), 0.4],
+      ['engine-heli', !!on?.has('rotor'), 0.28],
+      ['fire-crackle', !!on?.has('crackle'), 0.5],
+    ];
+    for (const [id, active, gain] of want) {
+      const key = 'scene:' + id;
+      const l = active ? this.loopOf(id, undefined, key) : this.loops.get(key);
+      l?.gain.gain.setTargetAtTime(active ? gain : 0, this.ac.currentTime, 0.12);
+    }
+  }
+
+  /** a burning call in the world crackling nearby (0 silent) */
+  fireNear(level: number): void {
+    if (!this.ac) return;
+    const l = level > 0.01 ? this.loopOf('fire-crackle', undefined, 'world:crackle') : this.loops.get('world:crackle');
+    l?.gain.gain.setTargetAtTime(Math.min(0.45, level * 0.45), this.ac.currentTime, 0.3);
   }
 
   thud(): void {

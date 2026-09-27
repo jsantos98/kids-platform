@@ -83,6 +83,43 @@ export function nodePiece(plan: CityPlan, n: PNode): RoadPiece | null {
   const reach = n.reach;
   const poly: V[] = [];
   const k = arms.length;
+  // a bend at any angle: shaped as the kit's own bend — the inner kerbs meet
+  // at a corner, and the outer kerb runs round it on an arc a full road
+  // width out, so the road keeps its 14 m all the way round (joined straight
+  // across, the outside cut the corner off to one lane: seed 860607861,
+  // island (1,0), the bend onto a river bridge)
+  if (k === 2) {
+    let a = 0, b = 1;
+    let th = hdg(arms[1]) - hdg(arms[0]);
+    while (th <= 0) th += Math.PI * 2;
+    if (th > Math.PI) { a = 1; b = 0; th = Math.PI * 2 - th; }
+    if (th < Math.PI - 1e-3) {
+      const ua = arms[a], ub = arms[b];
+      const sa = { x: ua.z, z: -ua.x }, sb = { x: ub.z, z: -ub.x };
+      const t = ROAD_HALF / Math.tan(th / 2);
+      const C = { x: n.x + sa.x * ROAD_HALF + ua.x * t, z: n.z + sa.z * ROAD_HALF + ua.z * t };
+      const ea = { x: n.x + ua.x * reach[a], z: n.z + ua.z * reach[a] }, eb = { x: n.x + ub.x * reach[b], z: n.z + ub.z * reach[b] };
+      const W = ROAD_HALF * 2;
+      poly.push({ x: ea.x - sa.x * ROAD_HALF, z: ea.z - sa.z * ROAD_HALF }, { x: ea.x + sa.x * ROAD_HALF, z: ea.z + sa.z * ROAD_HALF });
+      poly.push(C);
+      poly.push({ x: eb.x - sb.x * ROAD_HALF, z: eb.z - sb.z * ROAD_HALF }, { x: eb.x + sb.x * ROAD_HALF, z: eb.z + sb.z * ROAD_HALF });
+      // the outer kerb: from arm b's round to arm a's, about the corner C
+      const a0 = Math.atan2(sb.x, sb.z), a1 = Math.atan2(-sa.x, -sa.z);
+      const mid = Math.atan2(n.x - C.x, n.z - C.z);
+      // (the way round that passes the far side of the node from C: the
+      // one whose sweep takes in the direction from C through the node)
+      const TAU = Math.PI * 2;
+      const ccw = ((a1 - a0) % TAU + TAU) % TAU, ccwMid = ((mid - a0) % TAU + TAU) % TAU;
+      const sweep = ccwMid < ccw ? ccw : ccw - TAU;
+      const steps = Math.max(2, Math.ceil(Math.abs(sweep) / 0.12));
+      for (let q = 0; q <= steps; q++) {
+        const ang = a0 + (sweep * q) / steps;
+        poly.push({ x: C.x + Math.sin(ang) * W, z: C.z + Math.cos(ang) * W });
+      }
+      const maxR = Math.max(...reach);
+      return { kind: 'pad', x: n.x, z: n.z, ry: 0, lx: maxR * 2, lz: maxR * 2, crosswalks: n.signalized, poly };
+    }
+  }
   for (let i = 0; i < k; i++) {
     const u = arms[i], r = reach[i];
     const side = { x: u.z, z: -u.x }; // toward the next arm (heading + 90)
@@ -93,7 +130,12 @@ export function nodePiece(plan: CityPlan, n: PNode): RoadPiece | null {
     const v = arms[(i + 1) % k];
     let th = hdg(v) - hdg(u);
     while (th <= 0) th += Math.PI * 2;
-    if (k > 1 && th < Math.PI - 1e-3) {
+    if (k > 1 && Math.abs(th - Math.PI) > 1e-3) {
+      // (inside a corner the two kerbs meet ahead of the node; outside a
+      // bend — a gap wider than a straight line — their lines meet behind it,
+      // at the bend's outer corner: joined straight across instead, it cut
+      // the corner off and left one lane to turn in, seed 860607861, island
+      // (1,0), the bend onto a river bridge)
       const t = ROAD_HALF / Math.tan(th / 2);
       poly.push({ x: n.x + side.x * ROAD_HALF + u.x * t, z: n.z + side.z * ROAD_HALF + u.z * t });
     }

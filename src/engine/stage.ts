@@ -1,4 +1,5 @@
 // Stage factory: renderer, sky, lights, camera, HUD stats chip.
+import { TIERS, startQuality, type QualityTier } from './settings.js';
 import * as THREE from 'three';
 import { C } from './palette.js';
 import { Sky } from './sky.js';
@@ -148,7 +149,9 @@ export function makeSceneDressing(scene: THREE.Scene, {
   const sun = new THREE.DirectionalLight(still.lightColor, still.lightI);
   sun.position.set(...sunPos);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  // (its size and blur by the graphics quality, G13)
+  const tier = TIERS[startQuality()];
+  sun.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
   const s = shadowSpan;
   Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 10, far: 400 });
   sun.shadow.bias = -0.0002;
@@ -157,7 +160,7 @@ export function makeSceneDressing(scene: THREE.Scene, {
   // driving over the fixed shadow texels crawled with grain — its own
   // shadow's cells showing on its body and its outline stepping cell to cell
   sun.shadow.radius = 4;
-  sun.shadow.blurSamples = 8;
+  sun.shadow.blurSamples = tier.shadowBlur;
   scene.add(sun);
   scene.add(sun.target);
   sky.update(still, 0, 0, 0);
@@ -173,7 +176,6 @@ export function makeSceneDressing(scene: THREE.Scene, {
   // keep the sky centred on the player (the day's look)
   const followSky = (x: number, z: number) => sky.update(still, x, z, 0);
   const sunDist = Math.min(110, l);
-  const MAP = sun.shadow.mapSize.x;
   let span = shadowSpan;
   const _dir = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _c = new THREE.Vector3();
   /** the direction the shadow light holds (null: none yet) */
@@ -192,13 +194,14 @@ export function makeSceneDressing(scene: THREE.Scene, {
     // light itself turns in SUN_STEP steps (the sky's sun disc still moves
     // smoothly): turned a hair every frame, the grid turned with it and the
     // shadows trembled
-    const sx = shadow?.x ?? cx, sz = shadow?.z ?? cz, want = shadow?.span ?? shadowSpan;
+    // (the ground it covers shrinks at a lower graphics quality, G13)
+    const sx = shadow?.x ?? cx, sz = shadow?.z ?? cz, want = (shadow?.span ?? shadowSpan) * ((sun.userData.spanScale as number | undefined) ?? 1);
     if (want !== span) {
       span = want;
       Object.assign(sun.shadow.camera, { left: -span, right: span, top: span, bottom: -span });
       sun.shadow.camera.updateProjectionMatrix();
     }
-    const texel = (2 * span) / MAP;
+    const texel = (2 * span) / sun.shadow.mapSize.x;
     _now.set(...day.lightDir);
     if (!held || held.dot(_now) < SUN_STEP) held = (held ?? new THREE.Vector3()).copy(_now);
     _dir.copy(held);
@@ -215,9 +218,30 @@ export function makeSceneDressing(scene: THREE.Scene, {
   return { sun, hemi, sky, followSky, applyDay };
 }
 
+/** switch a running stage to another graphics quality (G13): the render
+ * resolution and the sun's shadow map (the edge smoothing stays as the page
+ * started — it takes a new page) */
+export function applyQuality(renderer: THREE.WebGLRenderer, sun: THREE.DirectionalLight, tier: QualityTier): void {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
+  renderer.setSize(innerWidth, innerHeight);
+  if (sun.shadow.mapSize.x !== tier.shadowMap) {
+    sun.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    sun.shadow.mapPass?.dispose();
+    sun.shadow.mapPass = null;
+  }
+  sun.shadow.blurSamples = tier.shadowBlur;
+  sun.userData.spanScale = tier.shadowSpan;
+  // (drawn every n-th frame: the caller sets shadowMap.needsUpdate)
+  renderer.shadowMap.autoUpdate = tier.shadowEvery <= 1;
+}
+
 export function createStage(opts: StageOptions = {}): Stage {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  // (the resolution and edge smoothing by the graphics quality, G13)
+  const tier = TIERS[startQuality()];
+  const renderer = new THREE.WebGLRenderer({ antialias: tier.antialias, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean
   renderer.toneMappingExposure = 1.06;

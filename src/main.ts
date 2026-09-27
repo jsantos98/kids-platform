@@ -22,7 +22,7 @@ import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/in
 import { speak, preloadVoice, speaking } from './i18n/voice.js';
 import { GameAudio } from './engine/audio.js';
 import type { SfxId } from './engine/sfxList.js';
-import { volume, setVolume, type VolumeKey } from './engine/settings.js';
+import { volume, setVolume, qualityPref, setQualityPref, type VolumeKey, type QualityPref } from './engine/settings.js';
 
 applyI18n('garage.pageTitle');
 preloadVoice();
@@ -572,6 +572,17 @@ for (const inp of settingsEl.querySelectorAll<HTMLInputElement>('input[data-vol]
   inp.addEventListener('input', () => { setVolume(k, Number(inp.value) / 100); show(); });
   inp.addEventListener('change', () => sample(k));
 }
+// the graphics quality (G13): auto / low / medium / high, for the next game
+const qualityBtns = [...settingsEl.querySelectorAll<HTMLButtonElement>('button[data-quality]')];
+const showQuality = (): void => {
+  const p = qualityPref();
+  for (const b of qualityBtns) {
+    b.classList.toggle('on', b.dataset.quality === p);
+    b.setAttribute('aria-checked', String(b.dataset.quality === p));
+  }
+};
+for (const b of qualityBtns) b.addEventListener('click', () => { setQualityPref(b.dataset.quality as QualityPref); showQuality(); });
+showQuality();
 settingsEl.addEventListener('click', e => { if (e.target === settingsEl) openSettings(false); });
 document.getElementById('settingsClose')!.addEventListener('click', () => openSettings(false));
 /** what a slider sounds like: a spoken name, the music (it plays on), a

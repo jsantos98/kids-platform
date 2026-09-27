@@ -24,12 +24,18 @@ export const PT: Record<Key, string> = {
   'garage.go': 'VAMOS!',
   'garage.letsGo': '{title}. Vamos lá!',
   'garage.language': 'Língua',
-  'settings.title': 'Definições de som',
+  'settings.title': 'Definições',
   'settings.voice': 'Voz',
   'settings.music': 'Música',
   'settings.bg': 'Sons de fundo',
   'settings.engine': 'Motores',
   'settings.close': 'Fechar',
+  'settings.quality': 'Gráficos',
+  'settings.quality.auto': 'Automático',
+  'settings.quality.low': 'baixos',
+  'settings.quality.medium': 'médios',
+  'settings.quality.high': 'altos',
+  'settings.qualityNote': 'O automático baixa os gráficos sozinho se o jogo estiver lento. Baixos é o melhor para um computador mais antigo.',
 
   // os carros de corrida (raceCars.ts), escolhidos depois da corrida na garagem
   'cars.blurb': 'Escolhe o teu carro de corrida!',
@@ -77,7 +83,7 @@ export const PT: Record<Key, string> = {
   'city.music': 'música ligada / desligada',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',
-  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · chamadas de desenho {calls} · triângulos {tris}',
+  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · {fps} fps · gráficos {quality} · chamadas de desenho {calls} · triângulos {tris}',
 
   // ---- a carregar ----
   'load.ready': 'A preparar…',

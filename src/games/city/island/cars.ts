@@ -47,7 +47,9 @@ const FALLBACK_COLORS = [0xfaf7ef, 0xd9dde2, 0x7fb2d9, 0xe25c5c];
 /** cars nearer than this light their lamps at night (m) */
 const LAMP_R = 150;
 /** cars farther than this from the player aren't drawn (the fog is ~260 m) */
-const DRAW_R = 190;
+let DRAW_R = 190;
+/** draw the cars over a shorter distance (× 190 m: the graphics quality, G13) */
+export function setCarDrawScale(k: number): void { DRAW_R = 190 * k; }
 
 /** how deep a car (centre, heading, half length; 1 m half width) and a
  * getaway car's footprint overlap (m; ≤ 0 clear) */

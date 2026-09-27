@@ -154,6 +154,13 @@
   #settings button { align-self: flex-end; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer;
     background: var(--sel, #e25c5c); color: #fffdf8; font: inherit; font-weight: 800; }
   #lang button.gear { padding: 6px 10px; }
+  #settings .quality { display: grid; grid-template-columns: 11em 1fr; align-items: center; gap: 12px;
+    font-weight: 800; font-size: clamp(14px, 2vh, 18px); color: var(--ink-soft); }
+  #settings .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  #settings .seg button { align-self: auto; padding: 8px 14px; background: #e9e2d4; color: var(--ink);
+    text-transform: capitalize; }
+  #settings .seg button.on { background: var(--sel, #e25c5c); color: #fffdf8; }
+  #settings .note { margin: -4px 0 0; font-size: clamp(12px, 1.6vh, 14px); color: var(--ink-soft); max-width: 36em; }
 </style>
 </head>
 <body>
@@ -181,6 +188,13 @@
     <label><span data-i18n="settings.music"></span><input type="range" min="0" max="100" data-vol="music"><output></output></label>
     <label><span data-i18n="settings.bg"></span><input type="range" min="0" max="100" data-vol="bg"><output></output></label>
     <label><span data-i18n="settings.engine"></span><input type="range" min="0" max="100" data-vol="engine"><output></output></label>
+    <div class="quality"><span data-i18n="settings.quality"></span><div class="seg" role="radiogroup">
+      <button type="button" role="radio" data-quality="auto" data-i18n="settings.quality.auto"></button>
+      <button type="button" role="radio" data-quality="low" data-i18n="settings.quality.low"></button>
+      <button type="button" role="radio" data-quality="medium" data-i18n="settings.quality.medium"></button>
+      <button type="button" role="radio" data-quality="high" data-i18n="settings.quality.high"></button>
+    </div></div>
+    <p class="note" data-i18n="settings.qualityNote"></p>
     <button id="settingsClose" type="button" data-i18n="settings.close"></button>
   </div>
 </div>

@@ -26,7 +26,9 @@ import { deckAt } from '../../../worlds/causeway.js';
 
 /** kit characters are ~0.7 units tall; scale them to villager height (~1.6 m) */
 const PED_SCALE = 2.2;
-const DRAW_R = 150;
+let DRAW_R = 150;
+/** draw the people over a shorter distance (× 150 m: the graphics quality, G13) */
+export function setWalkerDrawScale(k: number): void { DRAW_R = 150 * k; }
 const FLEE_R = 12;
 /** walkers keep this far outside a vehicle's footprint (m) */
 export const WALK_CLEAR = 0.6;

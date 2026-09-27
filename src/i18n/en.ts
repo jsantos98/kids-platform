@@ -23,12 +23,18 @@ export const EN = {
   'garage.go': 'GO!',
   'garage.letsGo': "{title}. Let's go!",
   'garage.language': 'Language',
-  'settings.title': 'Sound settings',
+  'settings.title': 'Settings',
   'settings.voice': 'Voice',
   'settings.music': 'Music',
   'settings.bg': 'Background sounds',
   'settings.engine': 'Engines',
   'settings.close': 'Close',
+  'settings.quality': 'Graphics',
+  'settings.quality.auto': 'Automatic',
+  'settings.quality.low': 'low',
+  'settings.quality.medium': 'medium',
+  'settings.quality.high': 'high',
+  'settings.qualityNote': 'Automatic lowers the graphics by itself if the game runs slowly. Low is best for an older computer.',
 
   // the race cars (raceCars.ts), picked after the race in the garage
   'cars.blurb': 'Pick your race car!',
@@ -76,7 +82,7 @@ export const EN = {
   'city.music': 'music on / off',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
-  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · draw calls {calls} · triangles {tris}',
+  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · {fps} fps · graphics {quality} · draw calls {calls} · triangles {tris}',
 
   // ---- loading ----
   'load.ready': 'Getting ready…',

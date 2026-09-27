@@ -1,7 +1,8 @@
 // The Endless City: boot, frame loop and play-mode orchestration (fire truck,
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
-import { createStage, makeHUD, type Dressing } from '../../engine/stage.js';
+import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
+import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, type Quality } from '../../engine/settings.js';
 import { bakedNight } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
@@ -26,6 +27,8 @@ import { createSea, boatLoop, waveAt } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
+import { setCarDrawScale } from './island/cars.js';
+import { setWalkerDrawScale } from './island/walkers.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, chunkGroundColor, inBox } from '../../worlds/cityChunk.js';
@@ -154,11 +157,19 @@ function modeSpawn(bx: number, by: number): { x: number; z: number; heading: num
 }
 
 // ---- stage & world dressing ----
+// (the graphics quality, G13: a level to start at, and in "auto" the frames
+// timed so it steps down while they are slow)
+let quality: Quality = startQuality();
+const qualityAuto = qualityPref() === 'auto';
 const stage = createStage({
-  sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: 70, fogFar: 260,
+  sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: TIERS[quality].fogNear, fogFar: TIERS[quality].fogFar,
   ground: false, groundColor: 0xa9c88b, clouds: true,
 });
 const { scene, camera, renderer } = stage;
+setCarDrawScale(TIERS[quality].drawScale);
+setWalkerDrawScale(TIERS[quality].drawScale);
+applyQuality(renderer, stage.sun, TIERS[quality]);
+let shadowFrame = 0;
 
 // ground follower — deep backdrop below the sea, hides the world's edge
 const groundFollower = new THREE.Mesh(
@@ -429,7 +440,49 @@ if (q.get('debugbake') === '1') {
 // the archipelago is far too big to build at once: chunks spring up around
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
-const chunks = new ChunkManager(scene, 64, 4);
+const chunks = new ChunkManager(scene, 64, TIERS[quality].viewR);
+
+/** switch to another graphics quality while playing (G13) */
+function setQuality(q: Quality): void {
+  quality = q;
+  const tier = TIERS[q];
+  applyQuality(renderer, stage.sun, tier);
+  chunks.setViewRadius(tier.viewR);
+  const fog = scene.fog as THREE.Fog;
+  fog.near = tier.fogNear;
+  fog.far = tier.fogFar;
+  setCarDrawScale(tier.drawScale);
+  setWalkerDrawScale(tier.drawScale);
+  if (qualityAuto) setAutoQuality(q);
+}
+/** the frames' real time, in 3 s windows: the frame rate the HUD shows, and
+ * what "auto" steps on — down after two slow windows (under ~36 fps), up
+ * only after eight steady ones at the screen's 60 fps and never again once
+ * it has stepped down (it would go up and down) */
+const perf = { last: performance.now(), t0: performance.now(), sum: 0, n: 0, fps: 0, slow: 0, fast: 0, downed: false };
+function timeFrame(): void {
+  const now = performance.now(), ms = now - perf.last;
+  perf.last = now;
+  // (a hitch — a tab switch, a boot bake — isn't the frame rate)
+  if (ms < 250) { perf.sum += ms; perf.n++; }
+  if (now - perf.t0 < 3000) return;
+  const avg = perf.n ? perf.sum / perf.n : 16;
+  perf.fps = Math.round(1000 / avg);
+  perf.t0 = now; perf.sum = 0; perf.n = 0;
+  // (a mission scene is a small stage; the first seconds are still loading)
+  if (!qualityAuto || director.busy || elapsed < 8) return;
+  perf.slow = avg > 28 ? perf.slow + 1 : 0;
+  perf.fast = avg < 18 ? perf.fast + 1 : 0;
+  if (perf.slow >= 2) {
+    const lo = lowerQuality(quality);
+    if (lo) { setQuality(lo); perf.downed = true; }
+    perf.slow = 0;
+  } else if (perf.fast >= 8 && !perf.downed) {
+    const hi = higherQuality(quality);
+    if (hi) setQuality(hi);
+    perf.fast = 0;
+  }
+}
 // the city's lights at night: lamp glows, pools, lit signals (G10)
 const nightLights = new NightLights(scene, camera.position);
 chunks.night = nightLights;
@@ -930,6 +983,7 @@ function nextStation(): { x: number; z: number; gap: number } | null {
 
 // ---- main loop ----
 const tick = (): void => {
+  timeFrame();
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
   const input = readDriveInput();
@@ -1527,6 +1581,9 @@ const tick = (): void => {
   bakedNight.value = day.night;
   setGuideNight(day.night);
   renderer.toneMappingExposure = day.exposure;
+  // (at a low graphics quality the city's shadows are drawn every n-th
+  // frame — a mission scene's, a small stage, every frame: G13)
+  if (!renderer.shadowMap.autoUpdate) renderer.shadowMap.needsUpdate = !!view.scene || ++shadowFrame % TIERS[quality].shadowEvery === 0;
   if (view.scene && view.camera) {
     // a mission scene plays at the world's time of day
     (view.scene.userData.dressing as Dressing | undefined)?.applyDay(day, 0, 0, elapsed, view.camera.position);
@@ -1539,7 +1596,7 @@ const tick = (): void => {
     statTime = elapsed;
     const i = renderer.info.render;
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()) }));
+    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()), fps: perf.fps, quality: tr(`settings.quality.${quality}` as Key) }));
     // (the tab shows the page's name; the dev probe keeps its stats title)
     if (q.get('debugsea') === '1') document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };

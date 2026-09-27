@@ -43,6 +43,9 @@ export class ChunkManager {
 
   constructor(private scene: THREE.Scene, private CH = 64, private VIEW_R = 4) {}
 
+  /** how many chunks round the kid are drawn (the graphics quality, G13) */
+  setViewRadius(r: number): void { this.VIEW_R = r; }
+
   /** resolve a world-chunk column/row to the owning city + local chunk */
   private resolve(wx: number, wz: number): { bx: number; by: number; cx: number; cz: number } | null {
     const city = cityAt(wx * this.CH + 0.5, wz * this.CH + 0.5);

@@ -60,13 +60,6 @@
     border: 3px solid rgba(255, 253, 246, .85);
     backface-visibility: hidden;
   }
-  /* its back, seen as it flips round */
-  .vcard .back {
-    position: absolute; inset: 0; border-radius: 24%; display: grid; place-items: center;
-    transform: rotateY(180deg); backface-visibility: hidden;
-    background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--c) 80%, #fff) 0 10%, var(--c) 10% 20%);
-    border: 3px solid #fffdf6; color: #fffdf6; font-size: 8vh; text-shadow: 0 3px 0 rgba(40, 46, 54, .25);
-  }
   .vcard .face img { width: 94%; height: 94%; object-fit: contain; pointer-events: none; user-select: none;
     filter: drop-shadow(0 4px 3px rgba(30, 34, 40, .35)); }
   .vcard .face .emo { font-size: 8.5vh; line-height: 1; filter: drop-shadow(0 3px 2px rgba(30, 34, 40, .3)); }

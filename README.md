@@ -78,7 +78,7 @@ the wind over the person, or chase the robber across a town square.
 ## How to play
 
 1. Open the game. The **garage** shows each vehicle on a stage of its own (a street, rails, a canal, a helipad, a runway, a race track), turning slowly; a row of cards with their pictures runs along the bottom.
-2. **Turn the wheel** to glide the cards along (keep it turned to keep stepping): the vehicle there drives off, the next one drives in with its own sound, and its card flips round in the middle.
+2. **Turn the wheel** to glide the cards along (keep it turned to keep stepping): the vehicle there drives off, the next one drives in with its own sound, and its card pops up in the middle.
 3. **Press the pedal** (or any wheel button, Enter, or click **GO!**) to start.
 4. Follow the **arrow over the vehicle**. The badge at the top shows what the
    call is and how far away it is. The arrow swings into a turn well before

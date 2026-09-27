@@ -346,9 +346,8 @@ let cards: HTMLElement[] = [];
 /** where the row is (a card index, unbounded: it glides) and where it's going */
 let pos = sel, vel = 0, target = sel;
 let lastTick = Math.round(pos);
-/** the chosen card's flip: owed until it reaches the middle, then played
- * from `flipAt` (its way round follows the way the row moved) */
-let flipOwed = false, flipAt = -9, flipDir = 1;
+/** the chosen card's little pop: owed until it reaches the middle, then played from `popAt` */
+let popOwed = false, popAt = -9;
 function paintCard(card: HTMLElement, it: Item): void {
   const face = card.firstElementChild as HTMLElement;
   const pic = thumbs.get(keyOf(it));
@@ -371,11 +370,7 @@ function buildCards(): void {
     card.style.setProperty('--c', it.color);
     const face = document.createElement('div');
     face.className = 'face';
-    // (its back, for the flip: the card's colour and a star)
-    const back = document.createElement('div');
-    back.className = 'back';
-    back.textContent = '★';
-    card.append(face, back);
+    card.append(face);
     paintCard(card, it);
     card.addEventListener('click', () => { if (i === sel) go(); else choose(i); });
     return card;
@@ -385,8 +380,6 @@ function buildCards(): void {
 }
 const wrap = (v: number, n: number): number => ((((v + n / 2) % n) + n) % n) - n / 2;
 const smooth = (k: number): number => k * k * (3 - 2 * k);
-/** ease out with a little overshoot, settling at 1 */
-const easeOutBack = (k: number): number => 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2;
 /** every card's place, from where the row is now */
 function placeCards(time: number): void {
   const n = list.length, unit = carousel.clientHeight * 0.62;
@@ -397,18 +390,14 @@ function placeCards(time: number): void {
     const x = sgn * (a <= 1 ? a * unit * 1.02 : unit * 1.02 + (a - 1) * unit * 0.46);
     const rot = -Math.max(-1, Math.min(1, o)) * 58;
     let s = a < 1 ? 1.18 - smooth(a) * 0.52 : 0.66 - Math.min(3, a - 1) * 0.04;
-    // the chosen one: a flip as it arrives in the middle, then breathing
-    let spin = 0;
+    // the chosen one: a little pop as it arrives in the middle, then breathing
     if (i === sel) {
-      if (flipOwed && a < 0.3) { flipOwed = false; flipAt = time; }
-      const k = (time - flipAt) / 0.7;
-      if (k >= 0 && k < 1) {
-        spin = flipDir * 360 * (1 - easeOutBack(k));
-        s *= 1 + Math.sin(k * Math.PI) * 0.12;
-      }
+      if (popOwed && a < 0.3) { popOwed = false; popAt = time; }
+      const k = (time - popAt) / 0.45;
+      if (k >= 0 && k < 1) s *= 1 + Math.sin(k * Math.PI) * 0.1;
     }
     if (a < 0.04) s *= 1 + 0.035 * Math.sin(time * (Math.PI * 2 / 2.4));
-    card.style.transform = `translateX(${x.toFixed(1)}px) translateZ(${(-a * 60).toFixed(1)}px) rotateY(${(rot + spin).toFixed(1)}deg) scale(${s.toFixed(3)})`;
+    card.style.transform = `translateX(${x.toFixed(1)}px) translateZ(${(-a * 60).toFixed(1)}px) rotateY(${rot.toFixed(1)}deg) scale(${s.toFixed(3)})`;
     card.style.opacity = String(a > 4.6 ? 0 : a > 3.8 ? (4.6 - a) / 0.8 : 1);
     card.style.zIndex = String(100 - Math.round(a * 10));
     card.style.filter = a < 0.5 ? '' : `brightness(${(1 - Math.min(3, a) * 0.07).toFixed(2)})`;
@@ -458,8 +447,7 @@ function choose(i: number): void {
   const d = wrap(to - sel, n) || 1;
   target += d;
   sel = to;
-  flipOwed = true;
-  flipDir = Math.sign(d);
+  popOwed = true;
   if (stage === 'modes') store.set(PICK_KEY, list[sel].id);
   else if (list[sel].id !== 'back') store.set(CAR_KEY, list[sel].id);
   swapTo(list[sel], Math.sign(d));

@@ -9,8 +9,8 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 The garage got a makeover. Along the bottom is a row of cards, each with a
 picture of its vehicle, turned and tucked behind each other like a deck; the
-chosen one is big and whole in the middle, flips round as it arrives there and
-gently breathes while it's chosen. The cards glide, growing as they come to
+chosen one is big and whole in the middle, pops a little as it arrives there
+and gently breathes while it's chosen. The cards glide, growing as they come to
 the middle, with a soft tick as each one passes.
 
 Every vehicle stands on a stage of its own — the road vehicles on a street,

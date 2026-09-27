@@ -14,10 +14,12 @@
 // while another is being said, and each kind of moment has a cooldown.
 import { speak, speaking } from '../../i18n/voice.js';
 
-type Moment = 'start' | 'call' | 'arrive' | 'praise' | 'gate' | 'gateTwo' | 'gateLast' | 'courseDone'
-  | 'caught' | 'spotted' | 'closing' | 'dashed' | 'oops'
-  | 'raceCount' | 'lastLap' | 'place' | 'raceUp' | 'raceDown' | 'raceLead' | 'almost' | 'station' | 'brake' | 'missed' | 'night' | 'morning'
-  | 'flame' | 'catMoved' | 'hearts' | 'chaseRun' | 'hold';
+/** every moment the narrator has a line for */
+export const MOMENTS = ['start', 'call', 'arrive', 'praise', 'gate', 'gateTwo', 'gateLast', 'courseDone',
+  'caught', 'spotted', 'closing', 'dashed', 'oops',
+  'raceCount', 'lastLap', 'place', 'raceUp', 'raceDown', 'raceLead', 'almost', 'station', 'brake', 'missed', 'night', 'morning',
+  'flame', 'catMoved', 'hearts', 'chaseRun', 'hold'] as const;
+export type Moment = typeof MOMENTS[number];
 
 /** how many variants each moment has (say.<moment>.<n>) */
 const VARIANTS: Partial<Record<Moment, number>> = {
@@ -55,32 +57,42 @@ export class Narrator {
   }
 
   private pick(m: Moment, detail?: string | number): string | null {
-    switch (m) {
-      case 'start': return `say-start-${detail}`;
-      case 'call': return this.variant(`say-call-${detail}`, 2);
-      case 'courseDone': return 'say-course-done';
-      case 'raceCount': return 'say-race-count';
-      case 'lastLap': return 'say-race-lastLap';
-      case 'place': return `say-race-place${Math.min(4, Math.max(1, Number(detail) || 4))}`;
-      case 'spotted': return this.variant(`say-spotted-${detail}`, 2);
-      case 'gateTwo': return 'say-gate-two';
-      case 'brake': return 'say-brake';
-      case 'gateLast': return 'say-gate-last';
-      case 'raceUp': return detail === 1 ? this.variant('say-race-up1', 2) : detail === 2 || detail === 3 ? `say-race-up${detail}` : null;
-      case 'raceDown': return this.variant('say-race-down', 2);
-      case 'raceLead': return this.variant('say-race-lead', 2);
-      case 'night': return 'say-night';
-      case 'morning': return 'say-morning';
-      default: return this.variant(`say-${m}`, VARIANTS[m] ?? 1);
-    }
-  }
-
-  /** one of `n` variants (base-1 … base-n), never the last one again */
-  private variant(base: string, n: number): string {
-    const prev = this.last.get(base) ?? 0;
-    let k = 1 + Math.floor(Math.random() * n);
-    if (n > 1 && k === prev) k = (k % n) + 1;
-    this.last.set(base, k);
-    return `${base}-${k}`;
+    const ids = lineIds(m, detail);
+    if (!ids.length) return null;
+    // one of the variants, never the last one again
+    const key = ids[0];
+    const prev = this.last.get(key) ?? -1;
+    let k = Math.floor(Math.random() * ids.length);
+    if (ids.length > 1 && k === prev) k = (k + 1) % ids.length;
+    this.last.set(key, k);
+    return ids[k];
   }
 }
+
+/** every clip a moment (with its detail: the mode, the call's kind, the
+ * race place, the side) may play — one per variant, `say-<moment>-<n>`, or
+ * just `say-<moment>` for a line with one (tools/check-i18n.ts holds every
+ * one of them to a recorded clip: a missing one fell back to the system's
+ * speech voice, which read the clip's name out in a Brazilian accent) */
+export function lineIds(m: Moment, detail?: string | number): string[] {
+  const vs = (base: string, n: number): string[] => (n === 1 ? [base] : Array.from({ length: n }, (_, k) => `${base}-${k + 1}`));
+  switch (m) {
+    case 'start': return [`say-start-${detail}`];
+    case 'call': return vs(`say-call-${detail}`, 2);
+    case 'courseDone': return ['say-course-done'];
+    case 'raceCount': return ['say-race-count'];
+    case 'lastLap': return ['say-race-lastLap'];
+    case 'place': return [`say-race-place${Math.min(4, Math.max(1, Number(detail) || 4))}`];
+    case 'spotted': return vs(`say-spotted-${detail}`, 2);
+    case 'gateTwo': return ['say-gate-two'];
+    case 'brake': return ['say-brake'];
+    case 'gateLast': return ['say-gate-last'];
+    case 'raceUp': return detail === 1 ? vs('say-race-up1', 2) : detail === 2 || detail === 3 ? [`say-race-up${detail}`] : [];
+    case 'raceDown': return vs('say-race-down', 2);
+    case 'raceLead': return vs('say-race-lead', 2);
+    case 'night': return ['say-night'];
+    case 'morning': return ['say-morning'];
+    default: return vs(`say-${m}`, VARIANTS[m] ?? 1);
+  }
+}
+

@@ -178,6 +178,13 @@ document.getElementById('save').onclick = async () => {
   const r = await fetch('/save?name=voice-picks-%NAME%.json', { method: 'POST', body });
   document.getElementById('msg').textContent = r.ok ? '✔ guardado' : '✘ não guardou';
 };
+// ?only=say-arrive,say-hold,…: just those lines (an id, or the start of one —
+// say-praise shows all its variants), to hunt down one that sounds wrong
+const ONLY = (new URLSearchParams(location.search).get('only') || '').split(',').map(s => s.trim()).filter(Boolean);
+if (ONLY.length) {
+  for (const tr of rows) if (!ONLY.some(o => tr.dataset.id === o || tr.dataset.id.startsWith(o + '-'))) tr.style.display = 'none';
+  document.querySelector('h1').textContent += ` — ${rows.filter(tr => tr.style.display !== 'none').length} frases`;
+}
 document.getElementById('only').onclick = e => {
   const on = document.body.classList.toggle('only');
   e.target.textContent = on ? 'Mostrar todas' : 'Só as que faltam';

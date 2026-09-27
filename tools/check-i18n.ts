@@ -71,6 +71,28 @@ for (const f of scripts) {
   }
 }
 
+// ---- every line the narrator can say is one of the recorded lines ----
+// (a name it builds that isn't — `say-hold-1` for `say-hold` — found no clip,
+// and the system's speech voice read the name out, in a Brazilian accent)
+{
+  const { MOMENTS, lineIds } = await import('../src/games/city/narrator.js');
+  const { MODES } = await import('../src/games/city/modes.js');
+  const details: Partial<Record<string, Array<string | number>>> = {
+    start: Object.keys(MODES), call: ['fire', 'cat', 'patient', 'rescue'], place: [1, 2, 3, 4],
+    spotted: ['left', 'right', 'ahead', 'behind'], raceUp: [1, 2, 3],
+  };
+  const lines = voiceLines();
+  let n = 0;
+  for (const m of MOMENTS) {
+    for (const d of details[m] ?? [undefined]) {
+      const ids = lineIds(m, d);
+      if (!ids.length) fails.push(`narrator: '${m}'${d === undefined ? '' : ` (${d})`} has no line`);
+      for (const id of ids) { n++; if (!(id in lines)) fails.push(`narrator: '${m}'${d === undefined ? '' : ` (${d})`} would say '${id}', which is no recorded line`); }
+    }
+  }
+  if (!fails.length) console.log(`narrator: all ${n} lines it can say are recorded`);
+}
+
 // ---- the garage's key help says what each mode really answers to ----
 {
   const { GAMES } = await import('../src/games/registry.js');

@@ -41,25 +41,41 @@
   #name .b { font-weight: 700; font-size: clamp(15px, 2.5vh, 24px); color: var(--ink-soft); text-shadow: 0 1px 0 #fffdf8; }
   @keyframes pop { from { transform: scale(.7); opacity: .2; } to { transform: scale(1); opacity: 1; } }
 
-  /* ---- the carousel: every vehicle, the chosen one big in the middle ---- */
-  /* (lifted clear of the key help under it: the chosen tile's bottom came
-     within 1 px of it on an 800×600 window) */
-  #carousel { position: fixed; left: 0; right: 0; bottom: calc(5vh + 12px); height: 19vh; z-index: 5; }
-  .tile {
-    position: absolute; left: 50%; top: 50%; width: 15vh; height: 15vh; margin: -7.5vh 0 0 -7.5vh;
-    border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-    background: var(--cream); font-size: 8vh; line-height: 1;
-    box-shadow: 0 5px 0 rgba(74, 80, 88, .16);
-    transition: transform .38s cubic-bezier(.3, 1.35, .5, 1), opacity .3s, box-shadow .3s;
+  /* ---- the cards: a coverflow, the chosen one whole and big in the middle,
+     the others turned away and tucked behind each other (main.ts places
+     every card every frame, so they grow as they glide to the middle) ---- */
+  /* (lifted clear of the key help under it) */
+  #carousel { position: fixed; left: 0; right: 0; bottom: calc(5vh + 12px); height: 19vh; z-index: 5;
+    perspective: 1100px; perspective-origin: 50% 40%; }
+  .vcard {
+    position: absolute; left: 50%; top: 50%; width: 16vh; height: 16vh; margin: -8vh 0 0 -8vh;
+    cursor: pointer; transform-style: preserve-3d; will-change: transform;
   }
-  /* (a race car's tile: its picture, drawn from its model) */
-  .tile .pic { width: 92%; height: 92%; object-fit: contain; pointer-events: none; user-select: none; }
-  .tile.sel {
-    box-shadow: 0 0 0 7px var(--c), 0 0 38px 10px color-mix(in srgb, var(--c) 55%, transparent), 0 8px 0 rgba(74, 80, 88, .2);
-    animation: breathe 1.6s ease-in-out infinite;
+  .vcard .face {
+    position: absolute; inset: 0; border-radius: 24%; overflow: hidden; display: grid; place-items: center;
+    background:
+      radial-gradient(120% 90% at 30% 15%, rgba(255, 255, 255, .55), transparent 55%),
+      linear-gradient(160deg, color-mix(in srgb, var(--c) 55%, #fffdf6), color-mix(in srgb, var(--c) 88%, #3d434b));
+    box-shadow: 0 6px 0 color-mix(in srgb, var(--c) 60%, #2c3138), 0 10px 22px rgba(40, 46, 54, .28);
+    border: 3px solid rgba(255, 253, 246, .85);
+    backface-visibility: hidden;
   }
-  @keyframes breathe { 50% { filter: brightness(1.06); } }
-  .tile.jump { transition: none; }
+  /* its back, seen as it flips round */
+  .vcard .back {
+    position: absolute; inset: 0; border-radius: 24%; display: grid; place-items: center;
+    transform: rotateY(180deg); backface-visibility: hidden;
+    background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--c) 80%, #fff) 0 10%, var(--c) 10% 20%);
+    border: 3px solid #fffdf6; color: #fffdf6; font-size: 8vh; text-shadow: 0 3px 0 rgba(40, 46, 54, .25);
+  }
+  .vcard .face img { width: 94%; height: 94%; object-fit: contain; pointer-events: none; user-select: none;
+    filter: drop-shadow(0 4px 3px rgba(30, 34, 40, .35)); }
+  .vcard .face .emo { font-size: 8.5vh; line-height: 1; filter: drop-shadow(0 3px 2px rgba(30, 34, 40, .3)); }
+  /* the chosen one: a ring and a glow in its colour */
+  .vcard.sel .face {
+    border-color: #fffdf6;
+    box-shadow: 0 0 0 5px var(--c), 0 0 44px 12px color-mix(in srgb, var(--c) 60%, transparent),
+      0 8px 0 color-mix(in srgb, var(--c) 60%, #2c3138), 0 16px 30px rgba(40, 46, 54, .32);
+  }
 
   /* ---- how to drive the menu ---- */
   #help {

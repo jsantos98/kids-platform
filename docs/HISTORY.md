@@ -5,6 +5,32 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-27 — a new garage
+
+The garage got a makeover. Along the bottom is a row of cards, each with a
+picture of its vehicle, turned and tucked behind each other like a deck; the
+chosen one is big and whole in the middle, flips round as it arrives there and
+gently breathes while it's chosen. The cards glide, growing as they come to
+the middle, with a soft tick as each one passes.
+
+Every vehicle stands on a stage of its own — the road vehicles on a street,
+the train on rails, the boat in a canal, the helicopters on a helipad, the
+plane on a runway, the race cars on a race track — and only the vehicle turns.
+The camera measures each one and frames it whole between the title and its
+name, whatever its size. Choosing another sends the one there off the way the
+cards moved and brings the next one in from the other side (flying ones fly,
+the boat sails, the train rolls along its rails), and it arrives with its own
+sound: a siren blip, the rotor, the horn, its engine.
+
+![The fire truck on its street](history/2026-09-27-garage/fire-truck.jpg)
+
+| | |
+|---|---|
+| ![The police car driving in as the fire truck leaves](history/2026-09-27-garage/changing.jpg) | ![The rescue helicopter on its helipad](history/2026-09-27-garage/helicopter.jpg) |
+| ![The train on its rails](history/2026-09-27-garage/train.jpg) | |
+
+---
+
 ## 2026-09-27 — the calls in the city, and every line in Benedita's voice
 
 **The calls show what's wrong.** Driving round the island you can now tell a

@@ -117,8 +117,9 @@ export class GameAudio {
   private playlists = new Map<MusicId, Playlist>();
 
   /** @param root the path from the page to the site root (the recordings)
-   * @param sfx load the sound effects (the garage plays only music) */
-  constructor(private root = '', private sfxOn = true) {
+   * @param sfxOn load the sound effects — all of them, or only those listed
+   *   (the garage: its choosing sounds) */
+  constructor(private root = '', private sfxOn: boolean | readonly SfxId[] = true) {
     try {
       this.muted = localStorage.getItem(MUTE_KEY) === '1';
       this.musicOn = localStorage.getItem(MUSIC_KEY) !== '0';
@@ -128,7 +129,7 @@ export class GameAudio {
   /** fetch and decode every recording (a missing one keeps its synth sound) */
   private loadSamples(): void {
     const ac = this.ac!;
-    for (const id of Object.keys(SFX) as SfxId[]) {
+    for (const id of Array.isArray(this.sfxOn) ? this.sfxOn : Object.keys(SFX) as SfxId[]) {
       void fetch(`${this.root}audio/sfx/${id}.ogg`)
         .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
         .then(b => ac.decodeAudioData(b))
@@ -618,6 +619,51 @@ export class GameAudio {
     g.gain.value = 1 / (1 + dist / fade);
     p.connect(g); g.connect(this.sfx!);
     return p;
+  }
+
+  // ---- the garage: its choosing sounds ----
+
+  /** a soft tick: a card passing the middle */
+  tick(): void {
+    if (!this.ac) return;
+    this.note(1760, this.ac.currentTime, 0.035, 0.045, 'sine');
+  }
+
+  /** a small whoosh: a vehicle leaving */
+  whoosh(): void {
+    if (!this.ac) return;
+    const ac = this.ac, t = ac.currentTime;
+    const s = ac.createBufferSource();
+    s.buffer = this.noise;
+    const b = ac.createBiquadFilter();
+    b.type = 'bandpass'; b.Q.value = 1.2;
+    b.frequency.setValueAtTime(500, t);
+    b.frequency.exponentialRampToValueAtTime(2200, t + 0.35);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    s.connect(b); b.connect(g); g.connect(this.sfx!);
+    s.start(t, Math.random()); s.stop(t + 0.45);
+  }
+
+  /** a moment of a recording — a siren's blip, a rotor, an engine — faded in
+   * and out over `secs`, on the engine bus or the effects bus */
+  blip(id: SfxId, secs = 1, gain = 0.5, bus: 'engine' | 'sfx' = 'sfx'): void {
+    const buf = this.samples.get(id);
+    if (!buf || !this.ac) return;
+    const ac = this.ac, t = ac.currentTime;
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    src.loop = buf.duration < secs;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + Math.min(0.15, secs / 4));
+    g.gain.setValueAtTime(gain, t + secs * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + secs);
+    src.connect(g); g.connect(bus === 'engine' ? this.engineBus! : this.sfx!);
+    src.start(t);
+    src.stop(t + secs + 0.05);
   }
 
   // ---- the mission scenes (G4) ----

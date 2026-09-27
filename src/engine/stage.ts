@@ -108,6 +108,13 @@ export interface Dressing {
   applyDay(day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3, shadow?: ShadowFocus): void;
 }
 
+/** the shadow light holds its direction until the sun has moved this far
+ * from it (rad), then catches up in one step: turned a little every frame,
+ * the shadow map's texel grid turned with it and every shadow edge
+ * shimmered; now nothing moves between steps (~1.2 a second at the day's
+ * pace). Stepping azimuth and elevation apart stepped three times as often. */
+const SUN_STEP = Math.cos((0.3 * Math.PI) / 180);
+
 /** Sky (sky.ts), fog, hemisphere fill, the warm shadow-casting sun, optional
  * sun disc and ground — everything a pastel scene needs besides its content.
  * Shared by the world stage and the mission scenes (same renderer). A scene
@@ -164,6 +171,9 @@ export function makeSceneDressing(scene: THREE.Scene, {
   const MAP = sun.shadow.mapSize.x;
   let span = shadowSpan;
   const _dir = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _c = new THREE.Vector3();
+  /** the direction the shadow light holds (null: none yet) */
+  let held: THREE.Vector3 | null = null;
+  const _now = new THREE.Vector3();
   const applyDay = (day: DayState, cx: number, cz: number, time: number, cam?: THREE.Vector3, shadow?: ShadowFocus) => {
     (scene.fog as THREE.Fog).color.setHex(day.skyBottom);
     hemi.color.setHex(day.hemiSky);
@@ -173,7 +183,10 @@ export function makeSceneDressing(scene: THREE.Scene, {
     sun.intensity = day.lightI;
     // the shadow box: round the focus (by default the centre), its size, and
     // snapped to whole shadow texels across the light — else every step of
-    // the kid slides the texel grid and the shadows' edges crawl
+    // the kid slides the texel grid and the shadows' edges crawl; and the
+    // light itself turns in SUN_STEP steps (the sky's sun disc still moves
+    // smoothly): turned a hair every frame, the grid turned with it and the
+    // shadows trembled
     const sx = shadow?.x ?? cx, sz = shadow?.z ?? cz, want = shadow?.span ?? shadowSpan;
     if (want !== span) {
       span = want;
@@ -181,7 +194,9 @@ export function makeSceneDressing(scene: THREE.Scene, {
       sun.shadow.camera.updateProjectionMatrix();
     }
     const texel = (2 * span) / MAP;
-    _dir.set(...day.lightDir);
+    _now.set(...day.lightDir);
+    if (!held || held.dot(_now) < SUN_STEP) held = (held ?? new THREE.Vector3()).copy(_now);
+    _dir.copy(held);
     _r.set(0, 1, 0).cross(_dir).normalize();
     _u.copy(_dir).cross(_r);
     _c.set(sx, 0, sz);

@@ -20,6 +20,8 @@ import { meshFromBakedData } from '../src/engine/baked.js';
 import { createHash } from 'node:crypto';
 import { clearCoastCache } from '../src/worlds/coast.js'; // (coastFor imported above)
 import { clearRiverCache, riverFor } from '../src/worlds/riverRoute.js';
+import { riverDecksFor, clearRiverDeckCache } from '../src/worlds/riverDecks.js';
+import { BRIDGE_HALF, deckReach } from '../src/worlds/deckDims.js';
 import { cityRoadPieces, edgePieces, pieceOutline, nodeReach } from '../src/worlds/roadLayout.js';
 import { MIN_ANGLE, MIN_EDGE, segDist, clearStreetNetCache } from '../src/worlds/streetGen.js';
 import { EXIT_IN } from '../src/worlds/streetLines.js';
@@ -35,6 +37,7 @@ const clearAllWorldCaches = (): void => {
   clearRailCache();
   clearOccupancyCache();
   clearRiverCache();
+  clearRiverDeckCache();
   clearGraphCache();
   clearStreetLineCache();
   clearCoastCache();
@@ -71,6 +74,8 @@ let railOnRoadSegs = 0;
 let worstRide = 0;
 let railRiverRoadTotal = 0;
 let lotClashTotal = 0;
+/** R40: lot outlines / cells on a river bridge's road deck, deck cells not painted ROAD */
+let deckLots = 0, deckHoles = 0;
 let seaBuiltTotal = 0;
 let seaRoadTotal = 0;
 let foldTotal = 0;
@@ -462,6 +467,30 @@ for (const [bx, by] of cells) {
     if ((b & SEA) && (b & ROAD) && !(b & DECK)) seaRoadTotal++;
   }
 
+  // R40: nothing built on a river bridge — no lot outline point within a
+  // road deck (+1 m), and every cell of a deck is DECK in the grid (so no
+  // prop or tree placement can claim it)
+  for (const d of riverDecksFor(bx, by)) {
+    if (d.kind !== 'road') continue;
+    const inDeck = (x: number, z: number, m: number): boolean => {
+      const t = (x - d.ax) * d.ux + (z - d.az) * d.uz;
+      return t >= -m && t <= d.len + m && Math.abs((x - d.ax) * d.uz - (z - d.az) * d.ux) < d.half + m;
+    };
+    for (let cx = 0; cx < WORLD_CHUNKS; cx++) for (let cz = 0; cz < WORLD_CHUNKS; cz++) for (const l of plan.lots(cx, cz)) {
+      if (Math.abs(l.x - d.ax) > d.len + 40 || Math.abs(l.z - d.az) > d.len + 40) continue;
+      const c = Math.cos(l.ry), s = Math.sin(l.ry);
+      const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]]
+        .map(([a, b]) => ({ x: l.x + a * l.w / 2 * c + b * l.d / 2 * s, z: l.z - a * l.w / 2 * s + b * l.d / 2 * c }));
+      if (pts.some(p => inDeck(p.x, p.z, 1))) {
+        deckLots++;
+        console.log(`  R40 detail: city ${bx},${by} ${l.kind} lot at (${l.x.toFixed(0)},${l.z.toFixed(0)}) on the deck of edge ${d.edge}`);
+      }
+    }
+    for (let t = 0.7; t <= d.len - 0.7; t += 1) for (let a = -d.half + 0.7; a <= d.half - 0.7; a += 1) {
+      if (!(occ.bits(d.ax + d.ux * t + d.uz * a, d.az + d.uz * t - d.ux * a) & DECK)) deckHoles++;
+    }
+  }
+
   // R33: every built block is at least 55% built over — of the ground a
   // small (7 m) lot could legally stand on, LOT cells cover >= 55%; and the
   // districts ring out from the centre (business, mixed, residential), with
@@ -638,6 +667,8 @@ if (railRiverRoadTotal > 0) fail('R22', `${railRiverRoadTotal} rail+river+road c
 if (seaBuiltTotal > 0) fail('R29', `${seaBuiltTotal} lot/rail/plaza cells stand in the sea`);
 if (seaRoadTotal > 0) fail('R29', `${seaRoadTotal} street cells run out over the sea off the causeway decks`);
 if (lotClashTotal > 0) fail('R23', `${lotClashTotal} lot cells overlap street/track/water/plaza`);
+if (deckLots > 0) fail('R40', `${deckLots} lots stand on a river bridge's deck`);
+if (deckHoles > 0) fail('R40', `${deckHoles} river bridge deck cells aren't DECK in the grid (props could stand there)`);
 if (foldTotal > 0) fail('R24', `${foldTotal} hairpin folds — the railway doubles back on itself`);
 if (strayNodes > 0) fail('R1', `${strayNodes} nodes on disconnected "private" roads — the island web must be one piece`);
 if (bareCrossings > 0) fail('R10', `${bareCrossings} rail x road crossings have no barriers recorded`);
@@ -790,6 +821,7 @@ function blockFillShare(p: CityPlan, b: CityBlock, occ: CityGrid, rail: RailNet,
   const W = Math.ceil(x1) - x0 + 1, H = Math.ceil(z1) - z0 + 1;
   const ok = new Uint8Array(W * H);
   const near = p.edges.filter(e => segDist({ x: b.cx, z: b.cz }, p.nodes[e.a], p.nodes[e.b]) < Math.hypot(W, H));
+  const bridges = p.riverBridges.filter(br => Math.hypot(br.x - b.cx, br.z - b.cz) < Math.hypot(W, H) + 40);
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const x = x0 + i + 0.5, z = z0 + j + 0.5;
     if (!inBlock(b, x, z)) continue;
@@ -797,6 +829,11 @@ function blockFillShare(p: CityPlan, b: CityBlock, occ: CityGrid, rail: RailNet,
     if (near.some(e => segDist({ x, z }, p.nodes[e.a], p.nodes[e.b]) < 8.5)) continue;
     if (p.nodes.some(n => Math.hypot(n.x - x, n.z - z) < (n.plaza ? 22.5 : Math.max(7, ...n.reach) + 3))) continue;
     if (rail.near(x, z, 16) || river.near(x, z, 14.25) && river.near(x, z, river.halfAt(x, z) + 6.5) || !coast.inLand(x, z, 4)) continue;
+    // (nor beside a river bridge: the lots keep off its deck — R40)
+    if (bridges.some(br => {
+      const dx = x - br.x, dz = z - br.z, ux = Math.sin(br.heading), uz = Math.cos(br.heading);
+      return Math.abs(dx * ux + dz * uz) < deckReach(river.halfAt(br.x, br.z)) + 1.5 && Math.abs(dx * uz - dz * ux) < BRIDGE_HALF + 1.5;
+    })) continue;
     ok[j * W + i] = 1;
   }
   // opening with a 7 x 7 square: only ground a small lot could stand on

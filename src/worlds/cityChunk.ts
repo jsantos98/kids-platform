@@ -71,6 +71,34 @@ const _ke = new THREE.Euler();
 const _kv = new THREE.Vector3();
 const _ks = new THREE.Vector3();
 
+/** metres per kit unit of Kenney's City Kits (Suburban, Commercial,
+ * Industrial share one scale): the Industrial kit's shipping container is
+ * 0.37 × 0.35 × 0.82 units, a real 20-ft one 2.44 × 2.6 × 6.1 m. Buildings
+ * are baked at this size (±15 %), never stretched to their lot — scaled to
+ * fill the lot, a house in a small lot was 2 m tall and a shed in a big one
+ * three times a real one (R33) */
+export const KIT_M = 7.2;
+/** how far a building may be scaled from its true size to fit its lot */
+const FIT_MIN = 0.85, FIT_MAX = 1.15;
+
+/** the building for a lot `w` wide (along its street) and `d` deep: among
+ * the templates that fit at their true size (±15 %), one of the three that
+ * fill it best (picked by `v`, 0…1), with its scale — or null when none fits */
+export function fitBuilding(tpls: readonly BakedTemplate[], w: number, d: number, v: number, room = 0.94): { tpl: BakedTemplate; s: number } | null {
+  const fits: Array<{ tpl: BakedTemplate; s: number; fill: number }> = [];
+  for (const tpl of tpls) {
+    const sx = (w * room) / (tpl.size.x * KIT_M), sz = (d * room) / (tpl.size.z * KIT_M);
+    const k = Math.min(FIT_MAX, sx, sz);
+    if (k < FIT_MIN) continue;
+    const s = k * KIT_M;
+    fits.push({ tpl, s, fill: (tpl.size.x * s * tpl.size.z * s) / (w * d) });
+  }
+  if (!fits.length) return null;
+  fits.sort((a, b) => b.fill - a.fill);
+  const best = fits.slice(0, Math.min(3, fits.length));
+  return best[Math.min(best.length - 1, Math.floor(v * best.length))];
+}
+
 function bakeModel(B: Baked, tpl: BakedTemplate, x: number, y: number, z: number, ry: number, s: number, s3: [number, number, number] | null = null): void {
   _ke.set(0, ry, 0);
   _kq.setFromEuler(_ke);
@@ -122,7 +150,9 @@ function kenneyTPL() {
     },
     cars: ['car-sedan', 'car-suv', 'car-taxi', 'car-hatch'].map(bakedModel).filter((t): t is BakedTemplate => !!t),
     industrial: [...'abcdefghijklmnopqrst'].map(b => bakedModel('ind-' + b)).filter((t): t is BakedTemplate => !!t),
-    indExtras: ['ind-tank', 'ind-tank-l', 'ind-box-a', 'ind-box-b', 'ind-box-c']
+    indTanks: ['ind-tank', 'ind-tank-l']
+      .map(bakedModel).filter((t): t is BakedTemplate => !!t),
+    containers: ['ind-box-a', 'ind-box-b', 'ind-box-c']
       .map(bakedModel).filter((t): t is BakedTemplate => !!t),
     chimney: bakedModel('ind-chimney-l') ?? bakedModel('ind-chimney-m'),
     // the block filler's lots: suburban houses, garden / courtyard / works-yard props
@@ -738,13 +768,20 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       const industrial = plan.districtAt(lot.x, lot.z) === 'industrial';
       const tpls = industrial ? TPL.industrial : TPL.buildings;
       if (tpls.length) {
-        // occasionally an industrial lot is just stacked containers / a tank
-        const tpl = industrial && TPL.indExtras.length && r() < 0.22
-          ? pick(r, TPL.indExtras)
-          : tpls[((lot.v * tpls.length) | 0) % tpls.length];
-        const s = Math.min((lot.w * 0.92) / tpl.size.x, (lot.d * 0.92) / tpl.size.z);
+        // occasionally an industrial lot is a big tank (true size too)
+        const tank = industrial && TPL.indTanks.length && r() < 0.22;
+        const fit = fitBuilding(tank ? TPL.indTanks : tpls, lot.w, lot.d, lot.v);
+        if (!fit) {
+          // (no building fits this lot at its true size: a works yard / a
+          // paved court instead of a stretched or shrunk one)
+          if (industrial) bakeYard(lot); else bakeCourt(lot);
+          return;
+        }
+        const { tpl, s } = fit;
+        // (the lot around a building smaller than it is paved)
+        if (!industrial) B.box(lot.w - 0.3, 0.04, lot.d - 0.3, 0xc9c6bd, lot.x, 0.12, lot.z, 0, lot.ry, 0);
         bakeModel(B, tpl, lot.x, 0.1, lot.z, lot.ry, s);
-        boxes.push({ ...obbBox(lot.x, lot.z, lot.w / 2, lot.d / 2, lot.ry), top: tpl.size.y * s + 0.1 });
+        boxes.push({ ...obbBox(lot.x, lot.z, (tpl.size.x * s) / 2, (tpl.size.z * s) / 2, lot.ry), top: tpl.size.y * s + 0.1 });
       } else {
         // procedural fallback house
         const h = 2.9 * (2 + ((lot.v * 3) | 0)) + 0.6;
@@ -796,10 +833,12 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
 
   /** a suburban house (City Kit Suburban), front to the lot's street side */
   function bakeHouse(lot: Lot): void {
-    if (!TPL.houses.length) { bakeGarden(lot); return; }
-    const tpl = TPL.houses[((lot.v * TPL.houses.length) | 0) % TPL.houses.length];
+    // a house at its true size, or a garden where none fits (a small lot held
+    // a 2 m "dog house")
+    const fit = TPL.houses.length ? fitBuilding(TPL.houses, lot.w, lot.d, lot.v, 0.86) : null;
+    if (!fit) { bakeGarden(lot); return; }
+    const { tpl, s } = fit;
     // the house on the front of the lot, a strip of lawn behind
-    const s = Math.min((lot.w * 0.86) / tpl.size.x, (lot.d * 0.8) / tpl.size.z);
     const hd = (tpl.size.z * s) / 2;
     const p = lotPt(lot, 0, lot.d / 2 - hd - 0.5);
     B.box(lot.w - 0.3, 0.04, lot.d - 0.3, 0xa8d487, lot.x, 0.13, lot.z, 0, lot.ry, 0);
@@ -847,16 +886,21 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
     if (TPL.flag && lot.v > 0.6) prop(lot, TPL.flag, lot.w / 2 - 1, -lot.d / 2 + 1, 3.2);
   }
 
-  /** a works yard: crates, barrels, timber and stone (Survival Kit), and a
-   * shipping container on the big ones */
+  /** a works yard: crates, barrels, timber and stone (Survival Kit), and
+   * rows of shipping containers — real-size, some stacked two high — on
+   * the big ones */
   function bakeYard(lot: Lot): void {
     B.box(lot.w - 0.2, 0.05, lot.d - 0.2, 0xbdb29c, lot.x, 0.14, lot.z, 0, lot.ry, 0);
-    if (lot.w >= 12 && TPL.indExtras.length && lot.v > 0.4) {
-      const tpl = pick(r, TPL.indExtras);
-      const s = Math.min((lot.w * 0.5) / tpl.size.x, (lot.d * 0.5) / tpl.size.z);
-      const p = lotPt(lot, -lot.w * 0.2, 0);
-      bakeModel(B, tpl, p.x, 0.12, p.z, lot.ry, s);
-      boxes.push(obbBox(p.x, p.z, (tpl.size.x * s) / 2, (tpl.size.z * s) / 2, lot.ry));
+    if (lot.w >= 12 && TPL.containers.length && lot.v > 0.4) {
+      const c0 = TPL.containers[0], cw = c0.size.x * KIT_M, cl = c0.size.z * KIT_M, ch = c0.size.y * KIT_M;
+      // (the yard's left 45 %, the containers' long side along the lot)
+      const cols = Math.max(1, Math.floor((lot.w * 0.45) / (cw + 0.4))), rows = Math.max(1, Math.floor((lot.d - 2) / (cl + 0.5)));
+      for (let i = 0; i < cols; i++) for (let q = 0; q < rows; q++) {
+        const lx = -lot.w / 2 + 1 + (cw + 0.4) * (i + 0.5), lz = (q - (rows - 1) / 2) * (cl + 0.5);
+        const p = lotPt(lot, lx, lz), high = r() < 0.4 ? 2 : 1;
+        for (let k = 0; k < high; k++) bakeModel(B, pick(r, TPL.containers), p.x, 0.12 + k * ch, p.z, lot.ry, KIT_M);
+        boxes.push({ ...obbBox(p.x, p.z, cw / 2, cl / 2, lot.ry), top: high * ch + 0.12 });
+      }
     }
     const n = Math.min(18, 3 + ((lot.w * lot.d) / 16 | 0));
     for (let i = 0; i < n && TPL.yardBits.length; i++) {
@@ -942,12 +986,16 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
   if (TPL.chimney || TPL.waterTower) {
     for (let t = 0; t < 6; t++) {
       const x = X0 + 12 + r() * (CH - 24), z = Z0 + 12 + r() * (CH - 24);
-      if (plan.districtAt(x, z) !== 'industrial' || occ.claims(x, z, 1.6, BLOCKED_FOR_PROPS)) continue;
+      if (plan.districtAt(x, z) !== 'industrial') continue;
       const big = r() < 0.5 && TPL.chimney ? TPL.chimney : TPL.waterTower;
       if (!big) continue;
       const s = big === TPL.chimney ? 3.2 + r() * 1.6 : 4.5 + r();
+      // (the ground it stands on is its real footprint, not a token 1.6 m:
+      // a 5 m water tower claimed 1.6 m and stood on a bridge's walkway)
+      const half = (Math.max(big.size.x, big.size.z) * s) / 2;
+      if (occ.claims(x, z, half + 0.5, BLOCKED_FOR_PROPS)) continue;
       bakeModel(B, big, x, 0.1, z, r() * Math.PI * 2, s);
-      boxes.push({ x1: x - 1.2, x2: x + 1.2, z1: z - 1.2, z2: z + 1.2, small: 1 });
+      boxes.push({ x1: x - half, x2: x + half, z1: z - half, z2: z + half, top: big.size.y * s + 0.1 });
       break;
     }
   }

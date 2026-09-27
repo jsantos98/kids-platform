@@ -7,6 +7,7 @@
 // The texts come from the dictionaries: change one and re-run the script
 // (tools/check-i18n.ts fails on a clip recorded from an older text).
 import { t, getLang, speechVoice, type Key } from './index.js';
+import { volume, onVolume } from '../engine/settings.js';
 import { EN } from './en.js';
 import { RACE_CARS } from '../games/raceCars.js';
 
@@ -44,7 +45,7 @@ const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station|spotted
 export function voiceMood(id: string): Mood {
   if (EXCITED.test(id)) return 'excited';
   if (/^say-(gate|race-count|race-place4|race-lastLap|race-lead|almost)/.test(id)) return 'cheer';
-  if (/^say-(oops|race-down)/.test(id)) return 'warm';
+  if (/^say-(oops|race-down|missed)/.test(id)) return 'warm';
   return 'lively';
 }
 
@@ -68,6 +69,8 @@ export function speaking(): boolean { return !!playing; }
 // line starts the moment it's asked for — an <audio> element loads lazily,
 // and not at all while its tab is in the background)
 let ctx: AudioContext | null = null;
+/** the voice's volume (the grown-ups' setting: settings.ts) */
+let out: GainNode | null = null;
 let playing: AudioBufferSourceNode | null = null;
 /** how many lines have been asked for (the last one is the one wanted) */
 let said = 0;
@@ -77,6 +80,10 @@ function context(): AudioContext | null {
   try {
     if (!ctx) {
       ctx = new AudioContext();
+      out = ctx.createGain();
+      out.gain.value = volume('voice');
+      out.connect(ctx.destination);
+      onVolume((k, v) => { if (k === 'voice' && out && ctx) out.gain.setTargetAtTime(v, ctx.currentTime, 0.05); });
       // (a page may only start sound after a click or a key: wake it then)
       const wake = (): void => { void ctx?.resume().catch(() => {}); };
       addEventListener('pointerdown', wake);
@@ -124,7 +131,7 @@ export function speak(id: string, root = ''): Promise<void> {
         const { lang, voice } = speechVoice();
         u.lang = lang;
         if (voice) u.voice = voice;
-        u.rate = 0.95; u.pitch = 1.15;
+        u.rate = 0.95; u.pitch = 1.15; u.volume = volume('voice');
         u.onend = () => done();
         u.onerror = () => done();
         synth.speak(u);
@@ -141,7 +148,7 @@ export function speak(id: string, root = ''): Promise<void> {
       void c.resume().catch(() => {});
       const node = c.createBufferSource();
       node.buffer = buf;
-      node.connect(c.destination);
+      node.connect(out ?? c.destination);
       node.onended = () => { if (playing === node) playing = null; done(); };
       node.start();
       playing = node;

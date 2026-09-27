@@ -13,14 +13,8 @@ import { railNetFor, hasRailNet } from './railRoute.js';
 import { citySeed } from './cityGrid.js';
 import { segDist } from './streetGen.js';
 
-/** the road deck's crown above the street, and the trestle's (m) */
-export const BRIDGE_H = 1.4;
-export const TRESTLE_H = 1.2;
-/** ramp length at each end of a deck (m) */
-export const DECK_RAMP = 9;
-/** half-widths: the carriageway plus a walkway each side / the track bed */
-export const BRIDGE_HALF = 10;
-export const TRESTLE_HALF = 2.4;
+import { BRIDGE_H, TRESTLE_H, DECK_RAMP, BRIDGE_HALF, TRESTLE_HALF } from './deckDims.js';
+export { BRIDGE_H, TRESTLE_H, DECK_RAMP, BRIDGE_HALF, TRESTLE_HALF };
 
 export interface RiverDeck {
   kind: 'road' | 'rail';

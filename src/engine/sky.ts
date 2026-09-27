@@ -10,6 +10,11 @@ import { MOON_PHASES } from './daylight.js';
 
 const DOME_R = 480;
 const SUN_R = 420, MOON_R = 400;
+/** the clouds: how many, the square they wrap in round the kid (m), the
+ * round window they are seen in and the band over which each fades in —
+ * the same density as 14 in the old ±450 m square, which popped them in at
+ * its edge */
+const CLOUDS = 56, CLOUD_W = 1800, CLOUD_R = 900, CLOUD_FADE = 260;
 
 const DOME_VS = /* glsl */`varying vec3 vP;
 void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
@@ -116,6 +121,7 @@ export class Sky {
   /** every cloud's puffs in one instanced mesh (a mesh per puff was 70 draw calls) */
   private clouds: THREE.InstancedMesh | null = null;
   private cloudMat: THREE.MeshLambertMaterial;
+  private cloudFade: THREE.InstancedBufferAttribute | null = null;
   private cloudBase: Array<{ x: number; z: number; y: number; s: number }> = [];
   private puffs: Array<{ cloud: number; m: THREE.Matrix4 }> = [];
   private meteor: THREE.Mesh;
@@ -141,10 +147,20 @@ export class Sky {
     this.moon.visible = false;
     scene.add(this.moon);
     // clouds: a few low-poly puffs, lit by the scene's lights (fog-free, so
-    // they read against the sky far off)
-    this.cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x555555, flatShading: true, fog: false });
+    // they read against the sky far off); each fades in and out by its own
+    // opacity (an instanced `aFade`) — grown from nothing at the edge of the
+    // window, they popped out of an empty sky
+    this.cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x555555, flatShading: true, fog: false, transparent: true });
+    this.cloudMat.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aFade;\nvarying float vFade;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vFade;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vFade;');
+    };
     if (clouds) {
-      for (let k = 0; k < 14; k++) {
+      for (let k = 0; k < CLOUDS; k++) {
         const n = 4 + ((hash1(k * 7.3) * 3) | 0);
         for (let i = 0; i < n; i++) {
           const rr = 0.7 + hash1(k * 13 + i) * 0.8;
@@ -153,9 +169,12 @@ export class Sky {
             new THREE.Quaternion(), new THREE.Vector3(rr, rr * 0.6, rr));
           this.puffs.push({ cloud: k, m });
         }
-        this.cloudBase.push({ x: (hash1(k * 1.9) - 0.5) * 900, z: (hash1(k * 2.3) - 0.5) * 900, y: 115 + hash1(k * 4.1) * 70, s: 9 + hash1(k * 3.7) * 9 });
+        this.cloudBase.push({ x: (hash1(k * 1.9) - 0.5) * CLOUD_W, z: (hash1(k * 2.3) - 0.5) * CLOUD_W, y: 115 + hash1(k * 4.1) * 70, s: 9 + hash1(k * 3.7) * 9 });
       }
-      this.clouds = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), this.cloudMat, this.puffs.length);
+      const geo = new THREE.IcosahedronGeometry(1, 1);
+      this.cloudFade = new THREE.InstancedBufferAttribute(new Float32Array(this.puffs.length).fill(1), 1);
+      geo.setAttribute('aFade', this.cloudFade);
+      this.clouds = new THREE.InstancedMesh(geo, this.cloudMat, this.puffs.length);
       this.clouds.frustumCulled = false;
       scene.add(this.clouds);
     }
@@ -200,18 +219,26 @@ export class Sky {
     }
     // clouds drift with the wind, wrapped round the centre; lit by the day
     this.cloudMat.emissive.setScalar(0.33 * (1 - d.night) + 0.08);
-    if (this.clouds) {
-      // (each cloud shrinks away toward the wrap edge, so none pops in)
-      const W = 900, drift = time * 2.2;
+    if (this.clouds && this.cloudFade) {
+      // (wrapped in a square twice the window's radius round the kid, but
+      // seen only inside the round window: each fades in by its opacity over
+      // the outer CLOUD_FADE m — wrapped where nobody can see it — at full size)
+      const W = CLOUD_W, drift = time * 2.2;
+      const fade: number[] = [];
       const place = this.cloudBase.map(b => {
         const x = ((((b.x + drift - cx) % W) + W * 1.5) % W) - W / 2;
         const z = ((((b.z - cz) % W) + W * 1.5) % W) - W / 2;
-        const edge = Math.min(1, Math.max(0, (W / 2 - Math.max(Math.abs(x), Math.abs(z))) / 70));
-        return new THREE.Matrix4().compose(new THREE.Vector3(x + cx, b.y, z + cz), new THREE.Quaternion(), new THREE.Vector3().setScalar(b.s * Math.max(1e-3, edge)));
+        const f = Math.min(1, Math.max(0, (CLOUD_R - Math.hypot(x, z)) / CLOUD_FADE));
+        fade.push(f * f * (3 - 2 * f));
+        return new THREE.Matrix4().compose(new THREE.Vector3(x + cx, b.y, z + cz), new THREE.Quaternion(), new THREE.Vector3().setScalar(b.s));
       });
       const m = new THREE.Matrix4();
-      this.puffs.forEach((p, k) => this.clouds!.setMatrixAt(k, m.multiplyMatrices(place[p.cloud], p.m)));
+      this.puffs.forEach((p, k) => {
+        this.clouds!.setMatrixAt(k, m.multiplyMatrices(place[p.cloud], p.m));
+        this.cloudFade!.setX(k, fade[p.cloud]);
+      });
       this.clouds.instanceMatrix.needsUpdate = true;
+      this.cloudFade.needsUpdate = true;
     }
     // a meteor now and then on a dark night: each 22 s slot may have one,
     // 0.8 s long, somewhere in the sky

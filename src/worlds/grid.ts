@@ -16,6 +16,7 @@ import { railNetFor, railPortals } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { ISLAND, WORLD_CHUNKS } from './world.js';
 import { raceTrackFor } from './raceIsland.js';
+import { riverDecksFor } from './riverDecks.js';
 
 export const ROAD = 1;
 export const RAIL = 2;
@@ -30,7 +31,7 @@ export const SEA = 32;
 export const DECK = 128;
 
 /** props may never claim cells carrying any of these */
-export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA | SEA;
+export const BLOCKED_FOR_PROPS = ROAD | RAIL | RIVER | LOT | PLAZA | SEA | DECK;
 /** built ground a prop cannot stand on even inside its own lot (trees) */
 export const STRUCTURED = ROAD | RAIL | RIVER | PLAZA | SEA;
 /** wild scatter (trees, junk) may own LOT-free, built-free ground only */
@@ -189,7 +190,7 @@ function paint(bx: number, by: number): CityGrid {
   // water first — everything later declares itself against the river.
   // Like the chunk baker, water is suppressed near a recorded road bridge —
   // farther for the wide causeway-corridor bridges — so the grid must not
-  // call that stretch water (the grid mirrors the world as built).
+  // call that stretch water (the grid mirrors the world as built)
   const bridges = plan.riverBridges;
   const nearBridge = (x: number, z: number): boolean =>
     bridges.some(b => Math.hypot(b.x - x, b.z - z) < (b.exit ? 16 : 11));
@@ -204,6 +205,12 @@ function paint(bx: number, by: number): CityGrid {
   for (const e of plan.edges) {
     const a = plan.nodes[e.a], b = plan.nodes[e.b];
     g.seg(a.x, a.z, b.x, b.z, 7, ROAD);
+  }
+  // a river bridge's whole deck — carriageway, walkways, parapets — is DECK:
+  // nothing is built or placed on it (R40); walkers still walk its walkways
+  // (painted ROAD they took its walkway for the carriageway and turned back)
+  for (const d of riverDecksFor(bx, by)) {
+    if (d.kind === 'road') g.obb(d.ax + d.ux * d.len / 2, d.az + d.uz * d.len / 2, d.half, d.len / 2, d.heading, DECK);
   }
   for (const n of plan.nodes) {
     if (n.plaza) g.disc(n.x, n.z, ROUNDABOUT_REACH, PLAZA);

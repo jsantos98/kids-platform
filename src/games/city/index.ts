@@ -288,7 +288,7 @@ function cabEye(): { f: number; y: number } {
   c.rotation.copy(rot);
   c.updateMatrixWorld(true);
   if (_cabBox.isEmpty()) return { f: V.cabF, y: V.cabY };
-  cabCache = { key, f: _cabBox.max.z + 0.3, y: _cabBox.min.y + (_cabBox.max.y - _cabBox.min.y) * 0.72 };
+  cabCache = { key, f: _cabBox.max.z + 0.3, y: _cabBox.min.y + (_cabBox.max.y - _cabBox.min.y) * 0.85 };
   return cabCache;
 }
 const camDir = new THREE.Vector3();
@@ -531,6 +531,9 @@ const boarding = new Boarding(scene,
 if (V.kind === 'rail') railway.addPlayer(START.bx, START.by, trainStart(START.bx, START.by).arc);
 /** the platform the kid's train last stopped at (the goal moves on) */
 let stationDone: { x: number; z: number } | null = null;
+/** the station the train was heading for last frame: when that changes
+ * without a stop, the train rolled past it (G6) */
+let stationAim: { x: number; z: number } | null = null;
 const stationIcon = V.kind === 'rail' ? makeIconSprite(GOAL_ICON.station, 3.4) : null;
 if (stationIcon) { stationIcon.visible = false; scene.add(stationIcon); }
 const transit = new Transit(scene);
@@ -576,6 +579,7 @@ if (q.get('debugsea') === '1') {
     robberInSight,
     /** the platforms' passengers */
     boarding: () => boarding.list(),
+    stationState: () => ({ done: stationDone, aim: stationAim, next: V.kind === 'rail' ? nextStation() : null }),
     /** race mode: the race on this island */
     race: () => race,
     /** where the guide arrow aims for a goal at world (tx, tz) */
@@ -659,7 +663,7 @@ let robberCount = 0;
 /** put getaway car k on the run on island c, away from the others */
 const newRobber = (k: number, c: CityRef): void => {
   const others = robbers.filter((o, j) => j !== k && o.active).map(o => ({ x: o.x, z: o.z }));
-  robbers[k].spawn(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z, citySeed(c.bx, c.by) + 7919 * ++robberCount, others);
+  robbers[k].spawn(c.bx, c.by, c.ox, c.oz, player.state.x, player.state.z, citySeed(c.bx, c.by) + 7919 * ++robberCount, others, islands.carsNear(c.ox + ISLAND / 2, c.oz + ISLAND / 2, ISLAND));
 };
 /** the nearest getaway car on the run, or null */
 const nearestRobber = (x: number, z: number): Robber | null => {
@@ -701,6 +705,7 @@ function applyCity(c: CityRef): void {
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
   stationDone = null;
+  stationAim = null;
   if (MODE.spawn === 'race') {
     race?.dispose();
     const T = raceTrackFor(c.bx, c.by);
@@ -1030,7 +1035,7 @@ const tick = (): void => {
   // (each keeps its own progress; a caught one is replaced 3 s after its scene)
   robbers.forEach((rb, k) => {
     if (rb.active) {
-      rb.update(dt, elapsed, st.x, st.z, director.busy);
+      rb.update(dt, elapsed, st.x, st.z, director.busy, islands.carsNear(rb.x, rb.z, 40));
       const lit = V.kind === 'heli'
         ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * SPOT_AHEAD), rb.z - (st.z + Math.cos(st.heading) * SPOT_AHEAD)) < SPOT_R + SPOT_GRACE
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
@@ -1122,7 +1127,7 @@ const tick = (): void => {
   } else {
     const desired = new THREE.Vector3(st.x - fwd.x * V.camBack, flyY + V.camUp, st.z - fwd.z * V.camBack);
     camera.position.lerp(desired, Math.min(1, dt * 4));
-    camera.lookAt(st.x + fwd.x * 6, flyY + 1.3, st.z + fwd.z * 6);
+    camera.lookAt(st.x + fwd.x * V.camAhead, flyY + 1.3, st.z + fwd.z * V.camAhead);
   }
   camera.position.y = Math.max(camera.position.y, 1.2);
 
@@ -1151,7 +1156,7 @@ const tick = (): void => {
   // from vehicles on the ground)
   islands.update(dt, elapsed, player.car.position, V.kind === 'ground'
     ? { x: st.x, z: st.z, heading: st.heading, v: st.v, halfL: V.glbLen / 2, halfW: V.halfW }
-    : null);
+    : null, robbers.map(r => r.chaser()).filter((c): c is NonNullable<typeof c> => !!c));
   // nobody drives through anybody: the island's cars push a road vehicle
   // out of their footprint (G8)
   if (V.kind === 'ground') {
@@ -1365,6 +1370,17 @@ const tick = (): void => {
       earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
       stationDone = { x: station.x, z: station.z };
     }
+    // stopping is the kid's job (G6): coming in too fast to stop gently at
+    // the board, the narrator says brake; roll past it and the people
+    // waiting are cross, no star, and the next station is the goal
+    if (gap > 12 && gap < 70 && pose.v * pose.v > 2 * 2 * (gap - 6)) narrator.say('brake');
+    if (stationAim && Math.hypot(station.x - stationAim.x, station.z - stationAim.z) > 1
+        && !(stationDone && Math.hypot(stationDone.x - stationAim.x, stationDone.z - stationAim.z) < 1)) {
+      boarding.grumble(stationAim.x, stationAim.z);
+      narrator.say('missed');
+      sound.event('missed');
+    }
+    stationAim = { x: station.x, z: station.z };
   } else if (near) {
     // ---- driving/flying guidance to the nearest call ----
     showGuide(callIcon(near.type), nd,

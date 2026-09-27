@@ -31,11 +31,18 @@ const BOOM_TIME = 1.6;  // seconds to lower or raise
 /** a train nearer than this (arc m) starts the lamps flashing and the
  * booms closing — the car AI holds at the same distance */
 export const CROSSING_WARN_DIST = 60;
+/** how far a crossing's bells carry (m) */
+const BELL_R = 90;
+/** the level crossings whose warning just started — a train is 60 m off and
+ * sounds its horn — for the soundscape (world; G11) */
+export const trainHorns: Array<{ x: number; z: number }> = [];
 /** a crossing's posts and booms stand this far up and down the street from
  * its centre (R12); cars stop short of the boom line */
 export const CROSSING_BOOM = 9.4;
 
 interface Signal {
+  /** warning last frame (a new warning sounds the train's horn) */
+  warn?: boolean;
   a: THREE.Mesh[];            // left lamps of every post
   b: THREE.Mesh[];            // right lamps of every post
   arms: THREE.Group[];        // boom pivots (rotation.x is animated)
@@ -361,14 +368,14 @@ export class Transit {
   night: NightLights | null = null;
   private _p = new THREE.Vector3();
 
-  /** the nearest crossing to (px, pz) that is warning a train, within 150 m
-   * (world; its bells ring, G11), or null */
+  /** the nearest crossing to (px, pz) that is warning a train, within 90 m
+   * (world; its bells ring, G11 — 150 m carried them across half a town), or null */
   nearestWarning(px: number, pz: number, rail: Railway): { x: number; z: number; d: number } | null {
     let best: { x: number; z: number; d: number } | null = null;
     for (const inst of this.cities.values()) {
       for (const sig of inst.signals) {
         const x = sig.c.x + inst.ox, z = sig.c.z + inst.oz, d = Math.hypot(x - px, z - pz);
-        if (d > 150 || (best && d >= best.d) || !this.blocked(inst, sig.c, rail)) continue;
+        if (d > BELL_R || (best && d >= best.d) || !this.blocked(inst, sig.c, rail)) continue;
         best = { x, z, d };
       }
     }
@@ -382,6 +389,12 @@ export class Transit {
       // the booms swing down for the train and lift again once it is past
       for (const sig of inst.signals) {
         const warn = this.blocked(inst, sig.c, rail);
+        // (a train coming up to the crossing sounds its horn — G11)
+        if (warn && sig.warn === false) {
+          trainHorns.push({ x: sig.c.x + inst.ox, z: sig.c.z + inst.oz });
+          if (trainHorns.length > 8) trainHorns.shift();
+        }
+        sig.warn = warn;
         const phase = Math.floor(elapsed * 2.6) % 2;
         for (const l of sig.a) l.material = warn && phase === 0 ? LIT_RED : DIM_RED;
         for (const l of sig.b) l.material = warn && phase === 1 ? LIT_RED : DIM_RED;

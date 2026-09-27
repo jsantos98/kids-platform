@@ -5,6 +5,49 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-27 — a Portuguese voice, music, and a truer city
+
+**A voice from Portugal.** The narrator is now Benedita (ElevenLabs), a
+European-Portuguese voice: every line was recorded in several takes and the
+best one picked by ear — lines that drifted Brazilian were reworded in turns
+only Portugal uses ("estás a ir lindamente", "fugiu-nos", "já falta pouco").
+She says a lot more: where a getaway car is ("Está ali à esquerda! Vamos
+apanhá-lo!"), "Só falta um! Tu consegues!" on the rings, every overtake in
+the race ("Passaste um! Estás em segundo!"), "Quase lá!" halfway through a
+mission — and the cheering plays the moment a mission is won, not after.
+
+**Music.** Four tracks for each moment — the garage, the island by day and by
+night, the race, the police chase, the missions — played in turn, crossfading,
+each a seamless loop of whole bars. The chase tune only starts once a getaway
+car is in sight. A ⚙️ panel in the garage sets the voice, music, background
+and engine volumes.
+
+**Better sound.** Every race car's engine holds a steady note (the F1's
+used to change gear inside its loop); level-crossing bells are heard only
+near the crossing; trains sound their horn coming up to one.
+
+**A truer city.**
+- Houses, shops and factories stand at their real size, no more tiny "dog
+  houses" or stretched sheds; containers are real-size, stacked in rows.
+- Nothing is built on a river bridge any more.
+- Clouds drift in softly instead of popping out of the sky, and the patrol
+  helicopter flies nose first.
+
+**Driving.**
+- Higher cameras: the chase view looks down on the street, the high view is
+  almost a map.
+- The getaway cars drive among the traffic — following it, passing cars that
+  pull over for them, waiting their turn at junctions — never through it.
+- The train is the kid's to stop: roll past the station and the people waiting
+  hop up and down, cross.
+
+| | |
+|---|---|
+| ![A clear river bridge](history/2026-09-27/bridge-clear.jpg) | ![Houses at their real size](history/2026-09-27/houses-true-size.jpg) |
+| ![The higher chase camera](history/2026-09-27/chase-camera.jpg) | |
+
+---
+
 ## 2026-09-26 — day and night, sound and a voice
 
 **Day and night.** A 24-hour clock the kid can see (an hour hand on a

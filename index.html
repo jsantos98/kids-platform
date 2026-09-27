@@ -126,6 +126,25 @@
     display: grid; place-items: center; font-size: 16vh; transition: opacity .5s ease;
   }
   #wipe.on { opacity: 1; }
+
+  /* ---- the grown-ups' sound settings (⚙️ beside the language, or O) ---- */
+  #settings {
+    position: fixed; inset: 0; z-index: 30; display: none; place-items: center;
+    background: rgba(61, 67, 75, .35);
+  }
+  #settings.on { display: grid; }
+  #settings .card {
+    min-width: min(460px, 90vw); padding: 22px 28px 20px; border-radius: 28px; background: var(--cream);
+    box-shadow: 0 8px 0 rgba(74, 80, 88, .18); display: flex; flex-direction: column; gap: 14px;
+  }
+  #settings h2 { margin: 0 0 4px; font-size: clamp(20px, 3vh, 28px); color: var(--ink); }
+  #settings label { display: grid; grid-template-columns: 11em 1fr 3em; align-items: center; gap: 12px;
+    font-weight: 800; font-size: clamp(14px, 2vh, 18px); color: var(--ink-soft); }
+  #settings input[type=range] { width: 100%; accent-color: var(--sel, #e25c5c); height: 28px; }
+  #settings output { text-align: right; font-variant-numeric: tabular-nums; }
+  #settings button { align-self: flex-end; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer;
+    background: var(--sel, #e25c5c); color: #fffdf8; font: inherit; font-weight: 800; }
+  #lang button.gear { padding: 6px 10px; }
 </style>
 </head>
 <body>
@@ -146,6 +165,16 @@
 <button id="go" type="button"><span data-i18n="garage.go"></span><span class="pedal">🦶</span></button>
 <div id="keys"></div>
 <div id="wipe"></div>
+<div id="settings" role="dialog" data-i18n-title="settings.title">
+  <div class="card">
+    <h2 data-i18n="settings.title"></h2>
+    <label><span data-i18n="settings.voice"></span><input type="range" min="0" max="100" data-vol="voice"><output></output></label>
+    <label><span data-i18n="settings.music"></span><input type="range" min="0" max="100" data-vol="music"><output></output></label>
+    <label><span data-i18n="settings.bg"></span><input type="range" min="0" max="100" data-vol="bg"><output></output></label>
+    <label><span data-i18n="settings.engine"></span><input type="range" min="0" max="100" data-vol="engine"><output></output></label>
+    <button id="settingsClose" type="button" data-i18n="settings.close"></button>
+  </div>
+</div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

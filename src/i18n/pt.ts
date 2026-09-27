@@ -24,6 +24,12 @@ export const PT: Record<Key, string> = {
   'garage.go': 'VAMOS!',
   'garage.letsGo': '{title}. Vamos lá!',
   'garage.language': 'Língua',
+  'settings.title': 'Definições de som',
+  'settings.voice': 'Voz',
+  'settings.music': 'Música',
+  'settings.bg': 'Sons de fundo',
+  'settings.engine': 'Motores',
+  'settings.close': 'Fechar',
 
   // os carros de corrida (raceCars.ts), escolhidos depois da corrida na garagem
   'cars.blurb': 'Escolhe o teu carro de corrida!',
@@ -236,6 +242,9 @@ export const PT: Record<Key, string> = {
   'say.race.place2': 'Uau, segundo lugar! Brilhante!',
   'say.race.place3': 'Terceiro lugar! Que grande corrida!',
   'say.race.place4': 'Acabaste a corrida! Muito bem, campeão!',
+  'say.brake': 'Trava! Vem aí a estação!',
+  'say.missed.1': 'Oh não! Passaste a estação! As pessoas ficaram zangadas!',
+  'say.missed.2': 'Opa, esqueceste-te de parar! Ficam à espera do próximo comboio.',
   'say.station.1': 'Estação! Todos a bordo!',
   'say.station.2': 'Próxima paragem! Grande condução!',
   'say.night': 'Está a ficar de noite. As luzes estão a acender-se!',

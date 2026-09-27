@@ -36,6 +36,7 @@ import { citySeed, southExit, eastExit } from './cityGrid.js';
 import { railNetFor, type RailRoute } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { coastFor } from './coast.js';
+import { BRIDGE_HALF, deckReach } from './deckDims.js';
 import { streetNetFor, segDist, type EdgeKind } from './streetGen.js';
 
 /** half-size of the kit roundabout at plazas (3 x 14 m tiles); roadLayout.ts
@@ -691,6 +692,18 @@ function buildPlan(bx: number, by: number): CityPlan {
         const pad = n.plaza ? ROUNDABOUT_REACH + 1.5 : Math.max(ROAD_HALF, ...n.reach) + 3;
         if (ol.some(f => Math.hypot(f.x - n.x, f.z - n.z) < pad)) return false;
       }
+    }
+    // nor on a river bridge: its deck is 10 m wide each side of the street
+    // and runs a ramp and a tile past both banks — lots 7.9 m out stood on
+    // its walkways and parapets (R40)
+    for (const br of riverBridges) {
+      const reach = deckReach(river.halfAt(br.x, br.z));
+      if (Math.abs(lot.x - br.x) > reach + 30 || Math.abs(lot.z - br.z) > reach + 30) continue;
+      const ux = Math.sin(br.heading), uz = Math.cos(br.heading);
+      if (ol.some(f => {
+        const dx = f.x - br.x, dz = f.z - br.z;
+        return Math.abs(dx * ux + dz * uz) < reach + 1.5 && Math.abs(dx * uz - dz * ux) < BRIDGE_HALF + 1.5;
+      })) return false;
     }
     // nor over a traffic-light pole
     {

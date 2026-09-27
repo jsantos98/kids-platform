@@ -9,6 +9,7 @@ import { citySeed, CITY_PITCH } from '../../../worlds/cityGrid.js';
 import { Fleet } from '../sea.js';
 import { IslandCars } from './cars.js';
 import { IslandWalkers, type Threat } from './walkers.js';
+import type { Chaser } from './cars.js';
 import type { BakedTemplate } from '../../../engine/assets.js';
 import type { Railway } from '../railway.js';
 
@@ -79,7 +80,7 @@ export class IslandSim {
 
   /** one frame: `player` is where the kid is (world), `threat` the ground
    * vehicle people scurry from (null when flying/sailing) */
-  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null): void {
+  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null, chasers: readonly Chaser[] = []): void {
     if (!this.active) return;
     if (this.lagging) {
       const t0 = performance.now();
@@ -90,16 +91,16 @@ export class IslandSim {
       this.lagging = false;
       dt = elapsed - this.simTime;
     }
-    this.tick(dt, elapsed, player, threat, true);
+    this.tick(dt, elapsed, player, threat, true, chasers);
   }
 
-  private tick(dt: number, t: number, player: THREE.Vector3 | null, threat: Threat | null, draw: boolean): void {
+  private tick(dt: number, t: number, player: THREE.Vector3 | null, threat: Threat | null, draw: boolean, chasers: readonly Chaser[] = []): void {
     this.simTime = t;
     // (the cars stop for the walkers on their crossings, the walkers wait
     // at the corners for the cars — each sees the other's last step)
     // (cars queue behind the kid's road vehicle — its footprint is the
     // walkers' threat; a flying one passes nothing to wait behind)
-    this.cars.update(dt, t, this.opts.railway, player, draw, this.walkers.walkers, threat);
+    this.cars.update(dt, t, this.opts.railway, player, draw, this.walkers.walkers, threat, chasers);
     this.walkers.update(dt, t, this.opts.railway, threat, player, draw, this.cars.cars);
     if (draw) this.fleet.update(this.simTime);
   }

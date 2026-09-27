@@ -14,6 +14,7 @@
 
 import { SFX, type SfxId } from './sfxList.js';
 import { MUSIC, trackFile, type MusicId } from './musicList.js';
+import { volume, onVolume } from './settings.js';
 
 export type EngineKind = 'car' | 'truck' | 'kart' | 'heli' | 'plane' | 'boat' | 'train';
 export type SirenStyle = 'fire' | 'ambulance' | 'police' | 'heli';
@@ -40,7 +41,10 @@ function shuffled(n: number): number[] {
 }
 /** the effects' and the ambience's levels — well under the narrator's voice
  * (which plays on its own at full level) — and how far a voice line ducks them */
-const SFX_LEVEL = 0.5, AMB_LEVEL = 0.45, DUCK = 0.45;
+const SFX_LEVEL = 0.4, AMB_LEVEL = 0.35, DUCK = 0.45;
+/** the vehicles' engines have a bus of their own (the kid's, the race
+ * rivals'), at 0.6 of where they sat on the effects bus — still too loud */
+const ENGINE_LEVEL = 0.3;
 /** the siren's two tones (Hz) and how long each lasts (s) */
 const SIREN: Record<SirenStyle, { lo: number; hi: number; tone: number; gain: number }> = {
   fire: { lo: 660, hi: 880, tone: 0.55, gain: 0.05 },
@@ -77,6 +81,7 @@ export class GameAudio {
   private master: GainNode | null = null;
   private sfx: GainNode | null = null;
   private amb: GainNode | null = null;
+  private engineBus: GainNode | null = null;
   private sirenOsc: OscillatorNode | null = null;
   private sirenLfo: OscillatorNode | null = null;
   private sirenLfoGain: GainNode | null = null;
@@ -190,8 +195,10 @@ export class GameAudio {
       this.amb = ac.createGain();
       this.amb.gain.value = AMB_LEVEL;
       this.amb.connect(this.master);
+      this.engineBus = ac.createGain();
+      this.engineBus.connect(this.master);
       this.musicBus = ac.createGain();
-      this.musicBus.gain.value = this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) : 0;
+      this.musicBus.gain.value = this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) * volume('music') : 0;
       this.musicBus.connect(this.master);
       // white noise, shared by every noisy sound
       const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
@@ -222,6 +229,9 @@ export class GameAudio {
       src.connect(bp); bp.connect(this.pumpGain); this.pumpGain.connect(this.sfx);
       src.start();
       if (this.sfxOn) this.loadSamples();
+      // (the grown-ups' volumes: every bus follows them — settings.ts)
+      this.levels(0);
+      onVolume(() => this.levels(0.1));
       if (this.wantMoment) this.setMusic(this.wantMoment);
     } catch {
       this.ac = null;
@@ -236,16 +246,26 @@ export class GameAudio {
     if (this.master && this.ac) this.master.gain.setTargetAtTime(m ? 0 : 1, this.ac.currentTime, 0.05);
   }
 
-  /** duck the sound effects, ambience and music under a voice line */
+  /** duck the sound effects, engines, ambience and music under a voice line */
   duck(on: boolean): void {
     // (called every frame is fine: only a change ramps)
     if (on === this.ducked && this.ac) return;
     this.ducked = on;
-    if (!this.ac || !this.sfx || !this.amb) return;
-    const t = this.ac.currentTime;
-    this.sfx.gain.setTargetAtTime(SFX_LEVEL * (on ? DUCK : 1), t, 0.12);
-    this.amb.gain.setTargetAtTime(AMB_LEVEL * (on ? DUCK : 1), t, 0.12);
-    this.musicLevel(0.15);
+    this.levels(0.12);
+  }
+
+  /** every bus at its level: the constant, ducked under a voice line, times
+   * the grown-ups' volume for it (settings.ts: background = effects and
+   * ambience) */
+  private levels(k: number): void {
+    const ac = this.ac;
+    if (!ac || !this.sfx || !this.amb || !this.engineBus) return;
+    const t = ac.currentTime, d = this.ducked ? DUCK : 1, bg = volume('bg');
+    const set = (g: GainNode, v: number): void => { if (k > 0) g.gain.setTargetAtTime(v, t, k); else g.gain.value = v; };
+    set(this.sfx, SFX_LEVEL * d * bg);
+    set(this.amb, AMB_LEVEL * d * bg);
+    set(this.engineBus, ENGINE_LEVEL * d * volume('engine'));
+    this.musicLevel(k || 0.01);
   }
 
   // ---- the music ----
@@ -260,7 +280,7 @@ export class GameAudio {
 
   private musicLevel(k: number): void {
     if (!this.ac || !this.musicBus) return;
-    this.musicBus.gain.setTargetAtTime(this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) : 0, this.ac.currentTime, k);
+    this.musicBus.gain.setTargetAtTime(this.musicOn ? MUSIC_LEVEL * (this.ducked ? MUSIC_DUCK : 1) * volume('music') : 0, this.ac.currentTime, k);
   }
 
   private playlist(id: MusicId): Playlist {
@@ -397,7 +417,7 @@ export class GameAudio {
     if (!kind) return;
     // the recorded loop, sped up with the vehicle (the synth voice falls
     // quiet); a race car plays its own (`rec`)
-    const lv = this.loopOf(rec && this.samples.has(rec) ? rec : `engine-${kind}` as SfxId);
+    const lv = this.loopOf(rec && this.samples.has(rec) ? rec : `engine-${kind}` as SfxId, this.engineBus!);
     if (lv) {
       const sp = Math.max(0, Math.min(1, speed)), g = Math.max(0, Math.min(1, gas)), e = ENGINE_REC[kind];
       this.engines.get(kind)?.out.gain.setTargetAtTime(0, ac.currentTime, 0.2);
@@ -414,7 +434,7 @@ export class GameAudio {
     const ac = this.ac!;
     const out = ac.createGain();
     out.gain.value = 0;
-    out.connect(this.sfx!);
+    out.connect(this.engineBus!);
     const osc = (type: OscillatorType, f: number): OscillatorNode => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f; o.start(); return o; };
     const filt = (type: BiquadFilterType, f: number, q = 0.7): BiquadFilterNode => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
     const ramp = (p: AudioParam, v: number, t: number, k = 0.08): void => { p.setTargetAtTime(v, t, k); };
@@ -533,7 +553,7 @@ export class GameAudio {
         // (a random start, so two rivals with the same car don't sound as one)
         src.start(0, Math.random() * buf.duration);
         gain.gain.value = 0;
-        src.connect(gain); gain.connect(pan); pan.connect(this.sfx!);
+        src.connect(gain); gain.connect(pan); pan.connect(this.engineBus!);
         v = { id: r.id, src, gain, pan };
         this.rivalVoices[i] = v;
       }
@@ -589,12 +609,12 @@ export class GameAudio {
   }
 
   /** a panned, distance-faded destination for a sound somewhere in the world */
-  private placed(pan: number, dist: number): AudioNode {
+  private placed(pan: number, dist: number, fade = 25): AudioNode {
     const ac = this.ac!;
     const p = ac.createStereoPanner();
     p.pan.value = Math.max(-1, Math.min(1, pan));
     const g = ac.createGain();
-    g.gain.value = 1 / (1 + dist / 25);
+    g.gain.value = 1 / (1 + dist / fade);
     p.connect(g); g.connect(this.sfx!);
     return p;
   }
@@ -663,11 +683,14 @@ export class GameAudio {
     this.note(880, t, 0.35, 0.08, 'sine'); this.note(659, t + 0.3, 0.5, 0.08, 'sine');
   }
 
-  /** the train's horn */
-  trainHorn(): void {
-    if (!this.ac || this.shot('train-horn')) return;
+  /** a train's horn — the kid's (no place), or one somewhere in the world
+   * (pan −1 left … 1 right, dist m: a horn carries, fading slowly) */
+  trainHorn(pan?: number, dist = 0): void {
+    if (!this.ac) return;
+    const dest = pan === undefined ? this.sfx! : this.placed(pan, dist, 40);
+    if (this.shot('train-horn', 1, dest)) return;
     const t = this.ac.currentTime;
-    for (const f of [311, 370]) this.note(f, t, 0.9, 0.05, 'sawtooth');
+    for (const f of [311, 370]) this.note(f, t, 0.9, 0.05, 'sawtooth', dest);
   }
 
   /** a car's horn somewhere (pan −1 left … 1 right, dist m): a short double beep */
@@ -695,7 +718,9 @@ export class GameAudio {
       this.crossing = { gain: g, pan: pn, next: 0 };
     }
     const c = this.crossing, t = ac.currentTime;
-    c.gain.gain.setTargetAtTime(on ? 1 / (1 + dist / 20) : 0, t, 0.1);
+    // (a bell is heard near its crossing: gone past 90 m, fading fast — it
+    // carried across half a town)
+    c.gain.gain.setTargetAtTime(on && dist < 90 ? 1 / (1 + (dist / 18) ** 2) : 0, t, 0.1);
     c.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
     // the recorded strike, rung at a steady pace on the audio clock (each
     // queued a little ahead at its exact time, so frames can't jitter it)

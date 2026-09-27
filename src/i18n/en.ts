@@ -23,6 +23,12 @@ export const EN = {
   'garage.go': 'GO!',
   'garage.letsGo': "{title}. Let's go!",
   'garage.language': 'Language',
+  'settings.title': 'Sound settings',
+  'settings.voice': 'Voice',
+  'settings.music': 'Music',
+  'settings.bg': 'Background sounds',
+  'settings.engine': 'Engines',
+  'settings.close': 'Close',
 
   // the race cars (raceCars.ts), picked after the race in the garage
   'cars.blurb': 'Pick your race car!',
@@ -235,6 +241,9 @@ export const EN = {
   'say.race.place2': 'Wow, second place! Brilliant!',
   'say.race.place3': 'Third place! What a race!',
   'say.race.place4': 'You finished the race! Well done, champ!',
+  'say.brake': 'Brake! The station is coming!',
+  'say.missed.1': 'Oh no! You passed the station! The people are cross!',
+  'say.missed.2': 'Oops, you forgot to stop! They\'ll wait for the next train.',
   'say.station.1': 'Station! Everybody on board!',
   'say.station.2': 'Next stop! Great driving!',
   'say.night': 'It\'s getting dark. The lights are coming on!',

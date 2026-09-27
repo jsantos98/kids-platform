@@ -14,18 +14,18 @@ import { speak, speaking } from '../../i18n/voice.js';
 
 type Moment = 'start' | 'call' | 'arrive' | 'praise' | 'gate' | 'gateTwo' | 'gateLast' | 'courseDone'
   | 'caught' | 'spotted' | 'closing' | 'dashed' | 'oops'
-  | 'raceCount' | 'lastLap' | 'place' | 'raceUp' | 'raceDown' | 'raceLead' | 'almost' | 'station' | 'night' | 'morning';
+  | 'raceCount' | 'lastLap' | 'place' | 'raceUp' | 'raceDown' | 'raceLead' | 'almost' | 'station' | 'brake' | 'missed' | 'night' | 'morning';
 
 /** how many variants each moment has (say.<moment>.<n>) */
 const VARIANTS: Partial<Record<Moment, number>> = {
-  arrive: 3, praise: 5, gate: 5, caught: 2, closing: 2, dashed: 2, oops: 3, station: 2, raceDown: 2, raceLead: 2, almost: 2,
+  arrive: 3, praise: 5, gate: 5, caught: 2, closing: 2, dashed: 2, oops: 3, station: 2, raceDown: 2, raceLead: 2, almost: 2, missed: 2,
 };
 /** the fewest seconds between two lines of the same kind of moment */
 const COOLDOWN: Partial<Record<Moment, number>> = {
-  arrive: 8, gate: 6, oops: 10, call: 6, praise: 3, spotted: 15, closing: 8, dashed: 6, raceUp: 3, raceDown: 12, raceLead: 25,
+  arrive: 8, gate: 6, oops: 10, call: 6, praise: 3, spotted: 15, closing: 8, dashed: 6, raceUp: 3, raceDown: 12, raceLead: 25, brake: 20,
 };
 /** moments that cut in over whatever is being said */
-const URGENT = new Set<Moment>(['start', 'raceCount', 'place', 'lastLap']);
+const URGENT = new Set<Moment>(['start', 'raceCount', 'place', 'lastLap', 'brake', 'missed']);
 
 export class Narrator {
   private last = new Map<string, number>();
@@ -61,6 +61,7 @@ export class Narrator {
       case 'place': return `say-race-place${Math.min(4, Math.max(1, Number(detail) || 4))}`;
       case 'spotted': return this.variant(`say-spotted-${detail}`, 2);
       case 'gateTwo': return 'say-gate-two';
+      case 'brake': return 'say-brake';
       case 'gateLast': return 'say-gate-last';
       case 'raceUp': return detail === 1 ? this.variant('say-race-up1', 2) : detail === 2 || detail === 3 ? `say-race-up${detail}` : null;
       case 'raceDown': return this.variant('say-race-down', 2);

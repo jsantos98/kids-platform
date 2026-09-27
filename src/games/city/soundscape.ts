@@ -8,10 +8,11 @@
 import type { GameAudio, EngineKind, SirenStyle } from '../../engine/audio.js';
 import type { SfxId } from '../../engine/sfxList.js';
 import { honks } from './island/cars.js';
+import { trainHorns } from './transit.js';
 
 export type GameEvent =
   | 'missionDone' | 'star' | 'gate' | 'crash' | 'bumpCar' | 'countdown' | 'go' | 'lap' | 'finish'
-  | 'station' | 'splash' | 'horn';
+  | 'station' | 'missed' | 'splash' | 'horn';
 
 export interface FrameState {
   /** the kid's engine this frame (null: in a mission scene) */
@@ -39,6 +40,7 @@ export interface FrameState {
 
 export class Soundscape {
   private lastHonk = -99;
+  private lastTrainHorn = -99;
   private lastBump = -99;
   private t = 0;
 
@@ -73,6 +75,15 @@ export class Soundscape {
       this.lastHonk = this.t;
       a.honk(p.pan, p.dist);
     }
+    // a train coming up to a crossing near the kid sounds its horn (from
+    // the crossing, panned; one at a time)
+    while (trainHorns.length) {
+      const h = trainHorns.shift()!;
+      const p = this.place(s, h.x, h.z);
+      if (p.dist > 220 || this.t - this.lastTrainHorn < 3) continue;
+      this.lastTrainHorn = this.t;
+      a.trainHorn(p.pan, p.dist);
+    }
   }
 
   /** a game moment's sound */
@@ -91,6 +102,7 @@ export class Soundscape {
       case 'go': a.beep(true); break;
       case 'lap': a.lap(); break;
       case 'finish': a.jingle(); break;
+      case 'missed': a.boing(); break;
       case 'station': a.stationBell(); setTimeout(() => a.doorChime(), 900); break;
       case 'splash': a.splash(); break;
       case 'horn': a.trainHorn(); break;

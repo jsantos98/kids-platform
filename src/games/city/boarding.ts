@@ -44,6 +44,8 @@ interface Platform {
   r: Rng;
   /** heading from the platform toward the track */
   face: number;
+  /** seconds left of being cross: the kid's train rolled past (G6) */
+  angry: number;
 }
 
 export class Boarding {
@@ -73,7 +75,7 @@ export class Boarding {
     plan.stations.forEach((st, i) => {
       const r = rng(chunkSeed(citySeed(bx, by), 0xb0a4, i));
       const a = platformPoint(st, 0, 3.5), b = platformPoint(st, 0, 0);
-      const p: Platform = { st, riders: [], nextIn: 0, serving: null, r, face: Math.atan2(b.x - a.x, b.z - a.z) };
+      const p: Platform = { st, riders: [], nextIn: 0, serving: null, r, face: Math.atan2(b.x - a.x, b.z - a.z), angry: 0 };
       const n = 2 + ((r() * (QUEUE - 1)) | 0);
       for (let k = 0; k < n; k++) this.addRider(p, true);
       this.platforms.push(p);
@@ -110,6 +112,7 @@ export class Boarding {
     if (`${bx},${by}` !== this.key) return;
     const standing = railway.dwelling(bx, by);
     for (const p of this.platforms) {
+      p.angry = Math.max(0, p.angry - dt);
       const sx = p.st.x + this.ox, sz = p.st.z + this.oz;
       const train: Dwelling | undefined = standing.find(d => d.passenger && d.doors.length && Math.hypot(d.x - sx, d.z - sz) < 3);
       if (train && p.serving !== train.id) {
@@ -161,20 +164,37 @@ export class Boarding {
           continue;
         }
         const moving = d > 0.05;
-        rd.mesh.position.set(rd.x, PLATFORM_Y + (moving ? Math.abs(Math.sin((elapsed + rd.phase) * 9)) * 0.07 : 0), rd.z);
+        // (cross, the train having rolled past: hopping up and down and
+        // shaking, facing the track)
+        const cross = p.angry > 0 && !moving && rd.goal === 'wait';
+        const hop = cross ? Math.abs(Math.sin((elapsed + rd.phase) * 8)) * 0.35 : moving ? Math.abs(Math.sin((elapsed + rd.phase) * 9)) * 0.07 : 0;
+        rd.mesh.position.set(rd.x, PLATFORM_Y + hop, rd.z);
+        rd.mesh.rotation.z = cross ? Math.sin((elapsed + rd.phase) * 14) * 0.22 : 0;
         if (!moving) rd.mesh.rotation.y = p.face; // waiting: face the track
       }
     }
   }
 
+  /** the kid's train rolled past the station at world (x, z) without
+   * stopping: its people are cross for a few seconds (G6) */
+  grumble(x: number, z: number): void {
+    let best: Platform | null = null, bd = 40;
+    for (const p of this.platforms) {
+      const q = platformPoint(p.st, 0, 0), d = Math.hypot(q.x + this.ox - x, q.z + this.oz - z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best) best.angry = 4;
+  }
+
   /** the platforms' riders right now (debug) */
-  list(): Array<{ station: number; waiting: number; boarding: number; leaving: number; serving: string | null }> {
+  list(): Array<{ station: number; waiting: number; boarding: number; leaving: number; serving: string | null; angry: number }> {
     return this.platforms.map((p, i) => ({
       station: i,
       waiting: p.riders.filter(r => r.goal === 'wait').length,
       boarding: p.riders.filter(r => r.goal === 'board').length,
       leaving: p.riders.filter(r => r.goal === 'leave').length,
       serving: p.serving,
+      angry: p.angry,
     }));
   }
 }

@@ -9,6 +9,10 @@ import { ISLAND } from '../../../worlds/world.js';
 import { IslandSim, type SimOptions } from './sim.js';
 import { islandReady } from '../../../worlds/islandData.js';
 import type { Threat } from './walkers.js';
+import type { Chaser } from './cars.js';
+
+/** a traffic car as a getaway car sees it */
+export interface TrafficCar { x: number; z: number; h: number; len: number; dodge: number; v: number; turning: boolean }
 
 const NEAR = 200;   // m from a neighbour island's edge that wakes it
 const KEEP = 4;     // simulations kept in memory (active + dormant)
@@ -53,7 +57,7 @@ export class IslandManager {
     return out;
   }
 
-  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null): void {
+  update(dt: number, elapsed: number, player: THREE.Vector3, threat: Threat | null, chasers: readonly Chaser[] = []): void {
     const want = this.wanted(player.x, player.z);
     const keys = new Set(want.map(([bx, by]) => `${bx},${by}`));
     for (const [bx, by] of want) this.sim(bx, by).setActive(true, elapsed);
@@ -65,7 +69,19 @@ export class IslandManager {
       oldest[1].dispose();
       this.sims.delete(oldest[0]);
     }
-    for (const s of this.sims.values()) s.update(dt, elapsed, player, threat);
+    for (const s of this.sims.values()) s.update(dt, elapsed, player, threat, chasers);
+  }
+
+  /** the awake islands' cars within r of world (x, z): where each is, its
+   * heading, length and how far it has pulled over (the getaway cars drive
+   * among them — G7) */
+  carsNear(x: number, z: number, r: number): TrafficCar[] {
+    const out: TrafficCar[] = [];
+    for (const s of this.sims.values()) {
+      if (!s.active) continue;
+      for (const c of s.cars.cars) if (Math.abs(c.x - x) < r && Math.abs(c.z - z) < r) out.push({ x: c.x, z: c.z, h: c.h, len: c.len, dodge: c.dodge, v: c.v, turning: !!c.round });
+    }
+    return out;
   }
 
   /** a push that keeps a ground vehicle (world x, z, radius r) out of every

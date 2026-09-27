@@ -49,7 +49,7 @@ and carries on from a spot just behind.
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
 | ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
 | 🚤 Boat | Sail round the island through the buoys |
-| 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off |
+| 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off; nothing brakes for you, and roll past it and the people waiting are cross |
 | 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
 
 | | |
@@ -118,6 +118,7 @@ missing or out of date.
 | Camera: chase / high / cab | — | `C` |
 | Back to the start (not the train) | — | `R` |
 | Back to the garage | start / select held a second | `Esc` (or 🏠) |
+| Sound settings (in the garage: voice, music, background, engines) | — | `O` (or ⚙️ beside the language) |
 
 What `W` / `S` do depends on the vehicle: the helicopters fly forward and
 back, the plane only goes faster and slower, the train goes and brakes. The
@@ -152,7 +153,8 @@ island's music) and the mission scenes — four tracks each, played
 in turn (shuffled, a couple of minutes each, each mission scene the next
 one). It crossfades from track to track and when the moment changes, carries
 on where it left off when you come back, and goes quieter while the narrator
-speaks. The 🎵 button (beside 🔊 in the
+speaks. Its volume, the narrator's, the background sounds' and the engines'
+are set in the garage's ⚙️ panel (or `O`), remembered for every page. The 🎵 button (beside 🔊 in the
 game, beside the language in the garage) turns only the music off; it is
 remembered.
 

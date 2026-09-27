@@ -17,8 +17,9 @@ import { graphFor, leaving, type StreetGraph, type SEdge, type SNode } from '../
 import { lightState, greenLeft, STOP_LINE } from '../lights.js';
 import { CROSSING_WARN_DIST, CROSSING_BOOM } from '../transit.js';
 import type { Threat } from './walkers.js';
-import { junctionPath, lanePoint, LANE, ROUND_IN, TURN_IN } from './junctionPath.js';
+import { junctionPath, lanePoint, alongPath, LANE, ROUND_IN, TURN_IN } from './junctionPath.js';
 import { crosswalksFor } from '../../../worlds/crosswalks.js';
+import { overlapDepth } from './obb.js';
 import { deckAt } from '../../../worlds/causeway.js';
 import type { Railway } from '../railway.js';
 
@@ -48,7 +49,19 @@ const LAMP_R = 150;
 /** cars farther than this from the player aren't drawn (the fog is ~260 m) */
 const DRAW_R = 190;
 
+/** how deep a car (centre, heading, half length; 1 m half width) and a
+ * getaway car's footprint overlap (m; ≤ 0 clear) */
+function boxDepth(x: number, z: number, h: number, halfL: number, r: Threat): number {
+  return overlapDepth({ x, z, h, hl: halfL, hw: 1.0 }, { x: r.x, z: r.z, h: r.heading, hl: r.halfL, hw: r.halfW });
+}
+
+/** a getaway car, as the traffic sees it: a footprint to queue behind, and
+ * `pushy` while it flees (cars it comes up behind ease aside) — G7 */
+export interface Chaser extends Threat { pushy: boolean }
+
 interface Car {
+  /** seconds stopped on its curve for a getaway car in its way (G7) */
+  yieldT?: number;
   /** its place in the fleet (a fixed order, for ties) */
   id: number;
   edge: number;
@@ -287,7 +300,8 @@ export class IslandCars {
    * anybody on the crosswalk ahead.
    */
   update(dt: number, elapsed: number, rail: Railway | null, player: THREE.Vector3 | null, draw: boolean,
-         walkers: Array<{ x: number; z: number; xing?: number; xingOn?: boolean }> | null = null, road: Threat | null = null): void {
+         walkers: Array<{ x: number; z: number; xing?: number; xingOn?: boolean }> | null = null, road: Threat | null = null,
+         chasers: readonly Chaser[] = []): void {
     const g = this.graph;
     // the crosswalks somebody is waiting at or crossing (the walkers say)
     const cws = crosswalksFor(this.bx, this.by);
@@ -393,6 +407,31 @@ export class IslandCars {
       return Math.min(v, Math.sqrt(Math.max(0, 8 * room)));
     };
     const follow = (gap: number, v: number): number => (gap < 16 ? Math.min(v, Math.max(0, (gap - 7) * 0.9)) : v);
+    /** the getaway cars in the lane ahead: queue behind them as behind the
+     * kid (G7 — a car drove straight through one) */
+    const forChasers = (c: Car, h: number, v: number): number => {
+      if (!chasers.length) return v;
+      const fx = Math.sin(h), fz = Math.cos(h);
+      for (const r of chasers) {
+        const dx = r.x - c.x, dz = r.z - c.z;
+        const ahead = dx * fx + dz * fz, side = dx * fz - dz * fx;
+        if (ahead <= 0 || ahead > 40 || Math.abs(side) > r.halfW + 1.8) continue;
+        v = Math.min(v, Math.sqrt(Math.max(0, 8 * (ahead - r.halfL - c.len / 2 - 2.5))));
+      }
+      return v;
+    };
+    /** a fleeing getaway car coming up behind in this car's lane — or
+     * passing it, until it is by: ease over to the kerb and slow, so it can
+     * pass (true when one is; pulled back in while it was alongside, the two
+     * met) */
+    const makeWay = (c: Car, hx: number, hz: number): boolean => chasers.some(r => {
+      const dx = r.x - c.x, dz = r.z - c.z;
+      const behind = -(dx * hx + dz * hz), side = dx * hz - dz * hx;
+      if (Math.abs(side) > 3.2 || Math.sin(r.heading) * hx + Math.cos(r.heading) * hz < 0.7) return false;
+      // (alongside, whatever it's doing now: stay over until it's by)
+      if (behind > -(c.len / 2 + r.halfL + 1) && behind < c.len / 2 + r.halfL) return true;
+      return r.pushy && behind > 0 && behind < 35;
+    });
 
     for (const c of this.cars) {
       if (c.round) {
@@ -402,6 +441,21 @@ export class IslandCars {
         let vT = follow(gapAhead(c), c.speed * 0.8);
         vT = forWalkers(c, c.h, vT);
         vT = forPlayer(c, c.h, vT);
+        vT = forChasers(c, c.h, vT);
+        // (a getaway car where this curve goes — it bends, and a look along
+        // the car's heading missed one it swung into): stop short
+        // (near its way it waits, and after 2.5 s goes on — the getaway car
+        // may be waiting for it in turn; right in its way it never goes on)
+        let yielded = false;
+        if (chasers.length) {
+          const L = c.round.cum[c.round.cum.length - 1];
+          for (const ds of [2, 4.5, 7]) {
+            const q = alongPath(c.round, Math.min(L, c.round.s + ds));
+            const d = Math.min(...chasers.map(r => Math.hypot(r.x - q.x - this.ox, r.z - q.z - this.oz)));
+            if (d < 2.4 || (d < 3 && (c.yieldT ?? 0) < 2.5)) { vT = Math.min(vT, Math.sqrt(Math.max(0, 10 * (ds - 2.2)))); yielded = true; break; }
+          }
+        }
+        c.yieldT = yielded ? (c.yieldT ?? 0) + dt : 0;
         // turning into a street whose crosswalk somebody is on: stop at the
         // end of the turn, the nose short of the stripes
         {
@@ -413,6 +467,18 @@ export class IslandCars {
           }
         }
         c.v += Math.max(-8 * dt, Math.min(5 * dt, vT - c.v));
+        // (the last word, as the getaway car's own: never a step that takes
+        // this car's body deeper into one — its side swept into one waiting
+        // beside its curve, where no look ahead along the curve could see it)
+        if (chasers.length && c.v > 0) {
+          const L = c.round.cum[c.round.cum.length - 1];
+          const q = alongPath(c.round, Math.min(L, c.round.s + c.v * dt));
+          const deeper = chasers.some(r => {
+            const d0 = boxDepth(c.x, c.z, c.h, c.len / 2, r), d1 = boxDepth(q.x + this.ox, q.z + this.oz, q.h, c.len / 2, r);
+            return d1 > 0.2 && d1 > d0 + 0.005;
+          });
+          if (deeper) c.v = 0;
+        }
         c.round.s += c.v * dt;
         if (c.round.s >= c.round.cum[c.round.cum.length - 1]) {
           const next = g.edges[c.round.next];
@@ -493,7 +559,11 @@ export class IslandCars {
             && Math.hypot(o.x - this.ox - E.x, o.z - this.oz - E.z) < 11);
           if (busy) holdAt = e.len - ROUND_IN - 0.05;
         } else if (!end.signalized && !end.mouth && end.edges.length >= 3) {
-          const busy = (onJunction.get(end.id) ?? []).some(inEdge => inEdge !== c.edge);
+          // (a getaway car moving onto or across the junction counts too —
+          // it has right of way; one standing at its edge waits for the
+          // traffic, and the traffic doesn't wait for it: nobody deadlocks)
+          const busy = (onJunction.get(end.id) ?? []).some(inEdge => inEdge !== c.edge)
+            || chasers.some(r => r.v > 0.5 && Math.hypot(r.x - end.x - this.ox, r.z - end.z - this.oz) < TURN_IN + 4);
           if (busy) holdAt = e.len - TURN_IN - 0.05;
         }
         if (holdAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (holdAt - c.s) * 1.4));
@@ -522,12 +592,19 @@ export class IslandCars {
         vTarget = forWalkers(c, c.h, vTarget);
         // the kid's road vehicle: queue behind it, ease aside when close
         vTarget = forPlayer(c, c.h, vTarget);
+        vTarget = forChasers(c, c.h, vTarget);
         let dodge = 0;
         if (road) {
           const hx = e.ux * c.dir, hz = e.uz * c.dir;
           const dx = road.x - c.x, dz = road.z - c.z;
           const side = -dx * hz + dz * hx;
           if (Math.hypot(dx, dz) < 6) dodge = side > 0 ? -1.2 : 1.8; // away from the player, kerb-ward by default
+        }
+        // (a getaway car fleeing up behind: to the kerb, slower — it passes;
+        // and while it's alongside this car doesn't start its turn across it)
+        if (!dodge && makeWay(c, e.ux * c.dir, e.uz * c.dir)) {
+          dodge = 1.8;
+          vTarget = Math.min(vTarget, c.speed * 0.6, Math.sqrt(Math.max(0, 10 * (e.len - (end.plaza ? ROUND_IN : TURN_IN) - 1 - c.s))));
         }
         c.dodge += (dodge - c.dodge) * Math.min(1, dt * 3);
         c.v += Math.max(-8 * dt, Math.min(5 * dt, vTarget - c.v));

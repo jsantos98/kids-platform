@@ -40,6 +40,8 @@ export interface VehicleConfig {
   steerMax: number;
   cabF: number;
   cabY: number;
+  /** how far ahead of the vehicle the chase camera looks (m) */
+  camAhead: number;
   front: number;
   halfW: number;
   frontR: number;
@@ -50,7 +52,7 @@ export interface VehicleConfig {
 const groundCar = (make: () => THREE.Group, glb: string, glbLen: number, over: Partial<VehicleConfig> = {}): VehicleConfig => ({
   make, glb, glbLen, kind: 'ground', fly: false,
   accel: 6.5, brake: 15, maxF: 12, maxR: 3, radius: 1.0,
-  camBack: 11, camUp: 5.2, highBack: 12, highUp: 11.5, highAhead: 6,
+  camBack: 11, camUp: 9.8, camAhead: 10, highBack: 12, highUp: 19, highAhead: 6,
   wheelbase: 2.7, steerMax: 0.5, cabF: 1.8, cabY: 1.6,
   front: 1.5, halfW: 0.95, frontR: 0.95,
   ...over,
@@ -59,7 +61,7 @@ const groundCar = (make: () => THREE.Group, glb: string, glbLen: number, over: P
 const heli = (body: number, band: number): VehicleConfig => ({
   make: () => makeHelicopter({ body, band }), glb: '', glbLen: 7.8, kind: 'heli', fly: true,
   accel: 9, brake: 12, maxF: 13, maxR: 6, radius: 2.6,
-  camBack: 17, camUp: 8.5, highBack: 20, highUp: 15, highAhead: 8,
+  camBack: 17, camUp: 13, camAhead: 12, highBack: 20, highUp: 29, highAhead: 8,
   wheelbase: 4, steerMax: 1.0, cabF: 4.6, cabY: 3.4,
   front: 3, halfW: 2.2, frontR: 2, scale: 1.5,
 });
@@ -67,7 +69,7 @@ const heli = (body: number, band: number): VehicleConfig => ({
 export const VEHICLES: Record<string, VehicleConfig> = {
   truck: groundCar(makeFireTruck, '/assets/kenney/firetruck.glb', 6.6, {
     accel: 5, brake: 13, maxF: 9.5, radius: 1.35,
-    camBack: 12.5, camUp: 5.6, highBack: 14, highUp: 13,
+    camBack: 12.5, camUp: 10.4, highBack: 14, highUp: 21,
     wheelbase: 3.6, steerMax: 0.46, cabF: 3.0, cabY: 2.9,
     front: 1.95, halfW: 1.15, frontR: 1.05,
   }),
@@ -75,7 +77,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     maxF: 12.5, radius: 1.05,
   }),
   ambulance: groundCar(() => makeCar({ body: 0xfaf7ef }), '/assets/kenney/ambulance.glb', 5.4, {
-    accel: 5.8, maxF: 11, radius: 1.2, camBack: 12, camUp: 5.4,
+    accel: 5.8, maxF: 11, radius: 1.2, camBack: 12, camUp: 10.2,
     wheelbase: 3.1, steerMax: 0.48, cabF: 2.2, cabY: 2.3, front: 1.8, halfW: 1.05, frontR: 1.0,
   }),
   car: groundCar(() => makeCar({ body: 0x7fb2d9 }), '/assets/kenney/hatchback-sports.glb', 4.2),
@@ -85,14 +87,15 @@ export const VEHICLES: Record<string, VehicleConfig> = {
   plane: {
     make: () => makePlane(), glb: '', glbLen: 8, kind: 'plane', fly: true,
     accel: 6, brake: 7, maxF: 24, maxR: 0, radius: 3,
-    camBack: 22, camUp: 7.5, highBack: 28, highUp: 18, highAhead: 10,
+    // (a little lower than the others, 18°: the rings it climbs to stay in view)
+    camBack: 22, camUp: 13, camAhead: 14, highBack: 28, highUp: 39, highAhead: 10,
     wheelbase: 4, steerMax: 0.9, cabF: 2.4, cabY: 1.6,
     front: 3, halfW: 3.6, frontR: 2, scale: 1.4,
   },
   boat: {
     make: () => new THREE.Group(), glb: '/assets/kenney/watercraft/boat-speed-a.glb', glbLen: 6.5, kind: 'boat', fly: false,
     accel: 6, brake: 8, maxF: 14, maxR: 3, radius: 2,
-    camBack: 15, camUp: 6.5, highBack: 18, highUp: 14, highAhead: 8,
+    camBack: 15, camUp: 12.2, camAhead: 12, highBack: 18, highUp: 27, highAhead: 8,
     wheelbase: 3.4, steerMax: 0.6, cabF: 1.2, cabY: 2.2,
     front: 3, halfW: 1.4, frontR: 1.4,
   },
@@ -100,7 +103,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     make: () => new THREE.Group(), glb: '', glbLen: 9, kind: 'rail', fly: false,
     accel: 2.4, brake: 5.5, maxF: 12, maxR: 0, radius: 2,
     // the kid's train is ~30 m long: the chase camera rides behind all of it
-    camBack: 40, camUp: 13, highBack: 48, highUp: 24, highAhead: 12,
+    camBack: 40, camUp: 25.5, camAhead: 20, highBack: 48, highUp: 60, highAhead: 12,
     wheelbase: 9, steerMax: 0, cabF: 3.5, cabY: 3.1,
     front: 4.5, halfW: 1.6, frontR: 1.6,
   },
@@ -108,7 +111,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
   // the kit), long and low — 4.4 m by 2.1 m, wheels 2.6 m apart
   kart: groundCar(() => makeCar({ body: 0xe25c5c }), '/assets/kenney/race.glb', 4.4, {
     accel: 10, brake: 14, maxF: 15, maxR: 4, radius: 1.2,
-    camBack: 10, camUp: 4.2, highBack: 12, highUp: 11,
+    camBack: 10, camUp: 9.4, highBack: 12, highUp: 19,
     wheelbase: 2.6, steerMax: 0.6, cabF: 1.2, cabY: 1.2, front: 2.2, halfW: 1.05, frontR: 1.0,
   }),
 };

@@ -17,6 +17,7 @@ import { loadTotals } from './games/city/state.js';
 import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/index.js';
 import { speak, preloadVoice, speaking } from './i18n/voice.js';
 import { GameAudio } from './engine/audio.js';
+import { volume, setVolume, type VolumeKey } from './engine/settings.js';
 
 applyI18n('garage.pageTitle');
 preloadVoice();
@@ -298,6 +299,13 @@ function drawLang(): void {
   note.title = tr('city.music');
   note.classList.toggle('off', !music.isMusicOn);
   note.addEventListener('click', e => { e.stopPropagation(); music.unlock(); music.setMusicOn(!music.isMusicOn); drawLang(); });
+  // the grown-ups' sound settings
+  const gear = document.createElement('button');
+  gear.type = 'button';
+  gear.textContent = '⚙️';
+  gear.className = 'gear';
+  gear.title = tr('settings.title');
+  gear.addEventListener('click', e => { e.stopPropagation(); openSettings(!settingsOpen); });
   langBox.replaceChildren(...LANGS.map(l => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -306,8 +314,42 @@ function drawLang(): void {
     b.classList.toggle('on', l.id === getLang());
     b.addEventListener('click', e => { e.stopPropagation(); pickLang(l.id); });
     return b;
-  }), note);
+  }), note, gear);
 }
+
+// ---- the grown-ups' sound settings (G11): voice, music, background sounds
+// and engines, each 0 … 100 %, remembered for every page; a sample plays when
+// a slider is let go. While the panel is open the wheel, the keys and the
+// clicks don't reach the carousel ----
+const settingsEl = document.getElementById('settings')!;
+let settingsOpen = false;
+function openSettings(on: boolean): void {
+  settingsOpen = on;
+  settingsEl.classList.toggle('on', on);
+  if (on) music.unlock();
+}
+for (const inp of settingsEl.querySelectorAll<HTMLInputElement>('input[data-vol]')) {
+  const k = inp.dataset.vol as VolumeKey;
+  const out = inp.nextElementSibling as HTMLOutputElement;
+  const show = (): void => { out.textContent = `${inp.value}%`; };
+  inp.value = String(Math.round(volume(k) * 100));
+  show();
+  inp.addEventListener('input', () => { setVolume(k, Number(inp.value) / 100); show(); });
+  inp.addEventListener('change', () => sample(k));
+}
+settingsEl.addEventListener('click', e => { if (e.target === settingsEl) openSettings(false); });
+document.getElementById('settingsClose')!.addEventListener('click', () => openSettings(false));
+/** what a slider sounds like: a spoken name, the music (it plays on), a
+ * ding, a moment of engine */
+function sample(k: VolumeKey): void {
+  if (k === 'voice') void say(list[sel].sayId);
+  else if (k === 'bg') music.ding();
+  else if (k === 'engine') {
+    music.setEngine('car', 0.7, 1);
+    setTimeout(() => music.setEngine(null), 1200);
+  }
+}
+
 function pickLang(l: 'pt' | 'en'): void {
   if (l === getLang()) return;
   setLang(l);
@@ -329,7 +371,7 @@ drawLang();
 // ---- go! ----
 let going = false;
 function go(): void {
-  if (going) return;
+  if (going || settingsOpen) return;
   const e = list[sel];
   // the race: first its car; the way back from the cars: the modes again
   if (stage === 'modes' && e.id === 'race') { enter('cars'); return; }
@@ -351,6 +393,10 @@ renderer.domElement.addEventListener('click', go);
 
 // ---- keys ----
 addEventListener('keydown', e => {
+  // (the settings panel: O opens and closes it, Esc closes it, and while
+  // it's open no key moves the carousel)
+  if (e.code === 'KeyO') { openSettings(!settingsOpen); return; }
+  if (settingsOpen) { if (e.code === 'Escape') openSettings(false); return; }
   if (e.code === 'KeyL') pickLang(getLang() === 'pt' ? 'en' : 'pt');
   else if ((e.code === 'Escape' || e.code === 'Backspace') && stage === 'cars') enter('modes');
   else if (e.code === 'ArrowLeft' || e.code === 'KeyA') choose(sel - 1);
@@ -364,6 +410,7 @@ addEventListener('keydown', e => {
 const wheelIcon = document.getElementById('wheel') as unknown as SVGElement;
 let armed = false, stepT = 0, ready = false;
 function pollWheel(dt: number): void {
+  if (settingsOpen) return;
   const gp = navigator.getGamepads?.()[0];
   if (!gp) { wheelIcon.style.transform = ''; return; }
   const steer = gp.axes[0] ?? 0;

@@ -646,15 +646,15 @@ export class Railway {
     }
   }
 
-  /** the kid's train this frame: gas / brake with a station-approach assist,
-   * a red signal at the diamond while a west-east train is due, and no
-   * stopping on the diamond itself */
+  /** the kid's train this frame: gas / brake — stopping at the station is
+   * the kid's job (G6: roll past and the people waiting are cross) —, a red
+   * signal at the diamond while a west-east train is due, and no stopping on
+   * the diamond itself */
   private driveKid(dt: number, t: number): void {
     const k = this.kid!;
     const seg = segment(k.bx, k.by, 'ns');
-    const { gas, brake, stationGap } = this.controls;
+    const { gas, brake } = this.controls;
     let vTarget = gas > 0.05 ? PLAYER_MAX : brake > 0.05 ? 0 : Math.max(0, k.v - 0.5);
-    if (stationGap < 80) vTarget = Math.min(vTarget, Math.max(1.6, stationGap * 0.3));
     const net = railNetFor(k.bx, k.by);
     const sD = seg.dir > 0 ? net.diamond.d[0] : seg.route.total - net.diamond.d[0];
     const toD = sD - k.s;                 // head to the diamond

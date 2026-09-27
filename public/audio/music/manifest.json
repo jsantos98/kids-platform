@@ -47,6 +47,30 @@
       "match": 0.72
     }
   },
+  "garage-5": {
+    "prompt": "Sparkly, jolly music for a children's game menu, a shiny toy showroom: steel pan melody, bouncy synth bass, finger snaps, toy piano, light bossa drums, major key, 106 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "take": 1,
+    "bpm": 106,
+    "loop": {
+      "from": 1.765,
+      "to": 47.044,
+      "beats": 79.99,
+      "match": 0.94
+    }
+  },
+  "garage-6": {
+    "prompt": "Bubbly, happy music for a children's game menu, picking a toy vehicle for an adventure: bouncy clavinet, plucky synth, cheerful recorder melody, hand drums and claps, playful bass, major key, 112 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "take": 1,
+    "bpm": 112,
+    "loop": {
+      "from": 0.859,
+      "to": 35.148,
+      "beats": 64.01,
+      "match": 0.87
+    }
+  },
   "day-1": {
     "prompt": "Sunny, upbeat adventure music for a children's driving game, exploring a little island city by day: acoustic guitar strums, bright piano, marimba melody, bouncy bass, light drums with shaker, major key, happy and carefree, 118 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
     "seconds": 120,
@@ -93,6 +117,30 @@
       "to": 107.716,
       "beats": 208.0,
       "match": 0.83
+    }
+  },
+  "day-5": {
+    "prompt": "Happy, sunny countryside-and-town music for a children's driving game: banjo and mandolin picking, accordion melody, upright bass, brushed drums and tambourine, major key, carefree, 116 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "take": 1,
+    "bpm": 116,
+    "loop": {
+      "from": 0.023,
+      "to": 74.513,
+      "beats": 144.01,
+      "match": 0.9
+    }
+  },
+  "day-6": {
+    "prompt": "Joyful, sunny morning music for a children's driving game through a busy little town: bright horn section riffs, funky rhythm guitar, bouncy electric bass, glockenspiel, upbeat drums, major key, 122 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "take": 1,
+    "bpm": 122,
+    "loop": {
+      "from": 31.951,
+      "to": 110.635,
+      "beats": 159.99,
+      "match": 0.85
     }
   },
   "night-1": {
@@ -143,6 +191,30 @@
       "match": 0.88
     }
   },
+  "night-5": {
+    "prompt": "Warm, gentle lo-fi night music for a children's game, city lights twinkling: mellow Rhodes chords, soft flute melody, kalimba, round bass, soft laid-back drums, major key, relaxed but moving along, 88 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "take": 1,
+    "bpm": 88,
+    "loop": {
+      "from": 16.277,
+      "to": 103.555,
+      "beats": 128.01,
+      "match": 0.94
+    }
+  },
+  "night-6": {
+    "prompt": "Tender, sleepy-but-moving night music for a children's game, driving past lit windows and a sleeping harbour: solo acoustic piano melody, soft cello, music box, gentle upright bass, soft shaker, major key, 84 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 120,
+    "take": 1,
+    "bpm": 84,
+    "loop": {
+      "from": 25.612,
+      "to": 82.744,
+      "beats": 79.99,
+      "match": 0.94
+    }
+  },
   "race-1": {
     "prompt": "Energetic, exciting race music for a children's kart racing game: driving drums, funky bass, bright synth brass stabs, electric guitar riffs, major key, fun and fast but never aggressive, 150 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
     "seconds": 90,
@@ -189,6 +261,30 @@
       "to": 68.615,
       "beats": 127.94,
       "match": 0.82
+    }
+  },
+  "race-5": {
+    "prompt": "Bright, thrilling racing music for a children's kart game: fast disco-funk drums, slap bass, synth brass fanfares, sparkling arpeggios, major key, exciting and happy, 140 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 140,
+    "loop": {
+      "from": 28.212,
+      "to": 76.219,
+      "beats": 112.02,
+      "match": 0.93
+    }
+  },
+  "race-6": {
+    "prompt": "Zippy, joyful race music for a children's toy car race: bright ska horns, offbeat guitar skanks, fast bouncy drums, walking bass, whistles, major key, 155 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 155,
+    "loop": {
+      "from": 0.627,
+      "to": 68.749,
+      "beats": 175.98,
+      "match": 0.91
     }
   },
   "chase-1": {
@@ -239,6 +335,30 @@
       "match": 0.74
     }
   },
+  "chase-5": {
+    "prompt": "Sneaky, comic chase music for a children's police game, cartoon detectives on the trail: tuba bass, marimba and xylophone, cheeky saxophone melody, snare with rimshots, playful and never scary, 124 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 124,
+    "loop": {
+      "from": 10.403,
+      "to": 64.579,
+      "beats": 111.96,
+      "match": 0.85
+    }
+  },
+  "chase-6": {
+    "prompt": "Bouncy, mischievous cartoon chase music for a children's police game, hot on the robber's heels: harpsichord runs, oompah tuba, fast pizzicato, slide whistle accents, woodblocks and snare, light-hearted, 136 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 136,
+    "loop": {
+      "from": 0.418,
+      "to": 69.223,
+      "beats": 155.96,
+      "match": 0.88
+    }
+  },
   "scene-1": {
     "prompt": "Brave, hopeful little-hero music for a children's rescue mission, putting out a fire and saving a kitten: light marching snare, bright brass and strings, glockenspiel, determined but cheerful, major key, 112 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
     "seconds": 60,
@@ -285,6 +405,30 @@
       "to": 28.593,
       "beats": 48.0,
       "match": 0.78
+    }
+  },
+  "scene-5": {
+    "prompt": "Bold, cheerful teamwork music for a children's rescue mission: French horn melody, pizzicato and bright strings, timpani rolls, glockenspiel, light snare, major key, brave and warm, 114 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "take": 1,
+    "bpm": 114,
+    "loop": {
+      "from": 1.927,
+      "to": 27.168,
+      "beats": 47.96,
+      "match": 0.78
+    }
+  },
+  "scene-6": {
+    "prompt": "Upbeat, heartwarming hero music for a children's mission, helping someone in need: acoustic guitar strums, bright piano, soaring strings, handclaps, light drums, major key, determined and kind, 110 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 60,
+    "take": 1,
+    "bpm": 110,
+    "loop": {
+      "from": 17.438,
+      "to": 52.348,
+      "beats": 64.0,
+      "match": 0.73
     }
   }
 }

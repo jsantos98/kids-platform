@@ -8,6 +8,10 @@ import { Baked } from '../../engine/baked.js';
 import { waveAt, hullObject, boatLoop } from './sea.js';
 import { buildBridge, type Lighthouse } from './bridge.js';
 import { harbourFor } from './harbour.js';
+import { isletsFor } from './islets.js';
+import { PK_M } from './sea.js';
+import { bakedModel } from '../../engine/assets.js';
+import { templateToMesh } from '../../engine/baked.js';
 import type { NightLights } from './nightLights.js';
 import { makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
@@ -16,7 +20,22 @@ import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 interface Bobber { mesh: THREE.Object3D; x: number; z: number; amp: number; phase: number }
 
-interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[]; lighthouse: Lighthouse }
+interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[]; lighthouse: Lighthouse; marks: THREE.Object3D[] }
+
+/** a Pirate Kit model at its kit scale (PK_M m a unit), standing on y = 0
+ * and centred, turned by ry — null until it is baked */
+function pk(name: string, ry = 0, s = PK_M): THREE.Mesh | null {
+  const t = bakedModel(`pk-${name}`);
+  if (!t) return null;
+  const m = templateToMesh(t);
+  m.geometry.scale(s, s, s);
+  m.geometry.computeBoundingBox();
+  const bb = m.geometry.boundingBox!;
+  m.geometry.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  m.rotation.y = ry;
+  m.castShadow = true;
+  return m;
+}
 
 export class CityScenery {
   private cities = new Map<string, Inst>();
@@ -108,8 +127,47 @@ export class CityScenery {
       bobbers.push({ mesh: buoy, x, z, amp: 1.4, phase: k * 2.3 });
     }
 
+    // the treasure islets out at sea (G15): a sandy mound in a ring of foam,
+    // palms, sand rocks, a pirate's flag, and a red ❌ over the treasure —
+    // hidden until the pirate mode has its map (`showTreasure`)
+    const marks: THREE.Object3D[] = [];
+    for (const [k, I] of isletsFor(bx, by).entries()) {
+      const x = ox + I.x, z = oz + I.z;
+      const S = new Baked();
+      S.cyl(I.r * 0.72, I.r, 0.9, 28, 0xf0e2c0, x, 0.1, z);
+      S.cyl(I.r * 0.45, I.r * 0.72, 0.55, 24, 0xf5e8c8, x, 0.72, z);
+      group.add(S.build());
+      const F = new Baked();
+      F.cyl(I.r + 1.6, I.r + 1.6, 0.08, 32, 0xffffff, x, 0.03, z);
+      const foam = F.build({ cast: false, receive: false });
+      foam.material = this.foamMat;
+      group.add(foam);
+      const put = (m: THREE.Mesh | null, a: number, d: number, y = 0.6): void => {
+        if (!m) return;
+        m.position.set(x + Math.cos(a) * d, y, z + Math.sin(a) * d);
+        group.add(m);
+      };
+      const palms = ['palm-detailed-bend', 'palm-bend', 'palm-detailed-straight', 'palm-straight'];
+      const n = 2 + Math.floor(I.v * 2.99);
+      for (let j = 0; j < n; j++) {
+        const a = I.v * 9 + j * 2.4;
+        put(pk(palms[(j + Math.floor(I.v * 4)) % 4], a * 1.7), a, I.r * (0.35 + 0.3 * ((j * 0.37 + I.v) % 1)), 0.4);
+      }
+      put(pk(['rocks-sand-a', 'rocks-sand-b', 'rocks-sand-c'][k % 3], I.v * 6), I.v * 9 + 1.2, I.r * 0.82, 0.05);
+      put(pk('patch-sand-foliage', I.v * 3), I.v * 9 + 3.6, I.r * 0.5, 0.9);
+      put(pk('flag-pirate', I.v * 5 + 1), I.v * 9 + 4.9, I.r * 0.2, 1.1);
+      // the ❌: two red planks crossed on the sand, standing a little proud
+      const X = new Baked();
+      for (const r of [Math.PI / 4, -Math.PI / 4]) X.box(0.7, 0.14, 3.6, 0xd8322a, 0, 0, 0, 0, r, 0);
+      const mark = X.build({ cast: false });
+      mark.position.set(ox + I.tx, 1.05, oz + I.tz);
+      mark.visible = false;
+      group.add(mark);
+      marks.push(mark);
+    }
+
     this.scene.add(group);
-    this.cities.set(key, { group, boxes, bobbers, lighthouse: bridge.lighthouse });
+    this.cities.set(key, { group, boxes, bobbers, lighthouse: bridge.lighthouse, marks });
     while (this.cities.size > 3) {
       const oldest = this.cities.keys().next().value as string;
       const inst = this.cities.get(oldest)!;
@@ -120,6 +178,12 @@ export class CityScenery {
       });
       this.cities.delete(oldest);
     }
+  }
+
+  /** show (or hide) the ❌ over island (bx, by)'s islet k's treasure */
+  showTreasure(bx: number, by: number, k: number, on: boolean): void {
+    const m = this.cities.get(`${bx},${by}`)?.marks[k];
+    if (m) m.visible = on;
   }
 
   /** at night the lighthouses' lamps glow here (G10) */

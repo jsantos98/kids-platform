@@ -16,6 +16,7 @@ import { deckAt, BOAT_CLEAR } from '../src/worlds/causeway.js';
 import { Fleet, type BoatFootprint } from '../src/games/city/sea.js';
 import { harbourFor, harbourBlocks, inSeaBox } from '../src/games/city/harbour.js';
 import { lighthouseAt } from '../src/games/city/bridge.js';
+import { isletsFor, onIslet } from '../src/games/city/islets.js';
 import { overlapDepth } from '../src/games/city/island/obb.js';
 import { createPlayer, physicsStep, VEHICLES } from '../src/games/city/player.js';
 import { citySeed } from '../src/worlds/cityGrid.js';
@@ -45,6 +46,7 @@ function touches(x: number, z: number): string | null {
   if (Math.hypot(lx - L.x, lz - L.z) < 3.2) return 'the lighthouse';
   const dk = deckAt(x, z);
   if (dk && dk.y < BOAT_CLEAR) return 'a low causeway deck';
+  if (onIslet(c.bx, c.by, lx, lz, 0)) return 'a treasure islet';
   return null;
 }
 
@@ -83,6 +85,18 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
     }
   }
   console.log(`island ${bx},${by}: ${count} boats; ${overlaps} overlapping pairs and ${grounded} boats aground in ${samples} samples`);
+  // the islets stand clear of the land, the causeways and each other (G15)
+  const isl = isletsFor(bx, by);
+  for (const I of isl) {
+    const ox = bx * CITY_PITCH, oz = by * CITY_PITCH;
+    for (let a = 0; a < Math.PI * 2; a += 0.3) {
+      const x = ox + I.x + Math.cos(a) * (I.r + 5), z = oz + I.z + Math.sin(a) * (I.r + 5);
+      const c = cityAt(x, z);
+      if (coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -20)) { fail(`island ${bx},${by}: a treasure islet within 25 m of land at (${x.toFixed(0)}, ${z.toFixed(0)})`); break; }
+      if (deckAt(x, z)) { fail(`island ${bx},${by}: a treasure islet under a causeway at (${x.toFixed(0)}, ${z.toFixed(0)})`); break; }
+    }
+  }
+  console.log(`  ${isl.length} treasure islets`);
 
   // the kid's boat, flat out at the lighthouse, the ship and the picnic isle
   const ox = bx * CITY_PITCH, oz = by * CITY_PITCH;

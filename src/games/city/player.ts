@@ -9,6 +9,7 @@ import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { bridgeLayout } from './bridge.js';
 import { harbourBlocks } from './harbour.js';
+import { onIslet } from './islets.js';
 import { deckAt, BOAT_CLEAR } from '../../worlds/causeway.js';
 import { inBox, type CollisionBox } from '../../worlds/cityChunk.js';
 
@@ -542,8 +543,10 @@ export function onGround(x: number, z: number): boolean {
 export function onLand(x: number, z: number, r: number): boolean {
   const c = cityAt(x, z);
   if (coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -(r + 1.5))) return true;
-  // the picnic bridge and island, the pier and its dinghies (G14)
+  // the picnic bridge and island, the pier and its dinghies (G14), and the
+  // treasure islets (G15)
   if (harbourBlocks(c.bx, c.by, x - c.ox, z - c.oz, r)) return true;
+  if (onIslet(c.bx, c.by, x - c.ox, z - c.oz, r + 1)) return true;
   // a causeway deck too low to sail under is a wall too (the raised span
   // in the middle clears the boats)
   const dk = deckAt(x, z);

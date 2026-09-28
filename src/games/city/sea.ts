@@ -298,6 +298,16 @@ const BIG: Array<[string, number]> = [
   ['ship-cargo-a', 30], ['ship-cargo-b', 32], ['ship-cargo-c', 34], ['ship-large', 30],
   ['ship-ocean-liner-small', 36],
 ];
+/** the Pirate Kit models the game bakes (as `pk-<name>`) */
+export const PIRATE_MODELS = [
+  'palm-straight', 'palm-bend', 'palm-detailed-straight', 'palm-detailed-bend', 'rocks-sand-a', 'rocks-sand-b',
+  'rocks-sand-c', 'patch-sand', 'patch-sand-foliage', 'flag-pirate', 'flag', 'chest', 'barrel', 'crate', 'bottle',
+  'ship-pirate-small', 'ship-pirate-medium', 'ship-pirate-large', 'ship-medium', 'ship-small', 'ship-wreck',
+  'boat-row-small', 'cannon', 'cannon-ball', 'hole', 'tool-shovel',
+];
+/** metres per Pirate Kit unit (its medium ship, 10.6 units, sails at 16 m) */
+export const PK_M = 1.5;
+
 /** every template the fleet can use */
 export const FLEET_MODELS = [...CALM, ...FAST, ...BIG].map(([t]) => t);
 
@@ -476,6 +486,10 @@ export async function createSea(scene: THREE.Scene): Promise<Sea> {
   const def = (n: string): BakeDef => [`${WC}/${n}.glb`, MAP];
   const defs: Record<string, BakeDef> = {};
   for (const n of [...FLEET_MODELS, 'boat-row-small', 'buoy', 'buoy-flag']) defs[n] = def(n);
+  // the Pirate Kit's islet dressing and ships (pk-*: the treasure islets and
+  // the pirate mode, G15)
+  const PK = '/assets/kenney/pirate';
+  for (const n of PIRATE_MODELS) defs[`pk-${n}`] = [`${PK}/${n}.glb`, `${PK}/Textures/colormap.png`];
   await prepBakedModels(defs).catch(() => {});
   return new Sea(scene);
 }

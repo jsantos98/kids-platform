@@ -16,6 +16,7 @@ import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
 import { bridgeLayout } from './bridge.js';
 import { coastFor, causewaySpan } from '../../worlds/coast.js';
+import { isletsFor } from './islets.js';
 import { callIcon, type Missions } from './missions.js';
 
 const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
@@ -151,6 +152,17 @@ export class Minimap {
     // on the sea
     ctx.fillStyle = '#72c3de';
     ctx.fillRect(0, 0, cv.width, cv.height);
+    // the treasure islets (G15): little sand islands with a palm
+    for (const I of isletsFor(this.bx, this.by)) {
+      ctx.beginPath();
+      ctx.arc(tx(I.x), ty(I.z), Math.max(2.5, I.r * PX), 0, Math.PI * 2);
+      ctx.fillStyle = '#f0e2c0';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(tx(I.x), ty(I.z), Math.max(1.2, I.r * PX * 0.4), 0, Math.PI * 2);
+      ctx.fillStyle = '#7fb069';
+      ctx.fill();
+    }
     const coast = coastFor(this.bx, this.by);
     ctx.beginPath();
     coast.pts.forEach((p, k) => (k ? ctx.lineTo(tx(p.x), ty(p.z)) : ctx.moveTo(tx(p.x), ty(p.z))));

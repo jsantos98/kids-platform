@@ -115,3 +115,35 @@ export function nearestLane(x: number, z: number, heading: number, boxes: Collis
   }
   return best;
 }
+
+/**
+ * Sea breadcrumbs (G14): the same idea on the water. While the kid's boat
+ * sails, a spot is remembered every 0.4 s when it is clear (no land, nothing
+ * standing in the water, no fleet boat near — the caller says); a crash
+ * resumes it at the newest one at least 15 m back that is still clear now
+ * (the fleet boats have moved on), else at the caller's fallback (the nearest
+ * point of the sailing lane).
+ */
+export class SeaCrumbs {
+  private crumbs: Spot[] = [];
+  private since = 0;
+
+  record(dt: number, x: number, z: number, heading: number, v: number, clear: (x: number, z: number) => boolean): void {
+    this.since += dt;
+    if (this.since < EVERY || Math.abs(v) < 1) return;
+    this.since = 0;
+    if (!clear(x, z)) return;
+    this.crumbs.push({ x, z, heading });
+    if (this.crumbs.length > KEEP) this.crumbs.shift();
+  }
+
+  pickResume(x: number, z: number, clear: (x: number, z: number) => boolean, fallback: Spot): Spot {
+    for (let i = this.crumbs.length - 1; i >= 0; i--) {
+      const c = this.crumbs[i];
+      if (Math.hypot(c.x - x, c.z - z) >= 15 && clear(c.x, c.z)) return { ...c };
+    }
+    return fallback;
+  }
+
+  clear(): void { this.crumbs.length = 0; }
+}

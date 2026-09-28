@@ -7,6 +7,7 @@ import { C, mat } from '../../engine/stage.js';
 import { Baked } from '../../engine/baked.js';
 import { waveAt, hullObject, boatLoop } from './sea.js';
 import { buildBridge, type Lighthouse } from './bridge.js';
+import { harbourFor } from './harbour.js';
 import type { NightLights } from './nightLights.js';
 import { makeRowboat } from '../../kit/boats.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
@@ -51,27 +52,25 @@ export class CityScenery {
       group.add(foam);
     }
 
-    // the picnic-island causeway
+    // the picnic-island causeway (its boxes are island-local: moved to the
+    // world like the chunks' — they only stood right on island (0,0), so the
+    // lighthouse, trees and rocks were nowhere anywhere else: G14)
     const bridge = buildBridge(bx, by, ox, oz);
     group.add(bridge.group);
-    boxes.push(...bridge.boxes);
+    boxes.push(...bridge.boxes.map(b => ({ ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz })));
 
     // wooden pier off the south-east shore + moored dinghies, facing out to
-    // sea from wherever the coast is (pier frame: +z outward, x across)
-    const shore = coast.shoreToward(CENTER + 1, CENTER + 1, -2);
-    const out = { x: shore.x - CENTER, z: shore.z - CENTER };
-    const ol = Math.hypot(out.x, out.z);
-    out.x /= ol; out.z /= ol;
-    const across = { x: out.z, z: -out.x };
-    const yaw = Math.atan2(out.x, out.z);
-    const at = (a: number, o: number): { x: number; z: number } =>
-      ({ x: ox + shore.x + across.x * a + out.x * o, z: oz + shore.z + across.z * a + out.z * o });
+    // sea from wherever the coast is (pier frame: +z outward, x across —
+    // harbour.ts, which the boats' physics and lanes read too)
+    const H = harbourFor(bx, by);
+    const yaw = H.yaw;
+    const at = (a: number, o: number): { x: number; z: number } => { const p = H.at(a, o); return { x: ox + p.x, z: oz + p.z }; };
     const pier = this.bakePier();
     const p0 = at(0, 0);
     pier.position.set(p0.x, 0, p0.z);
     pier.rotation.y = yaw;
     group.add(pier);
-    for (const [a, o, phase] of [[-7.5, 12, 1.2], [7.5, 16, 4.1]] as Array<[number, number, number]>) {
+    for (const [a, o, phase] of H.dinghies) {
       const boat = hullObject('boat-row-large', 4, () => makeRowboat({ hull: C.brown }));
       const p = at(a, o);
       boat.rotation.y = yaw + Math.PI / 2;
@@ -80,22 +79,27 @@ export class CityScenery {
       bobbers.push({ mesh: boat, x: p.x, z: p.z, amp: 1.6, phase });
     }
 
-    // an anchored cargo ship further out off the same shore
-    const sp = at(-40, 70);
-    const sx = sp.x, sz = sp.z;
+    // an anchored cargo ship further out off the same shore — solid: a boat
+    // running into it crashes (G14)
+    const sx = ox + H.ship.cx, sz = oz + H.ship.cz;
     const ship = hullObject('ship-cargo-a', 30, () => new THREE.Group());
-    ship.rotation.y = 0.5;
+    ship.rotation.y = H.ship.yaw;
+    {
+      const S = H.ship, ex = Math.abs(Math.sin(S.yaw)) * S.hl + Math.abs(Math.cos(S.yaw)) * S.hw, ez = Math.abs(Math.cos(S.yaw)) * S.hl + Math.abs(Math.sin(S.yaw)) * S.hw;
+      boxes.push({ x1: sx - ex, x2: sx + ex, z1: sz - ez, z2: sz + ez, top: 9, obb: { cx: sx, cz: sz, hx: S.hw, hz: S.hl, ry: S.yaw } });
+    }
     ship.position.set(sx, 0, sz);
     group.add(ship);
     bobbers.push({ mesh: ship, x: sx, z: sz, amp: 0.5, phase: 2.8 });
 
-    // course buoys just outside the sailing lane
+    // marker buoys just outside the sailing lane
     const loop = boatLoop(bx, by);
     for (let k = 0; k < 6; k++) {
       const p = loop[Math.floor((k / 6) * loop.length)];
       const nx = p.x - CENTER, nz = p.z - CENTER;
       const nl = Math.hypot(nx, nz) || 1;
-      const x = ox + p.x + (nx / nl) * 8, z = oz + p.z + (nz / nl) * 8;
+      // (halfway between the calm boats' two lanes, 10 m apart: sea.ts)
+      const x = ox + p.x + (nx / nl) * 5, z = oz + p.z + (nz / nl) * 5;
       const name = k % 2 ? 'buoy' : 'buoy-flag';
       const buoy = hullObject(name, k % 2 ? 1.4 : 2.2, () => new THREE.Group());
       buoy.position.set(x, 0, z);

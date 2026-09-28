@@ -3,6 +3,7 @@
 // shows both islands' trains, traffic, people and boats going about their
 // business. Simulations are kept (dormant) for a few islands, so coming back
 // finds the same people and cars where time would have taken them.
+import type { BoatFootprint } from '../sea.js';
 import * as THREE from 'three';
 import { cityAt, CITY_PITCH } from '../../../worlds/cityGrid.js';
 import { ISLAND } from '../../../worlds/world.js';
@@ -80,6 +81,18 @@ export class IslandManager {
     for (const s of this.sims.values()) {
       if (!s.active) continue;
       for (const c of s.cars.cars) if (Math.abs(c.x - x) < r && Math.abs(c.z - z) < r) out.push({ x: c.x, z: c.z, h: c.h, len: c.len, dodge: c.dodge, v: c.v, turning: !!c.round });
+    }
+    return out;
+  }
+
+  /** the awake islands' fleet boats within r of world (x, z), where they are
+   * `ahead` seconds from now — the kid's boat bumps into them, and a crash
+   * resumes clear of where they will be (G14) */
+  boatsNear(x: number, z: number, r: number, ahead = 0): BoatFootprint[] {
+    const out: BoatFootprint[] = [];
+    for (const s of this.sims.values()) {
+      if (!s.active) continue;
+      for (const b of s.fleet.footprints(s.simTime + ahead)) if (Math.abs(b.x - x) < r + b.hl && Math.abs(b.z - z) < r + b.hl) out.push(b);
     }
     return out;
   }

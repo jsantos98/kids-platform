@@ -54,6 +54,13 @@ export function bridgeLayout(bx: number, by: number): BridgeLayout {
 export interface Lighthouse { lamp: THREE.Mesh; beam: THREE.Group; x: number; y: number; z: number }
 export interface BuiltBridge { group: THREE.Group; boxes: CollisionBox[]; lighthouse: Lighthouse }
 
+/** where the picnic island's lighthouse stands (city-local): its tower
+ * 3.2 m round (the solid box: G14) */
+export function lighthouseAt(bx: number, by: number): { x: number; z: number } {
+  const { ISLE } = bridgeLayout(bx, by);
+  return { x: ISLE.x2 - 8, z: ISLE.z2 - 8 };
+}
+
 /** the lighthouse's height to its lamp (m) */
 const LAMP_Y = 15.6;
 
@@ -144,7 +151,7 @@ export function buildBridge(bx: number, by: number, ox: number, oz: number): Bui
   B.cyl(1.4, 1.4, 0.25, 12, 0x3c4450, LX, 16.9, LZ);
   B.cone(1.7, 1.4, 12, 0xd9473f, LX, 17.7, LZ);
   B.sphere(0.25, 0x3c4450, LX, 18.5, LZ);
-  boxes.push({ x1: LX - 3.2, x2: LX + 3.2, z1: LZ - 3.2, z2: LZ + 3.2 });
+  boxes.push({ x1: LX - 3.2, x2: LX + 3.2, z1: LZ - 3.2, z2: LZ + 3.2, top: 19 });
 
   // trees + rocks (deterministic scatter, clear of the bridge landing)
   const trees = ['tree-default', 'tree-oak', 'tree-detailed', 'tree-fat', 'tree-thin']

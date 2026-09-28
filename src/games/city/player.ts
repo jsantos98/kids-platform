@@ -8,6 +8,7 @@ import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { bridgeLayout } from './bridge.js';
+import { harbourBlocks } from './harbour.js';
 import { deckAt, BOAT_CLEAR } from '../../worlds/causeway.js';
 import { inBox, type CollisionBox } from '../../worlds/cityChunk.js';
 
@@ -388,19 +389,41 @@ export function physicsStep(
 
   if (V.kind === 'boat') {
     // on the water: gas/brake/steer like a light car with a long glide; the
-    // shore (any island) is a soft wall — the boat slides along it and slows,
-    // it never "crashes"
+    // shore (any island), the picnic bridge and island and the pier are a
+    // soft wall — the boat slides along them and slows; running into the
+    // lighthouse, the anchored ship or anything else standing up out of the
+    // water above 2 m/s is a crash: it flashes and the caller resumes it on
+    // clear water behind (G14 — before, it sailed through all of them)
+    st.alt = 0;
+    if (p.crashT > 0) {
+      p.crashT -= dt;
+      p.car.visible = (Math.floor(performance.now() / 1000 * 9) % 2) === 0;
+      if (p.crashT <= 0) {
+        st.x = p.crash.x; st.z = p.crash.z;
+        st.heading = p.crash.heading;
+        st.v = 0;
+        p.car.visible = true;
+      }
+      return { crashed: false };
+    }
     if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
     if (input.brake) st.v = Math.max(-V.maxR, st.v - V.brake * dt);
     if (!input.gas && !input.brake) st.v -= st.v * 0.6 * dt;
     st.heading += input.steer * V.steerMax * dt * Math.min(1, 0.3 + Math.abs(st.v) / 6) * Math.sign(st.v || 1);
     const nx = st.x + Math.sin(st.heading) * st.v * dt;
     const nz = st.z + Math.cos(st.heading) * st.v * dt;
+    // (only what stands up out of the water counts: a box a boat can hit,
+    // not the little ones round the picnic island's trees)
+    const hit = boxes.some(b => !b.small && inBox(b, nx, nz, V.radius) && !inBox(b, st.x, st.z, V.radius));
+    if (hit) {
+      if (Math.abs(st.v) > 2) { startCrash(p); return { crashed: true }; }
+      st.v *= 0.3;
+      return { crashed: false };
+    }
     const blockX = onLand(nx, st.z, V.radius), blockZ = onLand(st.x, nz, V.radius);
     if (!blockX) st.x = nx;
     if (!blockZ) st.z = nz;
     if (blockX || blockZ) st.v *= 1 - Math.min(0.9, dt * 3);
-    st.alt = 0;
     return { crashed: false };
   }
 
@@ -519,6 +542,8 @@ export function onGround(x: number, z: number): boolean {
 export function onLand(x: number, z: number, r: number): boolean {
   const c = cityAt(x, z);
   if (coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -(r + 1.5))) return true;
+  // the picnic bridge and island, the pier and its dinghies (G14)
+  if (harbourBlocks(c.bx, c.by, x - c.ox, z - c.oz, r)) return true;
   // a causeway deck too low to sail under is a wall too (the raised span
   // in the middle clears the boats)
   const dk = deckAt(x, z);

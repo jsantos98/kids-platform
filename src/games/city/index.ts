@@ -14,11 +14,12 @@ import { Narrator } from './narrator.js';
 import { preloadVoice, setVoiceMuted, wakeVoice, voiceReady } from '../../i18n/voice.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
-import { createPlayer, physicsStep, startCrash, heliSirenLamps, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
+import { createPlayer, physicsStep, startCrash, heliSirenLamps, onLand, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
+import { overlapDepth } from './island/obb.js';
 import { modeFromURL } from './modes.js';
 import { Course } from './course.js';
 import { Searchlight, Winch, SPOT_AHEAD, SPOT_R, SPOT_GRACE } from './heliFx.js';
-import { Breadcrumbs } from './breadcrumb.js';
+import { Breadcrumbs, SeaCrumbs, type Spot } from './breadcrumb.js';
 import { NightLights } from './nightLights.js';
 import { Causeways } from './causeways.js';
 import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
@@ -31,7 +32,7 @@ import { setCarDrawScale } from './island/cars.js';
 import { setWalkerDrawScale } from './island/walkers.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { graphFor } from '../../worlds/streetGraph.js';
-import { WORLD_CHUNKS, chunkGroundColor, inBox } from '../../worlds/cityChunk.js';
+import { WORLD_CHUNKS, chunkGroundColor, inBox, type CollisionBox } from '../../worlds/cityChunk.js';
 import { CENTER, ISLAND } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { setCityBase, citySeed, cityAt, cityBase, CITY_PITCH, type CityRef } from '../../worlds/cityGrid.js';
@@ -287,6 +288,30 @@ scene.add(player.car);
 if (V.kind === 'heli' && MODE.lightbar) player.car.userData.siren = heliSirenLamps(player.car, !!MODE.searchlight);
 // known-good road spots for crash / stuck resumes, and the floating guide arrow
 const crumbs = new Breadcrumbs(V.radius);
+// the boat's own crumbs, on clear water (G14)
+const seaCrumbs = new SeaCrumbs();
+const BOAT_HL = (V.glbLen ?? 6.5) / 2;
+/** clear water for the kid's boat at world (x, z): no land, harbour or
+ * anything standing in it, and no fleet boat there now or over the next
+ * 2 s (G14) */
+function seaClear(x: number, z: number, boxes: CollisionBox[]): boolean {
+  if (onLand(x, z, V.radius + 3)) return false;
+  if (boxes.some(b => !b.small && inBox(b, x, z, V.radius + 3))) return false;
+  for (const ahead of [0, 1, 2]) {
+    for (const b of islands.boatsNear(x, z, 40, ahead)) if (Math.hypot(b.x - x, b.z - z) < b.hl + BOAT_HL + 6) return false;
+  }
+  return true;
+}
+/** where the kid's boat resumes after a crash: a sea crumb well behind,
+ * else the nearest point of the sailing lane, heading along it */
+function boatResume(boxes: CollisionBox[]): Spot {
+  const st = player.state, c = cityAt(st.x, st.z), loop = boatLoop(c.bx, c.by);
+  let bi = 0, bd = Infinity;
+  loop.forEach((p, i) => { const d = Math.hypot(p.x + c.ox - st.x, p.z + c.oz - st.z); if (d < bd && seaClear(p.x + c.ox, p.z + c.oz, boxes)) { bd = d; bi = i; } });
+  const a = loop[bi], b = loop[(bi + 3) % loop.length];
+  const fallback = { x: a.x + c.ox, z: a.z + c.oz, heading: Math.atan2(b.x - a.x, b.z - a.z) };
+  return seaCrumbs.pickResume(st.x, st.z, (x, z) => seaClear(x, z, boxes), fallback);
+}
 const guideArrow3d = new GuideArrow();
 const _topBox = new THREE.Box3();
 /** how far the player's vehicle reaches above its origin (m) */
@@ -1082,6 +1107,29 @@ const tick = (): void => {
       // (road vehicles resume on a breadcrumb; the helicopter picked its
       // spot itself, just back along its path)
       if (V.kind === 'ground') Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+      // (the boat: on clear water behind it — G14)
+      else if (V.kind === 'boat') Object.assign(player.crash, boatResume(boxes));
+    } else if (!wasCrashing && V.kind === 'boat' && mode === 'drive') {
+      seaCrumbs.record(dt, st.x, st.z, st.heading, st.v, (x, z) => seaClear(x, z, boxes));
+      // the island's boats are solid (G14): running into one above 1.4 m/s
+      // is a crash — a flash, and the boat resumes on clear water behind;
+      // a nudge only pushes the two apart
+      const me = { x: st.x, z: st.z, h: st.heading, hl: BOAT_HL, hw: V.halfW };
+      for (const b of islands.boatsNear(st.x, st.z, 30)) {
+        const d = overlapDepth(me, { x: b.x, z: b.z, h: b.h, hl: b.hl, hw: b.hw });
+        if (d <= 0) continue;
+        if (Math.abs(st.v) > 1.4) {
+          startCrash(player);
+          sound.event('crash'); sound.event('bumpCar'); narrator.say('oops');
+          toast = '';
+          Object.assign(player.crash, boatResume(boxes));
+        } else {
+          const dx = st.x - b.x, dz = st.z - b.z, l = Math.hypot(dx, dz) || 1;
+          st.x += (dx / l) * Math.min(d, 0.5); st.z += (dz / l) * Math.min(d, 0.5);
+          st.v *= 0.5;
+        }
+        break;
+      }
     } else if (!wasCrashing && V.kind === 'ground' && mode === 'drive') {
       crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
       // stuck detector: gas held the whole window yet the truck went nowhere

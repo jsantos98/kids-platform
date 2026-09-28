@@ -44,6 +44,7 @@ import { buildIslandData, islandReady, installIslandData, type IslandData } from
 import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
 import { ChaseActivity } from './activity/chase.js';
 import { railNetFor } from '../../worlds/railRoute.js';
+import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { deckAt } from '../../worlds/causeway.js';
 import { Railway, lineDir, setIslandGate } from './railway.js';
 import { Missions, callIcon } from './missions.js';
@@ -137,7 +138,21 @@ function seaSpawn(bx: number, by: number): { x: number; z: number; heading: numb
 function trainStart(bx: number, by: number): { arc: number; x: number; z: number; h: number } {
   const L = railNetFor(bx, by).lines[0];
   const fwd = lineDir({ kind: 'ns', idx: bx }) > 0;
-  const arc = fwd ? 150 : L.rimOut - 150;
+  // about 220 m short of the first station ahead, so the first stop comes
+  // soon (150 m in from the rim it could start past the island's stations,
+  // the next one 1.5 km on) — clear of level crossings and the diamond
+  const plan = cityPlanFor(bx, by), net = railNetFor(bx, by);
+  const rim = fwd ? 150 : L.rimOut - 150;
+  const ahead = plan.stations.filter(s => s.line === 0 && (fwd ? s.d > rim + 120 : s.d < rim - 120))
+    .sort((p, q) => (fwd ? p.d - q.d : q.d - p.d))[0];
+  const clear = (a: number): boolean => plan.crossings.every(c => c.line !== 0 || Math.abs(c.d - a) > 30)
+    && Math.abs(net.diamond.d[0] - a) > 40;
+  let arc = rim;
+  if (ahead) {
+    for (let a = fwd ? Math.max(rim, ahead.d - 220) : Math.min(rim, ahead.d + 220); fwd ? a >= rim : a <= rim; a += fwd ? -10 : 10) {
+      if (clear(a)) { arc = a; break; }
+    }
+  }
   const p = L.sample(arc);
   return { arc, x: p.x, z: p.z, h: fwd ? p.h : p.h + Math.PI };
 }
@@ -1350,10 +1365,15 @@ const tick = (): void => {
   const robber = nearestRobber(st.x, st.z);
   const goal = robber ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
     : near ? { x: near.pos.x, z: near.pos.z } : null;
-  const goalD = goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
+  // (the train's goal is along its track: the metres the badge shows, and
+  // where the arrow points — at the track ahead)
+  const onRails = !robber && !gate && !!station;
+  const goalD = onRails ? station!.gap : goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
   // where the guidance points: straight at the goal when flying or close,
   // otherwise at the next junction of the shortest street route
-  const way = goal && mode === 'drive' ? guideWaypoint(goal.x, goal.z, goalD) : null;
+  const way = !goal || mode !== 'drive' ? null
+    : onRails ? (railway.kidAhead(Math.min(Math.max(goalD, 8), 40)) ?? guideWaypoint(goal.x, goal.z, goalD))
+    : guideWaypoint(goal.x, goal.z, goalD);
   const bearing = way ? Math.atan2(way.x - st.x, way.z - st.z) : null;
   // the arrow: the same size on screen and the same gap over the vehicle's
   // real top (its model, rotor and roof lamps measured — a fixed lift sat

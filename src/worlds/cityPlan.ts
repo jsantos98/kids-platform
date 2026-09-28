@@ -33,7 +33,7 @@ import { blocksOf, inBlock, type Block } from './blocks.js';
 import { raceTrackFor, ZONE_ROAD } from './raceIsland.js';
 import { fillBlock, LotRaster, LOT_GAP, R_EDGE, R_CENTRE, R_LOT, R_NEAR_C, R_NEAR_E } from './blockFill.js';
 import { citySeed, southExit, eastExit } from './cityGrid.js';
-import { railNetFor, type RailRoute } from './railRoute.js';
+import { railNetFor, lineDir, type RailRoute } from './railRoute.js';
 import { riverFor } from './riverRoute.js';
 import { coastFor } from './coast.js';
 import { BRIDGE_HALF, deckReach } from './deckDims.js';
@@ -54,10 +54,19 @@ export interface CityBlock extends Block {
   district: District;
 }
 
-/** how far along its line a station keeps from every level crossing (m):
- * the longest train (a loco and four wagons, ~45 m) standing at its stop
- * board either way round, and 8 m more (R16) */
-export const STATION_CLEAR = 56;
+/** how far along its line a station keeps from every level crossing (m)
+ * behind its stop board: a passenger train (three cars, ~30 m — freight
+ * trains don't stop at stations) standing with its head at the board, and
+ * 6 m more (R16) — and ahead of it, STATION_AHEAD: the nose clear of the
+ * boom. A line runs one way, so the track ahead of a standing train's head
+ * is free: kept 56 m clear either way round (for a 45 m freight train), the
+ * streets crossing the line every 60–125 m left an island's line one
+ * station or none — the kid's train had nowhere to stop */
+export const STATION_CLEAR = 36;
+export const STATION_AHEAD = 14;
+/** stations stand at least this far apart along a line (m) — about one every
+ * 250–400 m, a stop every half a minute or so */
+const STATION_GAP = 250;
 
 /** how far a junction with traffic lights keeps from every level crossing on
  * its arms (m): its stop line is STOP_LINE (18.5 m) out, so a car stopped at
@@ -817,12 +826,15 @@ function buildPlan(bx: number, by: number): CityPlan {
   }
 
   // ---- 7. train stations: straight, quiet stretches away from crossings
-  // (STATION_CLEAR along the line),
-  // the diamond and the river — up to two per line, well apart ----
+  // (STATION_CLEAR behind the stop board, STATION_AHEAD past it), the
+  // diamond and the river — as many as fit STATION_GAP apart ----
   const stations: Station[] = [];
   {
     const rs = rng(chunkSeed(seed, 0x9a7, 4));
     rail.lines.forEach((L, li) => {
+      // (which way this line's trains run: they stand with the head at the
+      // board, the body behind it)
+      const dir = lineDir(li === 0 ? 'ns' : 'ew', li === 0 ? bx : by);
       const cand: number[] = [];
       for (let d = 60; d < L.rimOut - 60; d += 4) {
         const h1 = L.sample(d - 14).h, h2 = L.sample(d + 14).h;
@@ -838,7 +850,10 @@ function buildPlan(bx: number, by: number): CityPlan {
         // body up to 45 m behind, either way round — covers no level
         // crossing: one stood on a crossing through every dwell and the
         // streets round it gridlocked, seed 7 island (1,0))
-        if (crossings.some(c => (c.line === li && Math.abs(c.d - d) < STATION_CLEAR) || Math.hypot(c.x - p.x, c.z - p.z) < 17)) continue;
+        if (crossings.some(c => {
+          const ahead = (c.d - d) * dir;
+          return (c.line === li && ahead > -STATION_CLEAR && ahead < STATION_AHEAD) || Math.hypot(c.x - p.x, c.z - p.z) < 17;
+        })) continue;
         if (rail.lines.some((o, oi) => oi !== li && o.near(p.x, p.z, 20))) continue;
         if (stations.some(st => Math.hypot(st.x - p.x, st.z - p.z) < 60)) continue;
         // the platform (3.5 m off the track) stays off every street
@@ -846,13 +861,11 @@ function buildPlan(bx: number, by: number): CityPlan {
         cand.push(d);
       }
       if (!cand.length) return;
-      const chosen: number[] = [cand[(rs() * cand.length) | 0]];
-      // (two a line on an 896 m island, more on a longer line)
-      for (let more = Math.round(2 * SCALE) - 1; more > 0; more--) {
-        const next = cand.find(c => chosen.every(cd => Math.abs(c - cd) > 220));
-        if (next === undefined) break;
-        chosen.push(next);
-      }
+      // (packed along the line: from one of its first few places, every next
+      // place at least STATION_GAP on — one at random with the next ones
+      // spread out from it left gaps of a kilometre)
+      const chosen: number[] = [cand[(rs() * Math.min(cand.length, 6)) | 0]];
+      for (const c of cand) if (c >= chosen[chosen.length - 1] + STATION_GAP) chosen.push(c);
       chosen.sort((p, q) => p - q);
       for (const d of chosen) stations.push(mkStation(L, li, d));
     });

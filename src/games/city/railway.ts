@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { nightLights } from './nightLights.js';
 import { spawnVehicle } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
-import { railNetFor, RAIL_TOP, type RailRoute, type LineKind } from '../../worlds/railRoute.js';
+import { railNetFor, RAIL_TOP, lineDir as lineDirOf, type RailRoute, type LineKind } from '../../worlds/railRoute.js';
 import { cityPlanFor, type Crossing } from '../../worlds/cityPlan.js';
 import { CITY_PITCH, citySeed } from '../../worlds/cityGrid.js';
 import { deckAt } from '../../worlds/causeway.js';
@@ -166,7 +166,7 @@ function timeTo(legs: Leg[], stops: Stop[], sigma: number): number {
 const hash01 = (a: number, b: number, c: number): number => (chunkSeed(0x7a11, a, b + c * 7919) % 100000) / 100000;
 
 /** each line runs one way, with its own phase */
-export function lineDir(l: LineId): 1 | -1 { return hash01(l.kind === 'ns' ? 1 : 2, l.idx, 3) < 0.5 ? 1 : -1; }
+export function lineDir(l: LineId): 1 | -1 { return lineDirOf(l.kind, l.idx); }
 function linePhase(l: LineId): number { return hash01(l.kind === 'ns' ? 1 : 2, l.idx, 5) * HEADWAY; }
 
 const segCache = new Map<string, Segment>();
@@ -184,7 +184,9 @@ function segment(bx: number, by: number, kind: LineKind): Segment {
   const total = route.total;
   const sig = (arc: number): number => (dir > 0 ? arc : total - arc);
   const plan = cityPlanFor(bx, by);
-  const base: Stop[] = plan.stations.filter(s => s.line === li)
+  // (only passenger trains stop at the stations — a freight train carries
+  // nobody, and its 45 m stood over the level crossings round a platform)
+  const base: Stop[] = plan.stations.filter(s => s.line === li && consistFor(id).passenger)
     .map(s => ({ s: sig(s.d), dwell: DWELL, station: true }))
     .sort((p, q) => p.s - q.s);
   const sD = sig(net.diamond.d[li]);
@@ -217,6 +219,8 @@ function segment(bx: number, by: number, kind: LineKind): Segment {
     const f = 1 + (fi % 2 ? -1 : 1) * Math.ceil(fi / 2) * 0.015;
     if (f < 0.75 || f > 1.3) continue;
     const stops = base.map(s => ({ ...s }));
+    /** a west-east train still on the diamond with a north-south one */
+    let clashes = false;
     if (kind === 'ew') {
       // the diamond: the west-east train's occupancy window (head 3 m short
       // until the tail is 3 m past) may never overlap a north-south one's,
@@ -243,7 +247,10 @@ function segment(bx: number, by: number, kind: LineKind): Segment {
           const last = before[before.length - 1];
           if (last && room(stops, last) >= delta) { holdStop = last; }
           else {
-            const h = clearHalt(sD - 8, Math.max(sD - 220, (last?.s ?? 0) + 25), stops);
+            // (a signal as far as 600 m back: a freight train stops at no
+            // platform, and in town the streets crossing every 60–80 m left
+            // no stretch its 45 m could stand on within 220 m)
+            const h = clearHalt(sD - 8, Math.max(sD - 600, (last?.s ?? 0) + 25), stops);
             if (h !== null) { addStop(stops, h, 0); holdStop = stops.find(st => st.s === h)!; }
             else if (last) holdStop = last;
           }
@@ -251,6 +258,8 @@ function segment(bx: number, by: number, kind: LineKind): Segment {
         if (!holdStop) break;
         holdStop.dwell += delta;
       }
+      const tl = timeline(total, stops, f);
+      clashes = clash(phE + timeTo(tl.legs, stops, sD - 3), phE + timeTo(tl.legs, stops, sD + trainLen + 3));
     }
     // the rest waits at platforms — only ones past the diamond on the
     // west-east line, whose diamond timing is fixed above — then at a
@@ -273,11 +282,12 @@ function segment(bx: number, by: number, kind: LineKind): Segment {
         if (h !== null) addStop(stops, h, 0);
       }
     }
-    const score = rest * 10 + Math.abs(f - 1) * 40;
+    // (a timetable with two trains on the diamond is the last resort)
+    const score = rest * 10 + Math.abs(f - 1) * 40 + (clashes ? 1e6 : 0);
     if (!best || score < best.score) {
       const fin = timeline(total, stops, f);
       best = { stops, legs: fin.legs, T: Math.ceil(fin.T / HEADWAY - 1e-6) * HEADWAY, score };
-      if (rest < 1e-6 && Math.abs(f - 1) < 0.05) break;
+      if (rest < 1e-6 && Math.abs(f - 1) < 0.05 && !clashes) break;
     }
   }
   const b = best!;
@@ -489,6 +499,23 @@ export class Railway {
         return { x: p.x, z: p.z, gap: Math.max(0, gap) };
       }
       off += seg.route.total;
+      [bx, by] = stepIsland(k.line.kind, bx, by, 1);
+    }
+    return null;
+  }
+
+  /** the point `dist` m ahead of the kid's train's head along its line (on
+   * over the strait onto the next islands) — the guide points along the
+   * track at it: aimed straight at a station round a bend it pointed off the
+   * line, even behind (G2, G3) */
+  kidAhead(dist: number): { x: number; z: number } | null {
+    const k = this.kid;
+    if (!k) return null;
+    let bx = k.bx, by = k.by, s = k.s + dist;
+    for (let hop = 0; hop < 4; hop++) {
+      const seg = segment(bx, by, k.line.kind);
+      if (s <= seg.route.total) { const p = this.pose(k.line.kind, bx, by, s); return { x: p.x, z: p.z }; }
+      s -= seg.route.total;
       [bx, by] = stepIsland(k.line.kind, bx, by, 1);
     }
     return null;

@@ -39,6 +39,14 @@ const DIAMOND_ARM = 16;
 
 export type LineKind = 'ns' | 'ew';
 
+/** which way a line's trains run along its arc (+1: with it) — seeded per
+ * column (north-south) or row (west-east), the same on every island it
+ * crosses (R16); the plan places its stations by it (a standing train covers
+ * only the track behind its head) and the timetable runs by it */
+export function lineDir(kind: LineKind, idx: number): 1 | -1 {
+  return (chunkSeed(0x7a11, kind === 'ns' ? 1 : 2, idx + 3 * 7919) % 100000) / 100000 < 0.5 ? 1 : -1;
+}
+
 export interface RailRoute {
   kind: LineKind;
   path: WorldPath;

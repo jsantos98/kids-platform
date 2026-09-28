@@ -233,8 +233,8 @@ npx tsx tools/plan-hash.ts            # for refactors: the cities must not chang
 
 3D models: [Kenney](https://kenney.nl) — Car Kit, City Kit (Commercial,
 Industrial, Suburban, Roads), Nature Kit, Mini Forest, Survival Kit, Cube
-Pets, Mini Characters, Train Kit, Watercraft Kit, Toy Car Kit and Racing
-Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).
+Pets, Mini Characters, Train Kit, Watercraft Kit, Pirate Kit, Toy Car Kit and
+Racing Kit, all CC0. The licence files are in `public/assets/kenney/` (the Racing Kit's in its own folder).
 
 Voices: Portuguese by ElevenLabs' voice "Benedita"
 ([ElevenLabs](https://elevenlabs.io) text to speech, Creator plan); English recorded with

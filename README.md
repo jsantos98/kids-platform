@@ -75,7 +75,7 @@ the wind over the person, chase the robber across a town square, swing the pirat
 | ![Fire: the hose](docs/screenshots/scene-fire.jpg) | ![Cat: the ladder truck at night](docs/screenshots/scene-cat-night.jpg) |
 | ![Burning building at dusk](docs/screenshots/scene-rescue-dusk.jpg) | ![The stretcher run](docs/screenshots/scene-run.jpg) |
 | ![The winch at sea](docs/screenshots/scene-winch.jpg) | ![Caught: the foot chase](docs/screenshots/scene-chase.jpg) |
-| ![The sea battle](docs/screenshots/scene-battle.jpg) | |
+| ![The sea battle](docs/screenshots/scene-battle.jpg) | ![Digging up the treasure](docs/screenshots/scene-dig.jpg) |
 
 ## How to play
 

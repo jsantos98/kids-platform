@@ -5,6 +5,26 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-29 (later) — after the first voyage
+
+The kid tried the pirate ship and we fixed what came up. The next ship to catch
+is always near now: they put out a few hundred metres from the pirate ship, a
+beaten one comes back close by, and if the pirate sails off they follow. The
+ship no longer sticks in the pier — its bow and stern bump too, not just its
+middle, it can always back out, and holding the gas while going nowhere puts
+it back on clear water. The sea is twice as busy: some sixty-five boats round
+every island, two big ships on every loop, and little boats circling the
+treasure islands. And every vehicle tilts the right way: speeding up heading
+east or west, the ship (and the helicopter, the plane, a car on a causeway
+ramp) used to lean to the side instead of lifting its bow. The new pirate lines
+were picked by ear.
+
+| | |
+|---|---|
+| ![The busier sea: boats everywhere along the shore](history/2026-09-29-sea/busier-sea.jpg) | ![The pirate ship flat out, bow up and level](history/2026-09-29-sea/bow-up.jpg) |
+
+---
+
 ## 2026-09-29 — pirates, a busy sea, and trains that stop
 
 **A new game: the pirate ship.** The kid sails a pirate ship with black sails

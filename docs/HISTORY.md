@@ -5,6 +5,46 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-29 — pirates, a busy sea, and trains that stop
+
+**A new game: the pirate ship.** The kid sails a pirate ship with black sails
+on the same sea as everyone else. Out on the open water sail a rival pirate
+ship and two merchant ships with white flags; they run when the pirate comes
+near (and so do the island's own boats), but the pirate ship is faster. Catch
+one and a sea battle starts: on the pirate's deck the wheel swings the cannon,
+which fires by itself, and the kid keeps it on the other ship as it sails to
+and fro. The rival pirate ship goes down in a cartoon sinking, its crew rowing
+off in little boats, waving; the merchant raises its white flag and swings a
+chest of gold across. Either way a treasure map floats up. The map marks one
+of the little treasure islands out at sea (a 💰 floats over it); stop beside it
+and the captain goes ashore with a treasure detector that beeps faster the
+nearer the treasure is, and digs the chest up. It sails to two new sea
+shanties, the ship creaks and the cannons boom, a parrot squawks, and the
+narrator has new lines for all of it.
+
+![The pirate ship sailing past a treasure island](history/2026-09-29-pirates/pirate-ship.jpg)
+
+| | |
+|---|---|
+| ![The sea battle: the kid's cannon and the rival pirate ship](history/2026-09-29-pirates/battle.jpg) | ![The rival sinks, its crew rowing away, a map floating up](history/2026-09-29-pirates/sinking.jpg) |
+| ![The merchant gives up and swings a chest across](history/2026-09-29-pirates/merchant.jpg) | ![Digging up the treasure on the island](history/2026-09-29-pirates/dig.jpg) |
+
+**A busy sea, and a solid one.** There are about thirty boats round every
+island now instead of nine — sailing boats, tugs, fishing boats, houseboats,
+speedboats, cargo ships and ocean liners — on lanes that never let two meet.
+The boat no longer sails through things: the pier, the picnic island and its
+lighthouse are solid, and running into another boat or the anchored ship
+flashes the boat and puts it back on clear water, like the cars.
+
+![An ocean liner out beyond the lanes](history/2026-09-29-pirates/liner.jpg)
+
+**Trains stop often**, about every 300 m instead of once an island, and the
+kid's train starts just before a station, its arrow pointing along the track.
+The traffic jams round level crossings are gone, and a new graphics setting
+(automatic, low, medium, high) keeps the game smooth on an older computer.
+
+---
+
 ## 2026-09-27 — a new garage
 
 The garage got a makeover. Along the bottom is a row of cards, each with a

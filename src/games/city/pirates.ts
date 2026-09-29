@@ -46,6 +46,8 @@ export interface Ship {
   group: THREE.Group;
   icon: THREE.Sprite;
   way: { x: number; z: number } | null;
+  /** the kid has come within sight of it since it put out */
+  seen?: boolean;
 }
 
 /** open water a ship may sail at world (x, z) with `r` to spare: no land
@@ -121,7 +123,7 @@ export class Pirates {
     s.group.visible = s.icon.visible = !!p;
     if (!p) return;
     s.x = p.x; s.z = p.z; s.h = this.r() * Math.PI * 2; s.v = CRUISE;
-    s.caught = 0; s.bolt = 0; s.wait = 0; s.way = null;
+    s.caught = 0; s.bolt = 0; s.wait = 0; s.way = null; s.seen = false;
   }
 
   /** beaten: gone for a while, then another puts out far from the kid */

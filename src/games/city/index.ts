@@ -952,7 +952,7 @@ function sceneCue(c: SceneCue): void {
     case 'woodHit': audio.sceneShot('wood-hit'); narrator.say('shipHit'); break;
     case 'sink': sound.event('splash'); break;
     case 'surrender': audio.star(); break;
-    case 'map': audio.star(); break;
+    case 'map': audio.star(); audio.sceneShot('parrot', 0.8); break;
     case 'beep': audio.sceneShot('beep'); break;
     case 'dig': audio.sceneShot('dig'); break;
     case 'coins': audio.sceneShot('coins'); break;
@@ -1260,7 +1260,8 @@ const tick = (): void => {
     for (const s of pirates.ships) {
       if (!s.active || mode !== 'drive' || player.crashT > 0) continue;
       const d = Math.hypot(s.x - st.x, s.z - st.z);
-      if (d < 150 && s.caught === 0) narrator.say('shipSpotted');
+      // (a ship in sight: the narrator calls it, and the parrot squawks)
+      if (d < 150 && s.caught === 0 && !s.seen) { s.seen = true; narrator.say('shipSpotted'); audio.sceneShot('parrot', 0.6); }
       if (d < SHIP_CATCH_R && s.bolt <= 0) s.caught += dt;
       if (s.caught >= SHIP_CATCH_T) {
         const ship: Ship = s;

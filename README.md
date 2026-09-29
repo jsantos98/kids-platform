@@ -48,7 +48,8 @@ and carries on from a spot just behind.
 | 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up |
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
 | ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
-| 🚤 Boat | Sail round the island through the buoys |
+| 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
+| 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |
 | 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off; nothing brakes for you, and roll past it and the people waiting are cross |
 | 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
 
@@ -57,7 +58,7 @@ and carries on from a spot just behind.
 | ![Fire truck driving to a burning building](docs/screenshots/fire-truck.jpg) | ![Police chase](docs/screenshots/police.jpg) |
 | ![Rescue helicopter over downtown](docs/screenshots/helicopter.jpg) | ![The city at night](docs/screenshots/night.jpg) |
 | ![Kart race](docs/screenshots/race.jpg) | ![The train at a station](docs/screenshots/train.jpg) |
-| ![Sunset from the plane](docs/screenshots/sunset.jpg) | |
+| ![Sunset from the plane](docs/screenshots/sunset.jpg) | ![The pirate ship and a treasure island](docs/screenshots/pirate.jpg) |
 | ![The race at night](docs/screenshots/race-night.jpg) | ![Smoke from two fires over the town at dusk](docs/screenshots/smoke-dusk.jpg) |
 
 Reaching a call opens its **mission scene** — a street built from the same
@@ -67,13 +68,14 @@ only input there, and nothing can be lost: sweep the hose over flames that
 flare up one after another, drive the ladder truck under the cat (or the
 people at the windows) and watch the ladder rise, steer the stretcher round
 cones, puddles and a dog while picking up hearts, hold the helicopter against
-the wind over the person, or chase the robber across a town square.
+the wind over the person, chase the robber across a town square, swing the pirate ship's cannon in a sea battle, or follow the treasure detector's beeps to the chest.
 
 | | |
 |---|---|
 | ![Fire: the hose](docs/screenshots/scene-fire.jpg) | ![Cat: the ladder truck at night](docs/screenshots/scene-cat-night.jpg) |
 | ![Burning building at dusk](docs/screenshots/scene-rescue-dusk.jpg) | ![The stretcher run](docs/screenshots/scene-run.jpg) |
 | ![The winch at sea](docs/screenshots/scene-winch.jpg) | ![Caught: the foot chase](docs/screenshots/scene-chase.jpg) |
+| ![The sea battle](docs/screenshots/scene-battle.jpg) | |
 
 ## How to play
 

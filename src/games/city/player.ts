@@ -170,6 +170,11 @@ const CRASH_FLASH = 1.6;
 export function createPlayer(V: VehicleConfig, x: number, z: number, heading: number): Player {
   const car = V.make();
   car.scale.setScalar(V.scale ?? 1);
+  // (heading first, then the pitch and roll about the vehicle's own axes: in
+  // the default order the nose-up of a boat speeding up, a helicopter's nose
+  // dip or a car's pitch on a causeway ramp turned about the world's x axis,
+  // a sideways lean whenever it headed east or west)
+  car.rotation.order = 'YXZ';
   const p: Player = {
     car, V,
     state: {

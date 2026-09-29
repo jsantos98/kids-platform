@@ -2,7 +2,7 @@
 // `?mode=<id>` picks one; the old `?vehicle=` links still work as aliases.
 import { VEHICLES, type VehicleConfig } from './player.js';
 
-export type ModeId = 'truck' | 'police' | 'ambulance' | 'tow' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'pirate' | 'train' | 'race';
+export type ModeId = 'truck' | 'police' | 'ambulance' | 'tow' | 'garbage' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'pirate' | 'train' | 'race';
 
 /** emergency calls a mode answers (missions.ts) */
 export type CallKind = 'fire' | 'cat' | 'patient' | 'rescue' | 'breakdown' | 'trash';
@@ -42,6 +42,7 @@ export const MODES: Record<ModeId, ModeDef> = {
   ambulance: { ...base, id: 'ambulance', icon: '🚑', vehicle: VEHICLES.ambulance, calls: ['patient'], lightbar: true },
   // the work trucks (G17): no siren — an amber beacon of their own
   tow: { ...base, id: 'tow', icon: '🛻', vehicle: VEHICLES.tow, calls: ['breakdown'] },
+  garbage: { ...base, id: 'garbage', icon: '🚛', vehicle: VEHICLES.garbage, calls: ['trash'] },
   heliMedical: { ...base, id: 'heliMedical', icon: '🚁', vehicle: VEHICLES.heliMedical, calls: ['patient'], lightbar: true, winch: true },
   heliPolice: { ...base, id: 'heliPolice', icon: '🚁', vehicle: VEHICLES.heliPolice, chase: true, lightbar: true, searchlight: true },
   plane: { ...base, id: 'plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },

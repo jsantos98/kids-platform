@@ -91,6 +91,13 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 3.4, steerMax: 0.47, cabF: 3.0, cabY: 2.5,
     front: 1.9, halfW: 1.1, frontR: 1.0,
   }),
+  // the garbage truck (G17): the Car Kit's, the one in the traffic
+  garbage: groundCar(() => makeCar({ body: 0x3f9a4a }), '/assets/kenney/garbage-truck.glb', 6.5, {
+    accel: 5, brake: 13, maxF: 9.5, radius: 1.35,
+    camBack: 12.5, camUp: 10.4, highBack: 14, highUp: 21,
+    wheelbase: 3.6, steerMax: 0.46, cabF: 3.0, cabY: 2.8,
+    front: 1.95, halfW: 1.15, frontR: 1.05,
+  }),
   heli: heli(0xfaf7ef, 0xe25c5c),
   heliMedical: heli(0xfaf7ef, 0xe25c5c),
   heliPolice: heli(0x5a7fb5, 0xfaf7ef),

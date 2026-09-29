@@ -65,6 +65,7 @@ import { RescueLadderActivity } from './activity/rescueLadder.js';
 import { RunActivity } from './activity/run.js';
 import { WinchActivity, type WinchVariant } from './activity/winch.js';
 import { TowActivity } from './activity/tow.js';
+import { BinsActivity } from './activity/bins.js';
 import type { Objective } from './missions.js';
 import { Particles } from './particles.js';
 import { Transit } from './transit.js';
@@ -437,7 +438,7 @@ function musicNow(night: number, inScene: boolean, dt: number): MusicId {
 }
 /** the kid's engine sound, by vehicle */
 const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
-  : V.kind === 'rail' ? 'train' : MODE.id === 'truck' || MODE.id === 'tow' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
+  : V.kind === 'rail' ? 'train' : MODE.id === 'truck' || MODE.id === 'tow' || MODE.id === 'garbage' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
 /** its siren's two tones */
 const SIREN_STYLE: SirenStyle = V.kind === 'heli' ? 'heli' : MODE.id === 'truck' ? 'fire' : MODE.id === 'police' ? 'police' : 'ambulance';
 let seaNear = 0, seaCheck = 0, lastCount = -1;
@@ -926,6 +927,9 @@ type CargoKind = 'patient' | 'thief' | 'car' | 'crew' | 'trash';
 const CARGO_TO: Record<CargoKind, LandmarkKind> = { patient: 'hospital', thief: 'prison', car: 'repair', crew: 'pier', trash: 'depot' };
 const CARGO_ICON: Record<CargoKind, string> = { patient: '🤕', thief: '🦹', car: '🚗', crew: '🏴‍☠️', trash: '🗑️' };
 let cargo: { kind: CargoKind; model?: string } | null = null;
+/** the garbage truck's load: full after TRASH_FULL stops */
+const TRASH_FULL = 3;
+let trashLoad = 0;
 /** where the cargo goes: the nearest place of its kind (checked every second) */
 let dest: ReturnType<typeof nearestLandmark> = null;
 let destCheck = 0;
@@ -1010,6 +1014,13 @@ function startHandover(): void {
   else if (V.kind === 'boat') handover.start(kind, { x: dest.ox + dest.x, z: dest.oz + dest.z }, door, 0.55, seed);
   else handover.start(kind, side, door, 0, seed);
   handing = { kind, y: p.y, pad: p.pad };
+  // (the depot: the whole load tumbles out behind the truck)
+  if (kind === 'depot') {
+    audio.sceneShot('truck-dump');
+    const back = new THREE.Vector3(st.x - Math.sin(st.heading) * 4, 1.2, st.z - Math.cos(st.heading) * 4);
+    for (let k = 0; k < 3; k++) particles.burstConfetti(back);
+  }
+  if (kind === 'prison') audio.sceneShot('jail-door', 0.8);
   // (the repair shop: the car rolls off the bed and in through its door)
   if (carried) { scene.attach(carried); carriedFrom = carried.position.clone(); handDoor = door; }
   narrator.say('arrive');
@@ -1018,6 +1029,7 @@ function finishHandover(): void {
   if (!handing) return;
   const kind = handing.kind;
   handing = null;
+  if (kind === 'depot') trashLoad = 0;
   if (carried) { carried.removeFromParent(); carried = null; carriedFrom = null; }
   cargo = null;
   dest = null;
@@ -1040,6 +1052,7 @@ function sceneFor(o: Objective): Activity {
   if (o.type === 'cat') return new CatLadderActivity(o.seed, o.variant as CatVariant, look);
   if (o.type === 'rescue') return new RescueLadderActivity(o.seed, look);
   if (o.type === 'breakdown') return new TowActivity(o.seed, look);
+  if (o.type === 'trash') return new BinsActivity(o.seed, look);
   return V.kind === 'heli' ? new WinchActivity(o.seed, look, (q.get('variant') as WinchVariant | null) ?? undefined) : new RunActivity(o.seed, look);
 }
 
@@ -1104,6 +1117,13 @@ function openCall(o: Objective): void {
     } else if (o.type === 'cat' || o.type === 'rescue') {
       missions.sCats++; totals.cats++;
       toast = tr(o.type === 'cat' ? 'call.catSaved' : 'call.allSafe');
+    } else if (o.type === 'trash') {
+      // (the truck fills up a third at every stop; full, it goes to the
+      // recycling depot — G16, G17)
+      trashLoad++;
+      earnStar(tr('call.binsEmptied'), player.car.position.clone());
+      if (trashLoad >= TRASH_FULL) load('trash');
+      else showCargo(CARGO_ICON.trash, trashLoad / TRASH_FULL);
     } else if (o.type === 'breakdown') {
       // (the car rides on the flatbed to a repair shop, G16)
       load('car', o.look?.model);
@@ -1137,10 +1157,10 @@ function openCall(o: Objective): void {
     mode = 'activity';
     director.start(() => new ChaseActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
   }
-  if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient' || sq === 'tow') {
+  if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient' || sq === 'tow' || sq === 'bins') {
     const o = missions.objectives[0] ?? null;
     const fake = {
-      ...(o ?? {}), type: sq === 'tow' ? 'breakdown' : sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
+      ...(o ?? {}), type: sq === 'tow' ? 'breakdown' : sq === 'bins' ? 'trash' : sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
       // (&look=house-c | bldg-f | car-taxi | tree-oak: the thing the call showed)
       look: lookFromName(q.get('look')),
       seed: Number(q.get('sceneSeed') ?? 7),

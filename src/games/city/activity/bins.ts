@@ -25,7 +25,7 @@ const LANE_Z = ROAD_Z + 3.5;
 const SIDE_Z = LANE_Z + 1.15;
 /** the bins' spot on the pavement */
 const BIN_Z = ROAD_Z + 8.3;
-const RANGE = 9;
+const RANGE = 6.5;
 const TOP_SPEED = 7, CRAWL = 3.2;
 /** within this of a bin, slow enough, the grabber takes it */
 const GRAB_R = 1.1, GRAB_V = 3.6;
@@ -87,7 +87,7 @@ export class BinsActivity implements Activity {
 
     // the bins along the kerb — never where the truck starts
     const n = 3 + (seed % 3);
-    const slots = n === 3 ? [-6.5, 3.5, 7.5] : n === 4 ? [-7.5, -3.8, 3.8, 7.5] : [-8, -4.6, 3.2, 5.8, 8.4];
+    const slots = n === 3 ? [-5, 2.8, 5.6] : n === 4 ? [-5.6, -3, 3, 5.6] : [-5.8, -3.6, 2.6, 4.2, 5.9];
     for (let k = 0; k < n; k++) {
       const x = slots[k] + (r() - 0.5) * 0.6;
       const g = wheelieBin(COLORS[(k + seed) % COLORS.length]);
@@ -104,7 +104,7 @@ export class BinsActivity implements Activity {
     }
     set.addRig(wearHat(person((seed + 4) % 12, 1.7), 'beanie'), -11, 0.17, BIN_Z + 1.4, Math.PI).play('interact-right', { speed: 1.2 });
     set.scene.add(this.icon);
-    set.shot({ x: 0, y: 6.4, z: ROAD_Z + 20 }, { x: 0, y: 1.6, z: ROAD_Z + 5 });
+    set.shot({ x: 0, y: 7.4, z: ROAD_Z + 27 }, { x: 0, y: 1.6, z: ROAD_Z + 5 });
   }
 
   /** the next bin to empty: the nearest full one */

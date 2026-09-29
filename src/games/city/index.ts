@@ -977,10 +977,12 @@ function destPoint(): { x: number; z: number; y: number; pad: boolean } | null {
 // the work trucks' amber beacon on the cab roof, flashing while there's a
 // load on board (G17: a work truck's own, not an emergency light bar)
 const workBeacon = MODE.id === 'tow' || MODE.calls.includes('trash') ? new THREE.Mesh(
-  new THREE.BoxGeometry(0.8, 0.2, 0.3), new THREE.MeshBasicMaterial({ color: 0x6b4410 })) : null;
+  new THREE.CylinderGeometry(0.22, 0.28, 0.24, 10), new THREE.MeshBasicMaterial({ color: 0x6b4410 })) : null;
 if (workBeacon) {
   workBeacon.userData.extra = true;
-  workBeacon.position.set(0, 2.9, MODE.id === 'tow' ? 2.2 : 2.4);
+  // (on the cab's roof — the garbage truck's hopper stands higher than its cab; only shown while loaded)
+  workBeacon.position.set(0, MODE.id === 'tow' ? 2.85 : 2.35, MODE.id === 'tow' ? 2.2 : 2.4);
+  workBeacon.visible = false;
   player.car.add(workBeacon);
 }
 /** the broken-down car riding on the tow truck's bed (G17) */
@@ -2024,7 +2026,7 @@ const tick = (): void => {
   if (workBeacon) {
     const lit = !!cargo && Math.floor(elapsed * 3) % 2 === 0;
     (workBeacon.material as THREE.MeshBasicMaterial).color.setHex(lit ? 0xffb030 : 0x6b4410);
-    if (player.car.userData.top && !workBeacon.userData.placed) { workBeacon.position.y = (player.car.userData.top as number) + 0.1; workBeacon.userData.placed = true; }
+    workBeacon.visible = !!cargo || trashLoad > 0;
     if (lit && nightLights.dark) { const p = workBeacon.getWorldPosition(new THREE.Vector3()); nightLights.flash({ x: p.x, y: p.y, z: p.z, color: 0xffb030, size: 2, pool: 0 }); }
   }
   if (player.crashT > 0) {

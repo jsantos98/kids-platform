@@ -220,7 +220,8 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
       // space), so the lightbar can sit on it
       car.userData.top = new THREE.Box3().setFromObject(g).max.y;
       // its own roof lamps, flashed when the siren is on (index.ts)
-      car.userData.siren = sirenLampsOf(g);
+      // (a boat's hull trim is no lamp: the police boat flashes the game's light bar)
+      car.userData.siren = V.kind === 'boat' ? null : sirenLampsOf(g);
       car.add(g);
       p.wheels = wheelNodes(g) as THREE.Object3D[];
     }).catch(() => {});

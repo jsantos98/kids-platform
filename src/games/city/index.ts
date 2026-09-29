@@ -470,7 +470,7 @@ addEventListener('pointerdown', () => audio.unlock());
 const sirenBtn = document.getElementById('sirenBtn') as HTMLButtonElement;
 let sirenOn = false;
 const sirenBar = makeSirenBar();
-sirenBar.group.position.set(0, V.fly ? 3.1 : 2.5, V.fly ? 1.5 : 0.8);
+sirenBar.group.position.set(0, V.fly ? 3.1 : 2.5, V.fly ? 1.5 : V.kind === 'boat' ? -0.3 : 0.8);
 sirenBar.group.visible = false;
 sirenBar.group.userData.extra = true;
 player.car.add(sirenBar.group);
@@ -1577,7 +1577,7 @@ const tick = (): void => {
 
   // the lightbar sits on the kit model's roof once it has loaded
   if (!airborne && player.car.userData.top && !sirenBar.group.userData.placed) {
-    sirenBar.group.position.y = player.car.userData.top as number;
+    sirenBar.group.position.y = (player.car.userData.top as number) - (V.kind === 'boat' ? 0.45 : 0);
     sirenBar.group.userData.placed = true;
   }
   searchlight?.update(st.x, st.alt + bob, st.z, st.heading);

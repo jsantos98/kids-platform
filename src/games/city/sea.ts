@@ -25,6 +25,7 @@ import { coastFor } from '../../worlds/coast.js';
 import { southExit, eastExit, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { RAIL_OFFSET } from '../../worlds/railRoute.js';
 import { harbourFor, inSeaBox } from './harbour.js';
+import { isletsFor } from './islets.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
 export function waveAt(x: number, z: number, t: number): number {
@@ -308,15 +309,20 @@ export const PIRATE_MODELS = [
 /** metres per Pirate Kit unit (its medium ship, 10.6 units, sails at 16 m) */
 export const PK_M = 1.5;
 
+/** the little boats round the treasure islets */
+const ISLET_BOATS: Array<[string, number]> = [['boat-fishing-small', 7], ['boat-row-large', 4.5], ['boat-sail-b', 7], ['boat-fan', 5]];
+
 /** every template the fleet can use */
 export const FLEET_MODELS = [...CALM, ...FAST, ...BIG].map(([t]) => t);
 
 /** the lanes round the island: how far out past the sailing lane, which
  * way round, the pace (m/s) and the boats (a count per 896 m island) */
 const LANES: Array<{ extra: number; dir: 1 | -1; speed: number; per: number; set: Array<[string, number]> }> = [
-  { extra: 0, dir: 1, speed: 4.2, per: 7, set: CALM },
-  { extra: 10, dir: -1, speed: 4.8, per: 7, set: CALM },
-  { extra: 20, dir: 1, speed: 8.5, per: 2.5, set: FAST },
+  // (a fourth lane further out met the neighbour island's in the narrow
+  // straits under the causeways: the lanes carry more boats instead)
+  { extra: 0, dir: 1, speed: 4.2, per: 16, set: CALM },
+  { extra: 10, dir: -1, speed: 4.8, per: 16, set: CALM },
+  { extra: 20, dir: 1, speed: 8.5, per: 5, set: FAST },
 ];
 const BIG_SPEED = 3;
 
@@ -343,6 +349,11 @@ function laneAt(L: Lane, s: number): Pt {
 /** the pirate ship the boats run from (world), or null (G15) */
 let threat: Pt | null = null;
 export function setFleetThreat(t: Pt | null): void { threat = t; }
+/** where the player is (world): only boats within DRAW_R of it are drawn —
+ * the fog hides the rest, and an old PC needn't draw them (G13) */
+let viewer: Pt | null = null;
+export function setFleetViewer(v: Pt | null): void { viewer = v; }
+const DRAW_R = 600;
 
 interface Boat {
   /** running from the pirate ship (G15): metres gained along its lane (its
@@ -400,10 +411,25 @@ export class Fleet {
         this.boats[this.boats.length - 1].room = lane.total / count / 3;
       }
     }
+    // two big ships on each loop, half its length apart
     for (const pts of bigShipLoops(bx, by)) {
       const lane = makeLane(pts);
-      add(lane, pick(BIG), r() * 1e4, BIG_SPEED, 1);
-      this.boats[this.boats.length - 1].room = lane.total / 3;
+      const s0 = r() * lane.total;
+      for (const k of [0, 1]) {
+        add(lane, pick(BIG), s0 + (k * lane.total) / 2, BIG_SPEED, 1);
+        this.boats[this.boats.length - 1].room = lane.total / 6;
+      }
+    }
+    // a small boat or two circling every treasure islet, 13 m off its sand
+    for (const I of isletsFor(bx, by)) {
+      const R = I.r + 13, pts: Pt[] = [];
+      for (let k = 0; k < 48; k++) pts.push({ x: I.x + Math.cos((k / 48) * Math.PI * 2) * R, z: I.z + Math.sin((k / 48) * Math.PI * 2) * R });
+      const lane = makeLane(pts);
+      const n = I.r >= 12 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        add(lane, pick(ISLET_BOATS), (k * lane.total) / n, 2.2, 1);
+        this.boats[this.boats.length - 1].room = lane.total / n / 4;
+      }
     }
     // one instanced mesh per model (the templates normalised to 1 m long,
     // the waterline at y = 0; each boat scaled to its length)
@@ -495,20 +521,25 @@ export class Fleet {
     const nl = nightLights();
     this.wakes.visible = true;
     for (const im of this.meshes.values()) im.visible = true;
-    this.boats.forEach((b, i) => {
+    const used = new Map<string, number>();
+    let wakes = 0;
+    this.boats.forEach(b => {
       const p = this.pose(b, elapsed);
       const x = this.ox + p.x, z = this.oz + p.z;
+      if (viewer && Math.hypot(x - viewer.x, z - viewer.z) > DRAW_R) return;
       const y = waveAt(x, z, elapsed) * 1.6 + 0.05;
       this._e.set(Math.sin(elapsed * 0.7 + b.phase) * 0.035, p.h, Math.sin(elapsed * 0.9 + b.phase) * 0.05 * Math.min(1, 8 / b.len));
       this._q.setFromEuler(this._e);
       const im = this.meshes.get(b.tpl);
       if (im) {
-        im.setMatrixAt(b.slot, this._m.compose(this._p.set(x, y, z), this._q, this._s.set(b.len, b.len, b.len)));
+        const k = used.get(b.tpl) ?? 0;
+        used.set(b.tpl, k + 1);
+        im.setMatrixAt(k, this._m.compose(this._p.set(x, y, z), this._q, this._s.set(b.len, b.len, b.len)));
       }
       const fx = Math.sin(p.h), fz = Math.cos(p.h);
       this._e.set(0, p.h, 0);
       this._q.setFromEuler(this._e);
-      this.wakes.setMatrixAt(i, this._m.compose(this._p.set(x - fx * b.len * 0.72, 0.06, z - fz * b.len * 0.72), this._q,
+      this.wakes.setMatrixAt(wakes++, this._m.compose(this._p.set(x - fx * b.len * 0.72, 0.06, z - fz * b.len * 0.72), this._q,
         this._s.set(Math.min(b.len * 0.55, b.hw * 2.2), 1, b.len * 1.4)));
       // at night: a white masthead light and red / green side lights (G10)
       if (nl?.dark) {
@@ -520,7 +551,8 @@ export class Fleet {
         nl.flash({ x: x + fz * w, y: y + 1.2, z: z - fx * w, color: 0xff2a22, size: 0.9, pool: 0, face: { x: fz, z: -fx } });
       }
     });
-    for (const im of this.meshes.values()) im.instanceMatrix.needsUpdate = true;
+    for (const [tpl, im] of this.meshes) { im.count = used.get(tpl) ?? 0; im.instanceMatrix.needsUpdate = true; }
+    this.wakes.count = wakes;
     this.wakes.instanceMatrix.needsUpdate = true;
   }
 }

@@ -24,7 +24,7 @@ import { NightLights } from './nightLights.js';
 import { Causeways } from './causeways.js';
 import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
-import { createSea, boatLoop, waveAt, setFleetThreat } from './sea.js';
+import { createSea, boatLoop, waveAt, setFleetThreat, setFleetViewer } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
@@ -1443,6 +1443,8 @@ const tick = (): void => {
   // helicopter; the river is a shallow ford — splash through it slowly
   // every awake island: trains, cars, people, boats (people only scatter
   // from vehicles on the ground)
+  // (the sea's boats are drawn only near the player, G14)
+  setFleetViewer({ x: st.x, z: st.z });
   islands.update(dt, elapsed, player.car.position, V.kind === 'ground'
     ? { x: st.x, z: st.z, heading: st.heading, v: st.v, halfL: V.glbLen / 2, halfW: V.halfW }
     : null, robbers.map(r => r.chaser()).filter((c): c is NonNullable<typeof c> => !!c));

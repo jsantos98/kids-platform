@@ -418,21 +418,46 @@ export function physicsStep(
     if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
     if (input.brake) st.v = Math.max(-V.maxR, st.v - V.brake * dt);
     if (!input.gas && !input.brake) st.v -= st.v * 0.6 * dt;
-    st.heading += input.steer * V.steerMax * dt * Math.min(1, 0.3 + Math.abs(st.v) / 6) * Math.sign(st.v || 1);
-    const nx = st.x + Math.sin(st.heading) * st.v * dt;
-    const nz = st.z + Math.cos(st.heading) * st.v * dt;
+    const h0 = st.heading;
+    const h1 = h0 + input.steer * V.steerMax * dt * Math.min(1, 0.3 + Math.abs(st.v) / 6) * Math.sign(st.v || 1);
+    const nx = st.x + Math.sin(h1) * st.v * dt;
+    const nz = st.z + Math.cos(h1) * st.v * dt;
     // (only what stands up out of the water counts: a box a boat can hit,
     // not the little ones round the picnic island's trees)
     const hit = boxes.some(b => !b.small && inBox(b, nx, nz, V.radius) && !inBox(b, st.x, st.z, V.radius));
     if (hit) {
       if (Math.abs(st.v) > 2) { startCrash(p); return { crashed: true }; }
       st.v *= 0.3;
+      st.heading = h1;
       return { crashed: false };
     }
-    const blockX = onLand(nx, st.z, V.radius), blockZ = onLand(st.x, nz, V.radius);
-    if (!blockX) st.x = nx;
-    if (!blockZ) st.z = nz;
-    if (blockX || blockZ) st.v *= 1 - Math.min(0.9, dt * 3);
+    // the hull against the shore, the pier and the picnic island: a long
+    // ship (the pirate's, 16 m) has its bow and stern too, not just its
+    // middle — the middle alone let its ends swing into the pier (G14); and
+    // a ship already touching may always move so long as it goes no deeper
+    // (it backs out from however deep it got): moving x and z apart, a diagonal step slipped it into
+    // the pier's edge and every step after that counted as blocked, so it
+    // was stuck there for good
+    const len = V.glbLen ?? 0;
+    const blocked = (x: number, z: number, h: number, give: number): boolean => {
+      if (onLand(x, z, V.radius - give)) return true;
+      if (len < 10) return false;
+      const e = len / 2 - V.halfW, r = V.halfW - give;
+      return onLand(x + Math.sin(h) * e, z + Math.cos(h) * e, r) || onLand(x - Math.sin(h) * e, z - Math.cos(h) * e, r);
+    };
+    // (how deep in it is: the least it must give to be clear)
+    const depth = (x: number, z: number, h: number): number => {
+      for (const g of [0, 0.4, 0.8, 1.2, 1.8, 2.5, 3.2, 4]) if (!blocked(x, z, h, g)) return g;
+      return 9;
+    };
+    const d0 = depth(st.x, st.z, h0);
+    const ok = (x: number, z: number, h: number): boolean => (d0 === 0 ? !blocked(x, z, h, 0) : depth(x, z, h) <= d0);
+    if (ok(nx, nz, h1)) { st.x = nx; st.z = nz; st.heading = h1; return { crashed: false }; }
+    // (sliding along it: one way or the other, or only turning)
+    if (ok(nx, st.z, h1)) { st.x = nx; st.heading = h1; }
+    else if (ok(st.x, nz, h1)) { st.z = nz; st.heading = h1; }
+    else if (ok(st.x, st.z, h1)) st.heading = h1;
+    st.v *= 1 - Math.min(0.9, dt * 3);
     return { crashed: false };
   }
 

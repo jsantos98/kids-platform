@@ -134,6 +134,9 @@ function seaSpawn(bx: number, by: number): { x: number; z: number; heading: numb
     const d = (p.x - pier.x) ** 2 + (p.z - pier.z) ** 2;
     if (d < best) { best = d; k0 = k; }
   });
+  // (a long ship — the pirate's — starts some 50 m on along the lane, clear
+  // of the pier it started right beside)
+  if ((MODE.vehicle.glbLen ?? 0) >= 10) k0 = (k0 + 17) % loop.length;
   const a = loop[k0], b = loop[(k0 + 1) % loop.length];
   return { x: a.x, z: a.z, heading: Math.atan2(b.x - a.x, b.z - a.z) };
 }
@@ -1169,6 +1172,18 @@ const tick = (): void => {
       else if (V.kind === 'boat') Object.assign(player.crash, boatResume(boxes));
     } else if (!wasCrashing && V.kind === 'boat' && mode === 'drive') {
       seaCrumbs.record(dt, st.x, st.z, st.heading, st.v, (x, z) => seaClear(x, z, boxes));
+      // stuck (gas held 3 s and it went nowhere — wedged against a pier or a
+      // shore): the same flash and resume on clear water as a crash (G1)
+      stuck.t += dt;
+      stuck.gas &&= input.gas > 0.1;
+      if (stuck.t >= 3) {
+        if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
+          startCrash(player);
+          sound.event('crash'); narrator.say('oops');
+          Object.assign(player.crash, boatResume(boxes));
+        }
+        Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
+      }
       // the island's boats are solid (G14): running into one above 1.4 m/s
       // is a crash — a flash, and the boat resumes on clear water behind;
       // a nudge only pushes the two apart

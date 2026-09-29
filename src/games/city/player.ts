@@ -101,6 +101,14 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 3.4, steerMax: 0.6, cabF: 1.2, cabY: 2.2,
     front: 3, halfW: 1.4, frontR: 1.4,
   },
+  // the pirate ship (G15): a boat on the same water, bigger and slower to turn
+  pirate: {
+    make: () => new THREE.Group(), glb: '/assets/kenney/pirate/ship-pirate-medium.glb', glbLen: 16, kind: 'boat', fly: false,
+    accel: 3.2, brake: 4.5, maxF: 11, maxR: 2.5, radius: 4.2,
+    camBack: 30, camUp: 20, camAhead: 16, highBack: 34, highUp: 48, highAhead: 10,
+    wheelbase: 8, steerMax: 0.42, cabF: 5.5, cabY: 6,
+    front: 8, halfW: 3.4, frontR: 3.4,
+  },
   train: {
     make: () => new THREE.Group(), glb: '', glbLen: 9, kind: 'rail', fly: false,
     accel: 2.4, brake: 5.5, maxF: 12, maxR: 0, radius: 2,

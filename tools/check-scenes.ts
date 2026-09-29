@@ -25,8 +25,10 @@ import { RescueLadderActivity } from '../src/games/city/activity/rescueLadder.js
 import { RunActivity } from '../src/games/city/activity/run.js';
 import { WinchActivity } from '../src/games/city/activity/winch.js';
 import { ChaseActivity, ESCAPE_T } from '../src/games/city/activity/chase.js';
+import { BattleActivity, BATTLE_T } from '../src/games/city/activity/battle.js';
+import { DigActivity } from '../src/games/city/activity/dig.js';
 
-interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean; escapes?: boolean }
+interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean; escapes?: number }
 
 const CASES: Case[] = [
   { name: 'fire: house', make: s => new HoseActivity(s, 'house'), limit: 30, steers: true },
@@ -39,8 +41,11 @@ const CASES: Case[] = [
   { name: 'winch: meadow', make: s => new WinchActivity(s, undefined, 'meadow'), limit: 15, steers: true },
   { name: 'winch: roof', make: s => new WinchActivity(s, undefined, 'roof'), limit: 15, steers: true },
   { name: 'winch: sea', make: s => new WinchActivity(s, undefined, 'sea'), limit: 15, steers: true },
-  { name: 'caught: police car', make: s => new ChaseActivity(s, false), limit: 15, steers: true, escapes: true },
-  { name: 'caught: helicopter', make: s => new ChaseActivity(s, true), limit: 15, steers: true, escapes: true },
+  { name: 'caught: police car', make: s => new ChaseActivity(s, false), limit: 15, steers: true, escapes: ESCAPE_T },
+  { name: 'caught: helicopter', make: s => new ChaseActivity(s, true), limit: 15, steers: true, escapes: ESCAPE_T },
+  { name: 'battle: pirate', make: s => new BattleActivity(s, 'pirate'), limit: 13, steers: true, escapes: BATTLE_T },
+  { name: 'battle: merchant', make: s => new BattleActivity(s, 'merchant'), limit: 12, steers: true, escapes: BATTLE_T },
+  { name: 'dig: treasure', make: s => new DigActivity(s), limit: 15, steers: true },
 ];
 const SEEDS = [1, 2, 3, 7, 11, 42];
 const DT = 1 / 60;
@@ -90,12 +95,12 @@ for (const c of CASES) {
     const label = `${c.name} (seed ${seed})`;
     const tAim = play(() => c.make(seed), a => a.aim(), c.limit, label + ', perfect player');
     if (tAim === Infinity) fail(`${label}: the perfect player didn't win within ${c.limit} s`);
-    const tKid = play(() => c.make(seed), child(seed), c.limit * 3, label + ', a child', c.escapes);
+    const tKid = play(() => c.make(seed), child(seed), c.limit * 3, label + ', a child', !!c.escapes);
     if (tKid === Infinity || tKid < 0) fail(`${label}: a child swinging the wheel didn't win within ${c.limit * 3} s — stuck, or lost?`);
     if (c.escapes) {
       // the wheel held hard over, away from the robber (whichever side that is)
       const away = (a: Activity): number => (a.aim() > 0 ? -1 : 1);
-      const tAway = play(() => c.make(seed), away, ESCAPE_T + 4, label + ', holding away', true);
+      const tAway = play(() => c.make(seed), away, c.escapes + 4, label + ', holding away', true);
       // (it may still win — the robber ran into the officer — but it must end)
       if (tAway === Infinity) fail(`${label}: the wheel held away from the robber and the scene never ended — stuck`);
       else console.log(`${label.padEnd(34)} held away: ${tAway > 0 ? 'caught anyway' : 'got away'}, the scene over at ${Math.abs(tAway).toFixed(1)} s`);

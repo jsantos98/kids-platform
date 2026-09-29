@@ -340,7 +340,18 @@ function laneAt(L: Lane, s: number): Pt {
   return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f };
 }
 
+/** the pirate ship the boats run from (world), or null (G15) */
+let threat: Pt | null = null;
+export function setFleetThreat(t: Pt | null): void { threat = t; }
+
 interface Boat {
+  /** running from the pirate ship (G15): metres gained along its lane (its
+   * lane's spacing a third either way at most, so it never reaches the boat
+   * ahead or behind) and metres swerved aside */
+  extra: number;
+  dodge: number;
+  /** the most it may gain or lose */
+  room: number;
   tpl: string;
   len: number;
   /** half width (from the model's own proportions) */
@@ -376,7 +387,7 @@ export class Fleet {
       const t = bakedModel(tpl);
       // (half width from the model's proportions, a little to spare)
       const hw = t ? (len * Math.min(t.size.x, t.size.z)) / Math.max(t.size.x, t.size.z) / 2 + 0.2 : len * 0.2;
-      this.boats.push({ tpl, len, hw, lane, offset, speed, dir, phase: this.boats.length * 1.7, slot: 0 });
+      this.boats.push({ tpl, len, hw, lane, offset, speed, dir, phase: this.boats.length * 1.7, slot: 0, extra: 0, dodge: 0, room: 0 });
     };
     for (const L of LANES) {
       const lane = makeLane(laneRing(bx, by, L.extra));
@@ -384,9 +395,16 @@ export class Fleet {
       // spread evenly round the lane, all at the lane's pace: none catches up
       // with another (a seeded shift keeps the islands' fleets apart)
       const shift = r() * lane.total;
-      for (let i = 0; i < count; i++) add(lane, pick(L.set), shift + (i / count) * lane.total, L.speed, L.dir);
+      for (let i = 0; i < count; i++) {
+        add(lane, pick(L.set), shift + (i / count) * lane.total, L.speed, L.dir);
+        this.boats[this.boats.length - 1].room = lane.total / count / 3;
+      }
     }
-    for (const pts of bigShipLoops(bx, by)) add(makeLane(pts), pick(BIG), r() * 1e4, BIG_SPEED, 1);
+    for (const pts of bigShipLoops(bx, by)) {
+      const lane = makeLane(pts);
+      add(lane, pick(BIG), r() * 1e4, BIG_SPEED, 1);
+      this.boats[this.boats.length - 1].room = lane.total / 3;
+    }
     // one instanced mesh per model (the templates normalised to 1 m long,
     // the waterline at y = 0; each boat scaled to its length)
     const per = new Map<string, number>();
@@ -429,12 +447,39 @@ export class Fleet {
 
   /** boat b at time t: city-local place and heading */
   private pose(b: Boat, t: number): { x: number; z: number; h: number } {
-    const s = b.offset + t * b.speed * b.dir;
+    const s = b.offset + (t * b.speed + b.extra) * b.dir;
     const p = laneAt(b.lane, s);
     // (heading along the lane a few metres either side, so it swings round
     // a bend instead of snapping at each point)
     const ahead = laneAt(b.lane, s + b.dir * 7), behind = laneAt(b.lane, s - b.dir * 3);
-    return { x: p.x, z: p.z, h: Math.atan2(ahead.x - behind.x, ahead.z - behind.z) };
+    const h = Math.atan2(ahead.x - behind.x, ahead.z - behind.z);
+    // (swerved aside: to the right of its heading is (-cos h, sin h))
+    return { x: p.x - Math.cos(h) * b.dodge, z: p.z + Math.sin(h) * b.dodge, h };
+  }
+
+  private lastT = -1;
+
+  /** run from the pirate ship (G15): a boat it is coming up behind speeds
+   * away along its lane; one it is ahead of slows and swerves aside */
+  private flee(t: number): void {
+    const dt = this.lastT < 0 ? 0 : Math.max(0, Math.min(0.2, t - this.lastT));
+    this.lastT = t;
+    for (const b of this.boats) {
+      let fx = 0, sideDodge = 0;
+      if (threat) {
+        const p = this.pose(b, t), x = this.ox + p.x, z = this.oz + p.z;
+        const d = Math.hypot(threat.x - x, threat.z - z);
+        if (d < 70) {
+          const hx = Math.sin(p.h), hz = Math.cos(p.h);
+          const ahead = (threat.x - x) * hx + (threat.z - z) * hz;
+          const side = (threat.x - x) * hz - (threat.z - z) * hx;
+          fx = ahead < 0 ? 0.9 : -0.75;
+          if (ahead >= 0) sideDodge = side > 0 ? 3 : -3;
+        }
+      }
+      b.extra = Math.max(-b.room, Math.min(b.room, b.extra + fx * b.speed * dt));
+      b.dodge += (sideDodge - b.dodge) * Math.min(1, dt * 0.8);
+    }
   }
 
   /** every boat where it is at time t (world) — its turned footprint */
@@ -446,6 +491,7 @@ export class Fleet {
   }
 
   update(elapsed: number): void {
+    this.flee(elapsed);
     const nl = nightLights();
     this.wakes.visible = true;
     for (const im of this.meshes.values()) im.visible = true;

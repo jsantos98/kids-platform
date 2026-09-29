@@ -24,7 +24,7 @@ import { NightLights } from './nightLights.js';
 import { Causeways } from './causeways.js';
 import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
-import { createSea, boatLoop, waveAt } from './sea.js';
+import { createSea, boatLoop, waveAt, setFleetThreat } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
@@ -44,6 +44,10 @@ import { exportBakedTemplates } from '../../engine/assets.js';
 import { buildIslandData, islandReady, installIslandData, type IslandData } from '../../worlds/islandData.js';
 import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
 import { ChaseActivity } from './activity/chase.js';
+import { BattleActivity } from './activity/battle.js';
+import { DigActivity } from './activity/dig.js';
+import { Pirates, CATCH_R as SHIP_CATCH_R, CATCH_T as SHIP_CATCH_T, type Ship } from './pirates.js';
+import { isletsFor, type Islet } from './islets.js';
 import { railNetFor } from '../../worlds/railRoute.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { deckAt } from '../../worlds/causeway.js';
@@ -415,6 +419,7 @@ function watchRobbers(dt: number): void {
 function musicNow(night: number, inScene: boolean, dt: number): MusicId {
   if (inScene) return 'scene';
   if (MODE.id === 'race') return 'race';
+  if (MODE.pirate) return 'pirate';
   if (MODE.chase) {
     watchRobbers(dt);
     if (chaseHold > 0) return 'chase';
@@ -628,6 +633,9 @@ let stationDone: { x: number; z: number } | null = null;
  * without a stop, the train rolled past it (G6) */
 let stationAim: { x: number; z: number } | null = null;
 const stationIcon = V.kind === 'rail' ? makeIconSprite(GOAL_ICON.station, 3.4) : null;
+// (the pirate mode: the treasure's icon floats high over its islet, G15)
+const treasureIcon = MODE.pirate ? makeIconSprite(GOAL_ICON.treasure, 4.2) : null;
+if (treasureIcon) { treasureIcon.visible = false; scene.add(treasureIcon); }
 if (stationIcon) { stationIcon.visible = false; scene.add(stationIcon); }
 const transit = new Transit(scene);
 transit.night = nightLights;
@@ -669,6 +677,9 @@ if (q.get('debugsea') === '1') {
     prefetched: () => prefetch.done,
     /** police modes: the getaway car */
     robbers: () => robbers,
+    /** the pirate mode: its ships, and the treasure a map has marked */
+    pirates: () => pirates,
+    treasure: () => treasure,
     robberInSight,
     /** the platforms' passengers */
     boarding: () => boarding.list(),
@@ -739,6 +750,8 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
       ...robbers.filter(r => r.active).map(r => ({ x: r.x, z: r.z, icon: GOAL_ICON.robber })),
       ...(course?.gates ?? []).filter(g => !g.passed).map(g => ({ x: g.x, z: g.z, icon: GOAL_ICON[course!.kind] })),
       ...(st ? [{ x: st.x, z: st.z, icon: GOAL_ICON.station }] : []),
+      ...(pirates?.ships ?? []).filter(s => s.active).map(s => ({ x: s.x, z: s.z, icon: GOAL_ICON[s.kind] })),
+      ...(treasure ? [{ x: curCity.ox + treasure.islet.x, z: curCity.oz + treasure.islet.z, icon: GOAL_ICON.treasure }] : []),
     ];
   });
 
@@ -753,6 +766,30 @@ let curCity: CityRef = cityAt(spawn.x, spawn.z);
 const robbers: Robber[] = MODE.chase ? Array.from({ length: ROBBERS }, () => new Robber(scene)) : [];
 const robberWait = robbers.map(() => 0);
 let robberCount = 0;
+/** the pirate mode (G15): the ships to catch on this island, the treasure
+ * maps won and the islet whose treasure the next one marks */
+const pirates = MODE.pirate ? new Pirates(scene) : null;
+let maps = 0;
+let treasure: { bx: number; by: number; k: number; islet: Islet } | null = null;
+/** islets already dug, per island ("bx,by,k") */
+const dug = new Set<string>();
+let pirateCount = 0;
+/** the islet the next map marks: the nearest one of this island not dug yet */
+function markTreasure(c: CityRef): void {
+  if (!pirates || treasure || maps <= 0) return;
+  const list = isletsFor(c.bx, c.by);
+  let best = -1, bd = Infinity;
+  list.forEach((I, k) => {
+    if (dug.has(`${c.bx},${c.by},${k}`)) return;
+    const d = Math.hypot(c.ox + I.x - player.state.x, c.oz + I.z - player.state.z);
+    if (d < bd) { bd = d; best = k; }
+  });
+  // (every islet here dug: they're all full again)
+  if (best < 0 && list.length) { for (let k = 0; k < list.length; k++) dug.delete(`${c.bx},${c.by},${k}`); best = 0; }
+  if (best < 0) return;
+  treasure = { bx: c.bx, by: c.by, k: best, islet: list[best] };
+  scenery.showTreasure(c.bx, c.by, best, true);
+}
 /** put getaway car k on the run on island c, away from the others */
 const newRobber = (k: number, c: CityRef): void => {
   const others = robbers.filter((o, j) => j !== k && o.active).map(o => ({ x: o.x, z: o.z }));
@@ -794,6 +831,13 @@ function applyCity(c: CityRef): void {
   boarding.setCity(c.bx, c.by, c.ox, c.oz);
   for (const r of robbers) r.hide();
   robbers.forEach((_, k) => newRobber(k, c));
+  // (the pirate mode: this island's ships put out; a treasure marked on the
+  // island left behind moves to one here)
+  if (pirates) {
+    pirates.start(c.bx, c.by, player.state.x, player.state.z, citySeed(c.bx, c.by) + ++pirateCount);
+    if (treasure && (treasure.bx !== c.bx || treasure.by !== c.by)) { scenery.showTreasure(treasure.bx, treasure.by, treasure.k, false); treasure = null; }
+    markTreasure(c);
+  }
   const s = modeSpawn(c.bx, c.by);
   spawn = { x: s.x + c.ox, z: s.z + c.oz, heading: s.heading };
   course?.start(c, player.state.x, player.state.z, player.state.heading);
@@ -903,6 +947,15 @@ function sceneCue(c: SceneCue): void {
     case 'cuffs': audio.sceneShot('cuffs'); break;
     case 'flutter': audio.sceneShot('pigeons', 0.7); break;
     case 'escaped': audio.boing(); narrator.say('dashed'); break;
+    case 'cannon': audio.sceneShot('cannon'); break;
+    case 'splash': sound.event('splash'); break;
+    case 'woodHit': audio.sceneShot('wood-hit'); narrator.say('shipHit'); break;
+    case 'sink': sound.event('splash'); break;
+    case 'surrender': audio.star(); break;
+    case 'map': audio.star(); break;
+    case 'beep': audio.sceneShot('beep'); break;
+    case 'dig': audio.sceneShot('dig'); break;
+    case 'coins': audio.sceneShot('coins'); break;
   }
 }
 
@@ -940,6 +993,11 @@ function openCall(o: Objective): void {
 // (dev/verification — every scene can be looked at without driving there)
 {
   const sq = q.get('scene');
+  if (sq === 'battle' || sq === 'merchant' || sq === 'dig') {
+    mode = 'activity';
+    const ss = Number(q.get('sceneSeed') ?? 1);
+    director.start(() => (sq === 'dig' ? new DigActivity(ss) : new BattleActivity(ss, sq === 'battle' ? 'pirate' : 'merchant')), () => { mode = 'drive'; });
+  }
   if (sq === 'caught') {
     mode = 'activity';
     director.start(() => new ChaseActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
@@ -1130,6 +1188,14 @@ const tick = (): void => {
         }
         break;
       }
+      // (the ships the pirate chases: pushed apart, never sailed through)
+      for (const b of pirates?.footprints() ?? []) {
+        const d = overlapDepth(me, b);
+        if (d <= 0) continue;
+        const dx = st.x - b.x, dz = st.z - b.z, l = Math.hypot(dx, dz) || 1;
+        st.x += (dx / l) * Math.min(d, 0.6); st.z += (dz / l) * Math.min(d, 0.6);
+        st.v *= 0.6;
+      }
     } else if (!wasCrashing && V.kind === 'ground' && mode === 'drive') {
       crumbs.record(dt, st.x, st.z, st.heading, st.v, boxes);
       // stuck detector: gas held the whole window yet the truck went nowhere
@@ -1182,6 +1248,55 @@ const tick = (): void => {
     if (ev.restart) {
       Object.assign(st, race.reset(), { v: 0 });
       crumbs.clear();
+    }
+  }
+
+  // the pirates (G15): the ships sail and run; staying close to one catches
+  // it and its battle opens; a map marks a treasure islet, and stopping
+  // beside it opens the dig
+  if (pirates) {
+    pirates.update(dt, elapsed, st.x, st.z, director.busy);
+    setFleetThreat(mode === 'drive' ? { x: st.x, z: st.z } : null);
+    for (const s of pirates.ships) {
+      if (!s.active || mode !== 'drive' || player.crashT > 0) continue;
+      const d = Math.hypot(s.x - st.x, s.z - st.z);
+      if (d < 150 && s.caught === 0) narrator.say('shipSpotted');
+      if (d < SHIP_CATCH_R && s.bolt <= 0) s.caught += dt;
+      if (s.caught >= SHIP_CATCH_T) {
+        const ship: Ship = s;
+        mode = 'activity';
+        ship.group.visible = ship.icon.visible = false;
+        narrator.say('battle');
+        director.start(() => new BattleActivity(citySeed(curCity.bx, curCity.by) + ++pirateCount, ship.kind === 'rival' ? 'pirate' : 'merchant'), won => {
+          mode = 'drive';
+          if (!won) { pirates.escaped(ship); return; }
+          pirates.beaten(ship);
+          maps++;
+          earnStar(tr('pirate.map'), player.car.position.clone());
+          narrator.say('treasureMap');
+          markTreasure(curCity);
+        }, () => narrator.say(ship.kind === 'rival' ? 'sunk' : 'surrender'));
+        break;
+      }
+    }
+    // the treasure: stop beside its islet and the dig opens
+    if (treasure && mode === 'drive' && player.crashT <= 0) {
+      const I = treasure.islet, T = treasure;
+      const d = Math.hypot(curCity.ox + I.x - st.x, curCity.oz + I.z - st.z);
+      if (d < I.r + 26 && Math.abs(st.v) < 3) {
+        mode = 'activity';
+        narrator.say('dig');
+        director.start(() => new DigActivity(citySeed(T.bx, T.by) + T.k * 101 + ++pirateCount), won => {
+          mode = 'drive';
+          if (!won) return;
+          dug.add(`${T.bx},${T.by},${T.k}`);
+          scenery.showTreasure(T.bx, T.by, T.k, false);
+          treasure = null;
+          maps = Math.max(0, maps - 1);
+          earnStar(tr('pirate.treasure'), player.car.position.clone());
+          markTreasure(curCity);
+        }, () => narrator.say('treasure'));
+      }
     }
   }
 
@@ -1411,8 +1526,15 @@ const tick = (): void => {
     if (station) stationIcon.position.set(station.x, 7 + Math.sin(elapsed * 2) * 0.4, station.z);
   }
   const robber = nearestRobber(st.x, st.z);
-  const goal = robber ? { x: robber.x, z: robber.z } : gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
-    : near ? { x: near.pos.x, z: near.pos.z } : null;
+  // (the pirate mode: the marked treasure islet, else the nearest ship)
+  const ship = pirates && !treasure ? pirates.nearest(st.x, st.z) : null;
+  const trove = treasure ? { x: curCity.ox + treasure.islet.x, z: curCity.oz + treasure.islet.z } : null;
+  if (treasureIcon) {
+    treasureIcon.visible = !!trove && mode === 'drive';
+    if (trove) treasureIcon.position.set(trove.x, 14 + Math.sin(elapsed * 2) * 0.5, trove.z);
+  }
+  const goal = robber ? { x: robber.x, z: robber.z } : trove ?? (ship ? { x: ship.x, z: ship.z } : null) ?? (gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
+    : near ? { x: near.pos.x, z: near.pos.z } : null);
   // (the train's goal is along its track: the metres the badge shows, and
   // where the arrow points — at the track ahead)
   const onRails = !robber && !gate && !!station;
@@ -1471,6 +1593,18 @@ const tick = (): void => {
       : V.kind === 'heli'
       ? (close ? 'chase.light' : 'chase.flyAfter')
       : (close ? 'chase.behind' : 'chase.catch'));
+  } else if (trove) {
+    // ---- the pirates: sail to the treasure islet and stop beside it ----
+    const td = Math.hypot(trove.x - st.x, trove.z - st.z) - (treasure?.islet.r ?? 0);
+    showGuide(GOAL_ICON.treasure, Math.max(0, td), Math.max(0, Math.min(5, Math.round(5 * (1 - td / 400)))));
+    promptFill.style.width = '0%';
+    promptText.textContent = tr(td < 40 ? 'pirate.stopHere' : 'pirate.toTreasure');
+  } else if (ship) {
+    // ---- the pirates: catch the nearest ship ----
+    const sd = Math.hypot(ship.x - st.x, ship.z - st.z);
+    showGuide(GOAL_ICON[ship.kind], sd, Math.round((5 * ship.caught) / SHIP_CATCH_T));
+    promptFill.style.width = `${Math.min(100, (100 * ship.caught) / SHIP_CATCH_T)}%`;
+    promptText.textContent = tr(sd < SHIP_CATCH_R * 1.6 ? 'pirate.close' : 'pirate.hunt');
   } else if (race) {
     // ---- the race: lap, place, countdown ----
     const rv = race.view();
@@ -1601,7 +1735,8 @@ const tick = (): void => {
     x: st.x, z: st.z, heading: st.heading, night: day.night, sea: seaNear,
     crossing: view.scene ? null : transit.nearestWarning(st.x, st.z, railway),
     // (the race: the kid's car sounds like itself, and so does each rival)
-    engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : undefined,
+    // (the pirate ship creaks: timber, ropes and the waves on its hull, G15)
+    engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : MODE.pirate ? 'ship-creak' : undefined,
     rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
   });
   // (a scene's own loops — the ladder's whir, the winch, running feet — and
@@ -1611,9 +1746,9 @@ const tick = (): void => {
   audio.setMusic(musicNow(day.night, !!view.scene, dt));
   // (the tracks likely next, fetched ahead: a mission's scene, the chase, the night)
   if (elapsed > 4) {
-    if (MODE.calls.length) audio.preloadMusic('scene');
+    if (MODE.calls.length || MODE.pirate) audio.preloadMusic('scene');
     if (MODE.chase) audio.preloadMusic('chase');
-    if (MODE.id !== 'race') audio.preloadMusic(musicNight ? 'day' : 'night');
+    if (MODE.id !== 'race' && !MODE.pirate) audio.preloadMusic(musicNight ? 'day' : 'night');
   }
   {
     // the vehicle's own roof lamps flash when its model has them (the police

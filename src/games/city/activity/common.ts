@@ -44,10 +44,19 @@ export type SceneCue =
   | 'caught'     // the robber is caught
   | 'cuffs'      // handcuffs click
   | 'flutter'    // pigeons fly up
-  | 'escaped';   // the robber got away
+  | 'escaped'    // the robber got away
+  | 'cannon'     // a cannon fires (G15)
+  | 'splash'     // a cannonball falls in the sea
+  | 'woodHit'    // a cannonball hits a ship
+  | 'sink'       // the rival pirate ship goes down
+  | 'surrender'  // the merchant ship waves its white flag
+  | 'map'        // a treasure map
+  | 'beep'       // the treasure detector
+  | 'dig'        // a spadeful of sand
+  | 'coins';     // the treasure's gold
 
 /** a sound a scene keeps going while it wants it */
-export type SceneLoop = 'pump' | 'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle';
+export type SceneLoop = 'pump' | 'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'waves';
 
 export interface Activity {
   scene: THREE.Scene;

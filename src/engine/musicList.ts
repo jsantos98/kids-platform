@@ -73,6 +73,11 @@ export const MUSIC = {
     { prompt: `Sneaky, comic chase music for a children's police game, cartoon detectives on the trail: tuba bass, marimba and xylophone, cheeky saxophone melody, snare with rimshots, playful and never scary, 124 BPM, ${LOOP}`, bpm: 124, seconds: 90 },
     { prompt: `Bouncy, mischievous cartoon chase music for a children's police game, hot on the robber's heels: harpsichord runs, oompah tuba, fast pizzicato, slide whistle accents, woodblocks and snare, light-hearted, 136 BPM, ${LOOP}`, bpm: 136, seconds: 90 },
   ],
+  // the pirate ship at sea (G15): sea shanties
+  pirate: [
+    { prompt: `Jolly, bouncy sea shanty for a children's pirate adventure game, sailing the high seas: accordion and fiddle melody, stomping drum and handclaps, upright bass, tin whistle, major key, rollicking and fun, 112 BPM, ${LOOP}`, bpm: 112, seconds: 90 },
+    { prompt: `Cheerful swashbuckling pirate music for a children's game, hunting for treasure: concertina, mandolin and pizzicato strings, bouncy tuba bass, snare and tambourine, a whistled hook, major key, adventurous and playful, never scary, 120 BPM, ${LOOP}`, bpm: 120, seconds: 90 },
+  ],
   // a mission's own scene: the fire, the cat, the patient, the rescue (each
   // scene the next track)
   scene: [

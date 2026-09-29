@@ -2,7 +2,7 @@
 // `?mode=<id>` picks one; the old `?vehicle=` links still work as aliases.
 import { VEHICLES, type VehicleConfig } from './player.js';
 
-export type ModeId = 'truck' | 'police' | 'ambulance' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'train' | 'race';
+export type ModeId = 'truck' | 'police' | 'ambulance' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'pirate' | 'train' | 'race';
 
 /** emergency calls a mode answers (missions.ts) */
 export type CallKind = 'fire' | 'cat' | 'patient' | 'rescue';
@@ -28,11 +28,13 @@ export interface ModeDef {
   winch: boolean;
   /** robber chases: a getaway car to catch (police car, police helicopter) */
   chase: boolean;
+  /** the pirates (G15): ships to catch and treasure to dig up */
+  pirate: boolean;
   /** where the vehicle starts (race: on a race island's starting grid) */
   spawn: 'street' | 'sea' | 'rail' | 'race';
 }
 
-const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, chase: false, spawn: 'street' as const };
+const base = { calls: [] as CallKind[], course: null, stations: false, lightbar: false, searchlight: false, winch: false, chase: false, pirate: false, spawn: 'street' as const };
 
 export const MODES: Record<ModeId, ModeDef> = {
   truck: { ...base, id: 'truck', icon: '🚒', vehicle: VEHICLES.truck, calls: ['fire', 'cat', 'fire', 'rescue'], lightbar: true },
@@ -42,6 +44,7 @@ export const MODES: Record<ModeId, ModeDef> = {
   heliPolice: { ...base, id: 'heliPolice', icon: '🚁', vehicle: VEHICLES.heliPolice, chase: true, lightbar: true, searchlight: true },
   plane: { ...base, id: 'plane', icon: '✈️', vehicle: VEHICLES.plane, course: 'rings' },
   boat: { ...base, id: 'boat', icon: '🚤', vehicle: VEHICLES.boat, course: 'buoys', spawn: 'sea' },
+  pirate: { ...base, id: 'pirate', icon: '🏴‍☠️', vehicle: VEHICLES.pirate, pirate: true, spawn: 'sea' },
   train: { ...base, id: 'train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },
   race: { ...base, id: 'race', icon: '🏎️', vehicle: VEHICLES.kart, spawn: 'race' },
 };

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { C } from '../../../engine/stage.js';
 import type { Rig } from '../../../engine/rig.js';
 
-export type HatKind = 'fire' | 'police' | 'medic' | 'beanie';
+export type HatKind = 'fire' | 'police' | 'medic' | 'beanie' | 'pirate';
 
 const lambert = (color: number): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color });
 
@@ -18,6 +18,22 @@ function hat(kind: HatKind): THREE.Group {
     const badge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.05), lambert(0xf6c952));
     badge.position.set(0, 0.28, 0.6);
     g.add(badge);
+  } else if (kind === 'pirate') {
+    // a captain's black tricorn (a three-sided crown over a wide brim) with a
+    // white skull badge on the front (G15)
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 3), lambert(0x22242a));
+    brim.rotation.y = Math.PI;
+    g.add(brim);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.62, 0.42, 16), lambert(0x2b2d33));
+    crown.position.y = 0.24;
+    g.add(crown);
+    const trim = new THREE.Mesh(new THREE.CylinderGeometry(0.97, 0.97, 0.03, 3), lambert(0xf6c952));
+    trim.rotation.y = Math.PI;
+    trim.position.y = 0.05;
+    g.add(trim);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), lambert(0xfaf7ef));
+    skull.position.set(0, 0.26, 0.58);
+    g.add(skull);
   } else if (kind === 'beanie') {
     // the robber's black woolly hat
     g.add(new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0x2b2d33)));

@@ -158,7 +158,7 @@ export class CityScenery {
       put(pk('flag-pirate', I.v * 5 + 1), I.v * 9 + 4.9, I.r * 0.2, 1.1);
       // the ❌: two red planks crossed on the sand, standing a little proud
       const X = new Baked();
-      for (const r of [Math.PI / 4, -Math.PI / 4]) X.box(0.7, 0.14, 3.6, 0xd8322a, 0, 0, 0, 0, r, 0);
+      for (const r of [Math.PI / 4, -Math.PI / 4]) X.box(1.1, 0.2, 5.4, 0xd8322a, 0, 0, 0, 0, r, 0);
       const mark = X.build({ cast: false });
       mark.position.set(ox + I.tx, 1.05, oz + I.tz);
       mark.visible = false;

@@ -359,6 +359,30 @@
       "match": 0.88
     }
   },
+  "pirate-1": {
+    "prompt": "Jolly, bouncy sea shanty for a children's pirate adventure game, sailing the high seas: accordion and fiddle melody, stomping drum and handclaps, upright bass, tin whistle, major key, rollicking and fun, 112 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 112,
+    "loop": {
+      "from": 18.088,
+      "to": 82.381,
+      "beats": 120.01,
+      "match": 0.76
+    }
+  },
+  "pirate-2": {
+    "prompt": "Cheerful swashbuckling pirate music for a children's game, hunting for treasure: concertina, mandolin and pizzicato strings, bouncy tuba bass, snare and tambourine, a whistled hook, major key, adventurous and playful, never scary, 120 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
+    "seconds": 90,
+    "take": 1,
+    "bpm": 120,
+    "loop": {
+      "from": 0.952,
+      "to": 72.977,
+      "beats": 144.05,
+      "match": 0.82
+    }
+  },
   "scene-1": {
     "prompt": "Brave, hopeful little-hero music for a children's rescue mission, putting out a fire and saving a kitten: light marching snare, bright brass and strings, glockenspiel, determined but cheerful, major key, 112 BPM, instrumental, steady groove from the first beat to the last, no intro, no ending, no fade, made to loop",
     "seconds": 60,

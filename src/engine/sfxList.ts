@@ -84,6 +84,13 @@ export const SFX = {
   'ladder-whir': { prompt: 'hydraulic motor of a fire truck aerial ladder extending, steady mechanical whir and hum, seamless loop', seconds: 4, loop: true },
   'winch': { prompt: 'electric rescue winch on a helicopter reeling a cable, steady whirring motor hum, seamless loop', seconds: 4, loop: true },
   'footsteps': { prompt: 'a few people running on a pavement, quick steady footsteps, seamless loop', seconds: 4, loop: true },
+  // the pirates (G15): the battle, the dig, and the pirate ship's own creak
+  'cannon': { prompt: 'a cartoon pirate ship cannon firing, one deep friendly boom with a puff, short', seconds: 1.5, loop: false },
+  'wood-hit': { prompt: 'a cannonball thudding into a wooden ship, a hollow wooden crack and a creak, cartoon, short', seconds: 1.2, loop: false },
+  'coins': { prompt: 'a treasure chest full of gold coins jingling and clinking, cheerful, short', seconds: 1.5, loop: false },
+  'dig': { prompt: 'a shovel digging into soft sand once, a scoop and a toss, short', seconds: 0.8, loop: false },
+  'parrot': { prompt: 'a cheerful cartoon parrot squawking twice, friendly, short', seconds: 1, loop: false },
+  'ship-creak': { prompt: 'a wooden sailing ship at sea creaking gently, ropes and timber, soft waves against the hull, steady, no voices, seamless loop', seconds: 6, loop: true },
 } satisfies Record<string, SfxDef>;
 
 export type SfxId = keyof typeof SFX;

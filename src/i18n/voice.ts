@@ -12,7 +12,7 @@ import { EN } from './en.js';
 import { RACE_CARS } from '../games/raceCars.js';
 
 /** the garage's play modes (registry.ts), whose names it says */
-export const SPOKEN_MODES = ['truck', 'police', 'ambulance', 'heliMedical', 'heliPolice', 'plane', 'boat', 'train', 'race'] as const;
+export const SPOKEN_MODES = ['truck', 'police', 'ambulance', 'heliMedical', 'heliPolice', 'plane', 'boat', 'pirate', 'train', 'race'] as const;
 
 /** every spoken line: clip id → its text in the current language */
 export function voiceLines(): Record<string, string> {
@@ -41,10 +41,10 @@ export function voiceLines(): Record<string, string> {
  * volume to it): a win or a finished mission `excited`, a gate `cheer`, a
  * bump `warm` and gentle, everything else `lively` */
 export type Mood = 'excited' | 'cheer' | 'lively' | 'warm';
-const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station|spotted|closing|race-up|chaseRun)/;
+const EXCITED = /^say-(praise|caught|course-done|race-place[1-3]|station|spotted|closing|race-up|chaseRun|sunk|surrender|treasure-|treasureMap)/;
 export function voiceMood(id: string): Mood {
   if (EXCITED.test(id)) return 'excited';
-  if (/^say-(gate|race-count|race-place4|race-lastLap|race-lead|almost|flame|catMoved|hearts|hold)/.test(id)) return 'cheer';
+  if (/^say-(gate|race-count|race-place4|race-lastLap|race-lead|almost|flame|catMoved|hearts|hold|shipHit|shipSpotted|battle)/.test(id)) return 'cheer';
   if (/^say-(oops|race-down|missed)/.test(id)) return 'warm';
   return 'lively';
 }

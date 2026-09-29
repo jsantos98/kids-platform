@@ -669,19 +669,22 @@ export class GameAudio {
   // ---- the mission scenes (G4) ----
 
   /** a scene's moment: a sizzle, a meow, a cheer… (a chime where there's no recording) */
-  sceneShot(id: 'sizzle' | 'meow' | 'crowd-cheer' | 'heart' | 'dog-bark' | 'cuffs' | 'pigeons', gain = 1): void {
+  sceneShot(id: 'sizzle' | 'meow' | 'crowd-cheer' | 'heart' | 'dog-bark' | 'cuffs' | 'pigeons' | 'cannon' | 'wood-hit' | 'coins' | 'dig' | 'parrot' | 'beep', gain = 1): void {
     if (!this.ac || this.shot(id, gain)) return;
     const t = this.ac.currentTime;
     if (id === 'sizzle') this.hiss(t, 0.5, 0.35, 'highpass', 3000);
     else if (id === 'pigeons') this.hiss(t, 0.4, 0.2, 'bandpass', 900);
     else if (id === 'cuffs') { this.click(0.4); this.hiss(t + 0.12, 0.05, 0.4, 'bandpass', 2400); }
+    else if (id === 'cannon' || id === 'wood-hit') { this.thud(); this.hiss(t, 0.3, 0.3, 'lowpass', 400); }
+    else if (id === 'dig') this.hiss(t, 0.2, 0.25, 'bandpass', 1400);
     else this.note(id === 'meow' ? 700 : 988, t, 0.2, 0.15, 'triangle', undefined, id === 'meow' ? 520 : 1318);
   }
 
   /** the loops a scene wants going (the rest fade out); null: none */
-  setSceneLoops(on: ReadonlySet<'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'pump'> | null): void {
+  setSceneLoops(on: ReadonlySet<'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'pump' | 'waves'> | null): void {
     if (!this.ac) return;
     const want: Array<[SfxId, boolean, number]> = [
+      ['amb-waves', !!on?.has('waves'), 0.5],
       ['ladder-whir', !!on?.has('ladder'), 0.45],
       ['winch', !!on?.has('winch'), 0.45],
       ['footsteps', !!on?.has('steps'), 0.4],

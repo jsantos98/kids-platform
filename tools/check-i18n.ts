@@ -77,8 +77,10 @@ for (const f of scripts) {
 {
   const { MOMENTS, lineIds } = await import('../src/games/city/narrator.js');
   const { MODES } = await import('../src/games/city/modes.js');
+  const DESTS = ['hospital', 'prison', 'repair', 'depot', 'pier'];
   const details: Partial<Record<string, Array<string | number>>> = {
-    start: Object.keys(MODES), call: ['fire', 'cat', 'patient', 'rescue'], place: [1, 2, 3, 4],
+    start: Object.keys(MODES), call: ['fire', 'cat', 'patient', 'rescue', 'breakdown', 'trash'], place: [1, 2, 3, 4],
+    toDest: DESTS, delivered: DESTS, first: DESTS,
     spotted: ['left', 'right', 'ahead', 'behind'], raceUp: [1, 2, 3],
   };
   const lines = voiceLines();

@@ -22,12 +22,13 @@ import { Searchlight, Winch, SPOT_AHEAD, SPOT_R, SPOT_GRACE } from './heliFx.js'
 import { Breadcrumbs, SeaCrumbs, type Spot } from './breadcrumb.js';
 import { NightLights } from './nightLights.js';
 import { Causeways } from './causeways.js';
-import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } from './guide3d.js';
+import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, makeBeacon, GOAL_ICON } from './guide3d.js';
 import { ChunkManager } from './chunks.js';
 import { createSea, boatLoop, waveAt, setFleetThreat, setFleetViewer } from './sea.js';
 import { CityScenery } from './scenery.js';
 import { LandmarkLayer } from './landmarkLayer.js';
-import { landmarksFor, nearestLandmark, type LandmarkKind } from './landmarks.js';
+import { landmarksFor, nearestLandmark, LANDMARK_ICON, type LandmarkKind } from './landmarks.js';
+import { Handover } from './handover.js';
 import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
 import { setCarDrawScale } from './island/cars.js';
@@ -764,6 +765,7 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
       ...(st ? [{ x: st.x, z: st.z, icon: GOAL_ICON.station }] : []),
       ...(pirates?.ships ?? []).filter(s => s.active).map(s => ({ x: s.x, z: s.z, icon: GOAL_ICON[s.kind] })),
       ...(treasure ? [{ x: curCity.ox + treasure.islet.x, z: curCity.oz + treasure.islet.z, icon: GOAL_ICON.treasure }] : []),
+      ...(cargo && dest ? [{ x: dest.door.x + dest.ox, z: dest.door.z + dest.oz, icon: LANDMARK_ICON[dest.kind] }] : []),
     ];
   });
 
@@ -914,6 +916,83 @@ let toast = '';
 let splashTimer = 0;
 const totals = loadTotals();
 updateMissionPanel();
+
+// ---- deliveries (G16): a pickup rides in the vehicle to its place — the
+// patient to a hospital, the thief to the prison, the broken-down car to a
+// repair shop, a full load of trash to the depot, the pirates to the police
+// pier. While there's cargo the other calls wait. ----
+type CargoKind = 'patient' | 'thief' | 'car' | 'crew' | 'trash';
+const CARGO_TO: Record<CargoKind, LandmarkKind> = { patient: 'hospital', thief: 'prison', car: 'repair', crew: 'pier', trash: 'depot' };
+const CARGO_ICON: Record<CargoKind, string> = { patient: '🤕', thief: '🦹', car: '🚗', crew: '🏴‍☠️', trash: '🗑️' };
+let cargo: { kind: CargoKind; model?: string } | null = null;
+/** where the cargo goes: the nearest place of its kind (checked every second) */
+let dest: ReturnType<typeof nearestLandmark> = null;
+let destCheck = 0;
+const handover = new Handover(scene);
+/** the place's icon floating over it, and its light pillar */
+const destIcons = new Map<LandmarkKind, THREE.Sprite>();
+const destBeacon = makeBeacon(0x6fe08a);
+destBeacon.visible = false;
+scene.add(destBeacon);
+const cargoEl = document.getElementById('cargo')!;
+const cargoIconEl = document.getElementById('cargoIcon')!;
+const cargoFillEl = document.getElementById('cargoFill')!;
+/** the HUD chip beside the badge: what's on board (and how full) */
+function showCargo(icon: string | null, fill = 1): void {
+  cargoEl.classList.toggle('on', !!icon);
+  cargoIconEl.textContent = icon ?? '';
+  cargoFillEl.style.width = `${Math.round(Math.min(1, fill) * 100)}%`;
+}
+/** take a pickup on board: the guide now points at its place */
+function load(kind: CargoKind, model?: string): void {
+  cargo = { kind, model };
+  dest = null;
+  destCheck = 0;
+  showCargo(CARGO_ICON[kind]);
+  toast = '';
+  narrator.say('toDest', CARGO_TO[kind]);
+}
+/** the world point where the kid hands the cargo over (and, for the
+ * helicopter, the deck height) */
+function destPoint(): { x: number; z: number; y: number; pad: boolean } | null {
+  if (!dest) return null;
+  const pad = V.kind === 'heli' && dest.kind === 'hospital' ? landmarkLayer.padOf(dest.bx, dest.by, dest) : null;
+  if (pad) return { x: pad.x, z: pad.z, y: pad.y, pad: true };
+  return { x: dest.door.x + dest.ox, z: dest.door.z + dest.oz, y: 0, pad: false };
+}
+/** handing over: the kid stopped at the place */
+let handing: { kind: LandmarkKind; y: number; pad: boolean } | null = null;
+function startHandover(): void {
+  if (!cargo || !dest) return;
+  const p = destPoint()!, st = player.state, kind = dest.kind;
+  mode = 'activity';
+  st.v = 0;
+  // from the vehicle's kerb side (or the helipad) to the building's door
+  const lot = dest.lot;
+  const nx = lot ? Math.sin(lot.ry) : 0, nz = lot ? Math.cos(lot.ry) : 0;
+  const door = lot
+    ? { x: dest.ox + lot.x + nx * (lot.d / 2 - 1.2), z: dest.oz + lot.z + nz * (lot.d / 2 - 1.2) }
+    : { x: dest.ox + dest.x - Math.sin(dest.door.heading) * 12, z: dest.oz + dest.z - Math.cos(dest.door.heading) * 12 };
+  const side = { x: st.x - Math.cos(st.heading) * (V.halfW + 0.9), z: st.z + Math.sin(st.heading) * (V.halfW + 0.9) };
+  const seed = citySeed(dest.bx, dest.by) + runStars;
+  if (p.pad) handover.start(kind, { x: p.x, z: p.z }, { x: p.x - nx * 4, z: p.z - nz * 4 }, p.y, seed);
+  else if (V.kind === 'boat') handover.start(kind, { x: dest.ox + dest.x, z: dest.oz + dest.z }, door, 0.55, seed);
+  else handover.start(kind, side, door, 0, seed);
+  handing = { kind, y: p.y, pad: p.pad };
+  narrator.say('arrive');
+}
+function finishHandover(): void {
+  if (!handing) return;
+  const kind = handing.kind;
+  handing = null;
+  cargo = null;
+  dest = null;
+  showCargo(null);
+  mode = 'drive';
+  sound.event('missionDone');
+  narrator.say('delivered', kind);
+  earnStar(tr(`deliver.done.${kind}` as Key), player.car.position.clone());
+}
 const clock = new THREE.Clock();
 let statTime = 0, elapsed = 0;
 let day = dayState(0, START_PHASE, MOON_BASE);
@@ -986,8 +1065,8 @@ function openCall(o: Objective): void {
       missions.sCats++; totals.cats++;
       toast = tr(o.type === 'cat' ? 'call.catSaved' : 'call.allSafe');
     } else {
-      runStars++; totals.stars++;
-      toast = tr('call.personSaved');
+      // (the patient rides to a hospital: the star comes with the handover, G16)
+      load('patient');
     }
     saveTotals(totals);
     updateMissionPanel();
@@ -1336,7 +1415,7 @@ const tick = (): void => {
         ? Math.hypot(rb.x - (st.x + Math.sin(st.heading) * SPOT_AHEAD), rb.z - (st.z + Math.cos(st.heading) * SPOT_AHEAD)) < SPOT_R + SPOT_GRACE
         : Math.hypot(rb.x - st.x, rb.z - st.z) < CATCH_R;
       // (no catching while it dashes: that's it shaking the police off)
-      if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0) {
+      if (lit && mode === 'drive' && player.crashT <= 0 && rb.dashT <= 0 && !cargo) {
         // (halfway to caught: "almost! don't let him get away!")
         if (rb.caught < CATCH_T / 2 && rb.caught + dt >= CATCH_T / 2) narrator.say('closing');
         rb.caught += dt;
@@ -1344,7 +1423,7 @@ const tick = (): void => {
       // (caught in the searchlight, the getaway car bolts — as a bump by the
       // police car sets it off, G7)
       if (V.kind === 'heli' && rb.spotted(lit && mode === 'drive', dt)) narrator.say('dashed');
-      if (rb.caught >= CATCH_T && mode === 'drive') {
+      if (rb.caught >= CATCH_T && mode === 'drive' && !cargo) {
         rb.hide();
         mode = 'activity';
         const seed = robberCount + k;
@@ -1355,6 +1434,8 @@ const tick = (): void => {
           if (!won) { rb.escape(); return; }
           earnStar(tr('chase.caught'), player.car.position.clone());
           robberWait[k] = 3;
+          // (the police car takes the thief to the prison, G16)
+          if (V.kind === 'ground') load('thief');
         }, () => narrator.say('caught'));
       }
     } else if (!director.busy) {
@@ -1543,8 +1624,11 @@ const tick = (): void => {
     // long-range finding (it shows over the rooftops, fog or not)
     const busy = activeCall === o;
     o.marker.visible = !busy;
+    // (waiting while a pickup is on board: dimmed, G16)
+    (o.marker as THREE.Sprite).material.opacity = cargo ? 0.45 : 1;
     o.marker.position.y = 5.4 + Math.sin(elapsed * 2 + o.index) * 0.5;
     pulseBeacon(o.beacon, elapsed, o.index, busy ? 0 : o.d);
+    if (cargo) (o.beacon.material as THREE.MeshBasicMaterial).opacity *= 0.35;
   }
   // the course gate / station the mode is heading for (when it has one)
   const gate = course?.target ?? null;
@@ -1554,7 +1638,22 @@ const tick = (): void => {
     stationIcon.visible = !!station && mode === 'drive';
     if (station) stationIcon.position.set(station.x, 7 + Math.sin(elapsed * 2) * 0.4, station.z);
   }
-  const robber = nearestRobber(st.x, st.z);
+  // (a pickup on board: its place, the nearest of its kind, is the goal)
+  if (cargo && !handing) {
+    destCheck -= dt;
+    if (destCheck <= 0 || !dest) { destCheck = 1; dest = nearestLandmark(CARGO_TO[cargo.kind], st.x, st.z, curCity.bx, curCity.by); }
+  }
+  const dp = cargo ? destPoint() : null;
+  for (const [k, spr] of destIcons) spr.visible = !!dp && dest?.kind === k && !handing && mode === 'drive';
+  if (dp && dest) {
+    let spr = destIcons.get(dest.kind);
+    if (!spr) { spr = makeIconSprite(LANDMARK_ICON[dest.kind], 4.2); scene.add(spr); destIcons.set(dest.kind, spr); }
+    spr.visible = !handing && mode === 'drive';
+    spr.position.set(dp.x, (dp.pad ? dp.y + 7 : 13) + Math.sin(elapsed * 2) * 0.5, dp.z);
+    destBeacon.position.set(dp.x, dp.pad ? dp.y : 0, dp.z);
+    pulseBeacon(destBeacon, elapsed, 7, handing ? 0 : Math.hypot(dp.x - st.x, dp.z - st.z));
+  } else destBeacon.visible = false;
+  const robber = cargo ? null : nearestRobber(st.x, st.z);
   // (the pirate mode: the marked treasure islet, else the nearest ship)
   const ship = pirates && !treasure ? pirates.nearest(st.x, st.z) : null;
   const trove = treasure ? { x: curCity.ox + treasure.islet.x, z: curCity.oz + treasure.islet.z } : null;
@@ -1562,11 +1661,11 @@ const tick = (): void => {
     treasureIcon.visible = !!trove && mode === 'drive';
     if (trove) treasureIcon.position.set(trove.x, 14 + Math.sin(elapsed * 2) * 0.5, trove.z);
   }
-  const goal = robber ? { x: robber.x, z: robber.z } : trove ?? (ship ? { x: ship.x, z: ship.z } : null) ?? (gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
+  const goal = dp ? { x: dp.x, z: dp.z } : robber ? { x: robber.x, z: robber.z } : trove ?? (ship ? { x: ship.x, z: ship.z } : null) ?? (gate ? { x: gate.x, z: gate.z } : station ? { x: station.x, z: station.z }
     : near ? { x: near.pos.x, z: near.pos.z } : null);
   // (the train's goal is along its track: the metres the badge shows, and
   // where the arrow points — at the track ahead)
-  const onRails = !robber && !gate && !!station;
+  const onRails = !dp && !robber && !gate && !!station;
   const goalD = onRails ? station!.gap : goal ? Math.hypot(goal.x - st.x, goal.z - st.z) : 0;
   // where the guidance points: straight at the goal when flying or close,
   // otherwise at the next junction of the shortest street route
@@ -1612,6 +1711,30 @@ const tick = (): void => {
     promptEl.style.display = view.scene ? 'block' : 'none';
     promptText.textContent = view.prompt;
     promptFill.style.width = `${Math.min(100, view.progress * 100)}%`;
+  } else if (handing) {
+    // ---- handing the cargo over (the helicopter settles onto the pad) ----
+    guideEl.style.opacity = '0';
+    promptEl.style.display = 'block';
+    promptText.textContent = tr('deliver.handing');
+    promptFill.style.width = '100%';
+    if (handing.pad) st.alt += (handing.y + 1.7 - st.alt) * Math.min(1, dt * 2.5);
+    if (handover.update(dt)) finishHandover();
+  } else if (cargo && dp && dest) {
+    // ---- a pickup on board: to its place, and stop there ----
+    const dd = Math.hypot(dp.x - st.x, dp.z - st.z);
+    showGuide(LANDMARK_ICON[dest.kind], dd, Math.max(0, Math.min(5, Math.round(5 * (1 - dd / 400)))));
+    promptFill.style.width = '0%';
+    const heliMode = V.kind === 'heli', boat = V.kind === 'boat';
+    const reach = heliMode ? (dp.pad ? 7 : 9) : boat ? 25 : 12;
+    const stopped = heliMode ? Math.abs(st.v) < 4 : boat ? Math.abs(st.v) < 2 : Math.abs(st.v) < 1 && player.crashT <= 0;
+    // (stopping by a call that waits: the cargo comes first)
+    if (near && nd < (heliMode ? 9 : 15) && stopped && dd > reach) {
+      promptText.textContent = tr(`deliver.first.${dest.kind}` as Key);
+      narrator.say('first', dest.kind);
+    } else {
+      promptText.textContent = dd < reach ? tr(heliMode ? (dp.pad ? 'deliver.land' : 'call.hover') : 'call.stop') : tr(`deliver.to.${dest.kind}` as Key);
+    }
+    if (dd < reach && stopped && mode === 'drive') startHandover();
   } else if (robber) {
     // ---- the chase: the nearest getaway car ----
     const rd = Math.hypot(robber.x - st.x, robber.z - st.z);
@@ -1840,6 +1963,9 @@ if (q.get('debugsea') === '1') {
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.tick = tick;
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.missions = missions;
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.director = director;
+  // (the deliveries, G16: put a pickup on board / see where it goes)
+  (window as unknown as { __dbg: Record<string, unknown> }).__dbg.load = load;
+  (window as unknown as { __dbg: Record<string, unknown> }).__dbg.cargo = () => ({ cargo, dest, handing, point: destPoint() });
 }
 if (q.get('still') === '1') {
   // background tabs suspend rAF — drive frames off a timer so ?still captures

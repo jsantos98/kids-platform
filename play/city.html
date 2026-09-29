@@ -61,6 +61,15 @@
   }
   #guideDist .m { font-size: .55em; margin-left: 12px; letter-spacing: 1px; color: var(--ink-soft); vertical-align: middle; }
   #guideDist:empty, #guideWait:empty { display: none; }
+  /* what's on board (G16): a patient, a thief, a car, a load of trash */
+  #cargo {
+    display: none; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px;
+    background: var(--cream); box-shadow: 0 3px 0 rgba(74, 80, 88, .14);
+  }
+  #cargo.on { display: flex; }
+  #cargoIcon { font-size: clamp(22px, 3.6vh, 34px); line-height: 1; }
+  #cargo .bar { width: clamp(36px, 6vh, 60px); height: 10px; border-radius: 5px; background: rgba(74, 80, 88, .15); overflow: hidden; }
+  #cargoFill { height: 100%; width: 100%; background: #6fb86a; border-radius: 5px; transition: width .4s; }
   /* the prompt keeps out of the way — never over the vehicle or a scene's
      action: a compact pill in the bottom-left corner, above the siren
      button (right in the corner when there's no siren, or in a scene) */
@@ -206,6 +215,7 @@
   <div id="mission" data-i18n="city.loadingPanel"></div>
 </div>
 <div id="guide">
+  <div id="cargo"><span id="cargoIcon"></span><div class="bar"><div id="cargoFill"></div></div></div>
   <div id="guideBadge"><span id="guideIcon"></span>
     <svg id="guideArrow" width="190" height="190" viewBox="0 0 100 100">
       <path d="M50 14 L75 46 L62 46 L62 84 L38 84 L38 46 L25 46 Z"

@@ -54,13 +54,14 @@ interface Item {
   sound: { id: SfxId; secs: number; gain: number; bus: 'engine' | 'sfx' } | null;
 }
 const STAGE: Record<string, StageKind> = {
-  truck: 'road', police: 'road', ambulance: 'road', heliMedical: 'helipad', heliPolice: 'helipad',
+  truck: 'road', police: 'road', ambulance: 'road', tow: 'road', heliMedical: 'helipad', heliPolice: 'helipad',
   plane: 'runway', boat: 'canal', pirate: 'canal', train: 'rail', race: 'track',
 };
 const SOUND: Record<string, Item['sound']> = {
   truck: { id: 'siren-fire', secs: 1.1, gain: 0.35, bus: 'sfx' },
   police: { id: 'siren-police', secs: 1.1, gain: 0.35, bus: 'sfx' },
   ambulance: { id: 'siren-ambulance', secs: 1.1, gain: 0.35, bus: 'sfx' },
+  tow: { id: 'engine-truck', secs: 1.4, gain: 0.8, bus: 'engine' },
   heliMedical: { id: 'engine-heli', secs: 1.4, gain: 0.8, bus: 'engine' },
   heliPolice: { id: 'engine-heli', secs: 1.4, gain: 0.8, bus: 'engine' },
   plane: { id: 'engine-plane', secs: 1.4, gain: 0.8, bus: 'engine' },

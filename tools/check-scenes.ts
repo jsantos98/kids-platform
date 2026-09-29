@@ -27,6 +27,7 @@ import { WinchActivity } from '../src/games/city/activity/winch.js';
 import { ChaseActivity, ESCAPE_T } from '../src/games/city/activity/chase.js';
 import { BattleActivity, BATTLE_T } from '../src/games/city/activity/battle.js';
 import { DigActivity } from '../src/games/city/activity/dig.js';
+import { TowActivity } from '../src/games/city/activity/tow.js';
 
 interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean; escapes?: number }
 
@@ -46,6 +47,7 @@ const CASES: Case[] = [
   { name: 'battle: pirate', make: s => new BattleActivity(s, 'pirate'), limit: 13, steers: true, escapes: BATTLE_T },
   { name: 'battle: merchant', make: s => new BattleActivity(s, 'merchant'), limit: 12, steers: true, escapes: BATTLE_T },
   { name: 'dig: treasure', make: s => new DigActivity(s), limit: 15, steers: true },
+  { name: 'tow: broken-down car', make: s => new TowActivity(s), limit: 20, steers: true },
 ];
 const SEEDS = [1, 2, 3, 7, 11, 42];
 const DT = 1 / 60;

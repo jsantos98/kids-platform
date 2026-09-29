@@ -56,6 +56,11 @@ export const GAMES: GameEntry[] = [
     url: mode('ambulance'), model: { glb: 'assets/kenney/ambulance.glb', len: 5.4 },
   }),
   entry({
+    id: 'tow', icon: '🛻', color: '#d8503a',
+    controls: { drive: 'road', siren: false },
+    url: mode('tow'), model: { glb: 'assets/kenney/delivery-flat.glb', len: 6.8 },
+  }),
+  entry({
     id: 'heliMedical', icon: '🚁', color: '#63b0a8',
     controls: { drive: 'heli', siren: true },
     url: mode('heliMedical'), model: { make: 'heliMedical', len: 7.8 },

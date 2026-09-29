@@ -669,13 +669,15 @@ export class GameAudio {
   // ---- the mission scenes (G4) ----
 
   /** a scene's moment: a sizzle, a meow, a cheer… (a chime where there's no recording) */
-  sceneShot(id: 'sizzle' | 'meow' | 'crowd-cheer' | 'heart' | 'dog-bark' | 'cuffs' | 'pigeons' | 'cannon' | 'wood-hit' | 'coins' | 'dig' | 'parrot' | 'beep', gain = 1): void {
+  sceneShot(id: 'sizzle' | 'meow' | 'crowd-cheer' | 'heart' | 'dog-bark' | 'cuffs' | 'pigeons' | 'cannon' | 'wood-hit' | 'coins' | 'dig' | 'parrot' | 'beep'
+    | 'ramp-clank' | 'strap-click' | 'bin-tip' | 'bin-set' | 'truck-dump' | 'jail-door', gain = 1): void {
     if (!this.ac || this.shot(id, gain)) return;
     const t = this.ac.currentTime;
     if (id === 'sizzle') this.hiss(t, 0.5, 0.35, 'highpass', 3000);
     else if (id === 'pigeons') this.hiss(t, 0.4, 0.2, 'bandpass', 900);
     else if (id === 'cuffs') { this.click(0.4); this.hiss(t + 0.12, 0.05, 0.4, 'bandpass', 2400); }
-    else if (id === 'cannon' || id === 'wood-hit') { this.thud(); this.hiss(t, 0.3, 0.3, 'lowpass', 400); }
+    else if (id === 'cannon' || id === 'wood-hit' || id === 'ramp-clank' || id === 'bin-set' || id === 'jail-door') { this.thud(); this.hiss(t, 0.3, 0.3, 'lowpass', 400); }
+    else if (id === 'bin-tip' || id === 'truck-dump' || id === 'strap-click') this.hiss(t, id === 'truck-dump' ? 1.2 : 0.4, 0.3, 'bandpass', 1800);
     else if (id === 'dig') this.hiss(t, 0.2, 0.25, 'bandpass', 1400);
     else this.note(id === 'meow' ? 700 : 988, t, 0.2, 0.15, 'triangle', undefined, id === 'meow' ? 520 : 1318);
   }

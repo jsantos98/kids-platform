@@ -41,12 +41,31 @@ function kitMesh(name: string, s: number): THREE.Mesh | null {
   return m;
 }
 
-export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue';
+/** a wheelie bin: its body in a colour, a dark lid, two wheels (the calls'
+ * and the garbage truck's scene: G17) */
+export function wheelieBin(color: number): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.0, 0.8), new THREE.MeshLambertMaterial({ color }));
+  body.position.y = 0.62;
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.08, 0.88), new THREE.MeshLambertMaterial({ color: 0x2f333b }));
+  lid.position.y = 1.16;
+  g.add(body, lid);
+  for (const x of [-0.3, 0.3]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.08, 10), new THREE.MeshLambertMaterial({ color: 0x2f333b }));
+    w.rotation.z = Math.PI / 2;
+    w.position.set(x, 0.12, -0.36);
+    g.add(w);
+  }
+  g.traverse(o => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+  return g;
+}
+
+export type ObjectiveType = 'fire' | 'cat' | 'patient' | 'rescue' | 'breakdown' | 'trash';
 
 /** the icon the HUD badge shows for a call kind — each call floats the same
  * one over itself, so calls standing close together can be told apart */
 export function callIcon(type: ObjectiveType): string {
-  return type === 'fire' || type === 'rescue' ? '🔥' : type === 'patient' ? '🆘' : '🐱';
+  return type === 'fire' || type === 'rescue' ? '🔥' : type === 'patient' ? '🆘' : type === 'breakdown' ? '🚗' : type === 'trash' ? '🗑️' : '🐱';
 }
 
 export interface Objective {
@@ -63,6 +82,8 @@ export interface Objective {
   rigs: Rig[];
   /** what it showed, for its scene */
   look?: CallLook;
+  /** lamps that blink (a broken-down car's hazards) */
+  lamps?: THREE.Mesh[];
   pos: THREE.Vector3;
   progress: number;
   need: number;
@@ -112,7 +133,12 @@ export class Missions {
   }
 
   /** step the calls' fire, smoke and animated characters */
+  private time = 0;
+
   update(dt: number, camera: THREE.Camera, night: number): void {
+    this.time += dt;
+    const on = Math.floor(this.time * 2.5) % 2 === 0;
+    for (const o of this.objectives) for (const l of o.lamps ?? []) (l.material as THREE.MeshBasicMaterial).color.setHex(on ? 0xffb030 : 0x5a3a10);
     this.fireFx.night = night;
     this.smokeFx.light = 1 - night * 0.55;
     this.fireFx.update(dt, camera);
@@ -149,7 +175,7 @@ export class Missions {
     const qType = new URLSearchParams(location.search).get('type');
     let type: ObjectiveType;
     if (forcedType) type = forcedType;
-    else if ((qType === 'fire' || qType === 'cat' || qType === 'patient' || qType === 'rescue') && this.calls.includes(qType)) type = qType;
+    else if (qType && this.calls.includes(qType as ObjectiveType)) type = qType as ObjectiveType;
     else type = this.calls[this.index % this.calls.length];
     const diff = Math.min(this.sFires + this.sCats, 10);
     this.home ??= { x: player.x, z: player.z };
@@ -249,6 +275,7 @@ export class Missions {
     const fires: Fire[] = [];
     let smoke: SmokeEmitter | null = null;
     const rigs: Rig[] = [];
+    const lamps: THREE.Mesh[] = [];
     const cxl = pos.x - this.ox, czl = pos.z - this.oz;
     const district = setDistrict(plan.districtAt(cxl, czl));
     let look: CallLook = { kind: 'none', district };
@@ -334,6 +361,54 @@ export class Missions {
         group.add(who.root);
         rigs.push(who);
       }
+    } else if (type === 'breakdown') {
+      // a car broken down at the corner (G17): bonnet up, hazard lamps
+      // blinking, a wisp of steam, its driver waving the tow truck down
+      const name = CARS[(r() * CARS.length) | 0];
+      const tpl = bakedModel(name);
+      const car = new THREE.Group();
+      car.rotation.y = Math.atan2(toNode.x, toNode.z) + Math.PI / 4;
+      const m = kitMesh(name, tpl ? 4.1 / Math.max(tpl.size.x, tpl.size.z) : 1);
+      if (m) { m.position.y = 0.05; car.add(m); }
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.06, 1.0), new THREE.MeshLambertMaterial({ color: 0xe8e2d6 }));
+      hood.position.set(0, 1.35, 1.55);
+      hood.rotation.x = -0.9;
+      car.add(hood);
+      for (const [x, z] of [[0.75, 2], [-0.75, 2], [0.75, -2], [-0.75, -2]]) {
+        const l = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffb030 }));
+        l.position.set(x, 0.8, z);
+        car.add(l);
+        lamps.push(l);
+      }
+      group.add(car);
+      const fwd = new THREE.Vector3(0, 0, 1.4).applyEuler(car.rotation);
+      smoke = this.smokeFx.add({ x: pos.x + fwd.x, y: 1.4, z: pos.z + fwd.z, rate: 1.6, size0: 0.4, size1: 1.8, rise: 1.3, life: 2.4, jitter: 0.3, dark: 0 });
+      const who = person(seed % 12, 1.7);
+      who.root.position.set(toNode.z * 2.4 + toNode.x * 1.2, 0, -toNode.x * 2.4 + toNode.z * 1.2);
+      who.root.rotation.y = Math.atan2(toNode.x, toNode.z);
+      who.play('interact-right', { speed: 1.4 });
+      group.add(who.root);
+      rigs.push(who);
+      look = { kind: 'car', model: name, district };
+    } else if (type === 'trash') {
+      // full wheelie bins on the corner, a few bags beside them (G17)
+      const across = new THREE.Vector3(toNode.z, 0, -toNode.x);
+      const colors = [0x3f9a4a, 0x2c6fb8, 0xf2c230, 0x3f9a4a];
+      const n = 3 + (seed % 2);
+      for (let k = 0; k < n; k++) {
+        const bin = wheelieBin(colors[(k + seed) % colors.length]);
+        const off = (k - (n - 1) / 2) * 1.1;
+        bin.position.set(across.x * off, 0, across.z * off);
+        bin.rotation.y = Math.atan2(toNode.x, toNode.z);
+        group.add(bin);
+      }
+      for (let k = 0; k < 2; k++) {
+        const bag = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 6), new THREE.MeshLambertMaterial({ color: 0x3a3f48 }));
+        bag.scale.set(1, 0.8, 1);
+        const off = ((n + 1) / 2 + 0.2 + k * 0.7) * (k % 2 ? -1 : 1);
+        bag.position.set(across.x * off + toNode.x * 0.3, 0.3, across.z * off + toNode.z * 0.3);
+        group.add(bag);
+      }
     } else if (type === 'patient') {
       // hurt, sitting on the pavement; a friend waving the ambulance down
       const who = person(seed % 12, 1.65);
@@ -371,10 +446,10 @@ export class Missions {
     const marker = makeIconSprite(callIcon(type));
     marker.position.set(pos.x, 5.4, pos.z);
     this.scene.add(marker);
-    const beacon = makeBeacon(type === 'fire' || type === 'rescue' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : 0xff8ad1);
+    const beacon = makeBeacon(type === 'fire' || type === 'rescue' ? 0xff8a3c : type === 'patient' ? 0x7fb2d9 : type === 'breakdown' ? 0xffb030 : type === 'trash' ? 0x6fb86a : 0xff8ad1);
     beacon.position.set(pos.x, 0, pos.z);
     this.scene.add(beacon);
-    this.objectives.push({ type, variant, seed, group, fires, smoke, rigs, look, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
+    this.objectives.push({ type, variant, seed, group, fires, smoke, rigs, look, lamps, pos, progress: 0, need, gx: gx + this.ox, gz: gz + this.oz, marker, beacon, index: this.index, d: 1e9 });
     this.index++;
   }
 

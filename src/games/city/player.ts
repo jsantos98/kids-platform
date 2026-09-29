@@ -83,6 +83,14 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 3.1, steerMax: 0.48, cabF: 2.2, cabY: 2.3, front: 1.8, halfW: 1.05, frontR: 1.0,
   }),
   car: groundCar(() => makeCar({ body: 0x7fb2d9 }), '/assets/kenney/hatchback-sports.glb', 4.2),
+  // the tow truck (G17): the Car Kit's red flatbed — the one in the traffic —
+  // a little bigger than the traffic's (5.4 m) so a car fits on its bed
+  tow: groundCar(() => makeCar({ body: 0xd8503a }), '/assets/kenney/delivery-flat.glb', 6.8, {
+    accel: 5.5, brake: 14, maxF: 11, radius: 1.3,
+    camBack: 12.5, camUp: 10.4, highBack: 14, highUp: 21,
+    wheelbase: 3.4, steerMax: 0.47, cabF: 3.0, cabY: 2.5,
+    front: 1.9, halfW: 1.1, frontR: 1.0,
+  }),
   heli: heli(0xfaf7ef, 0xe25c5c),
   heliMedical: heli(0xfaf7ef, 0xe25c5c),
   heliPolice: heli(0x5a7fb5, 0xfaf7ef),

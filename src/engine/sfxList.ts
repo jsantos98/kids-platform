@@ -90,6 +90,13 @@ export const SFX = {
   'coins': { prompt: 'a treasure chest full of gold coins jingling and clinking, cheerful, short', seconds: 1.5, loop: false },
   'dig': { prompt: 'a shovel digging into soft sand once, a scoop and a toss, short', seconds: 0.8, loop: false },
   'parrot': { prompt: 'a cheerful cartoon parrot squawking twice, friendly, short', seconds: 1, loop: false },
+  // the work trucks and the deliveries (G16, G17)
+  'ramp-clank': { prompt: 'two heavy steel loading ramps dropping onto a road from a tow truck, a metallic clank and a clunk, short', seconds: 1.2, loop: false },
+  'strap-click': { prompt: 'a ratchet tie-down strap being tightened, three quick ratchet clicks and a buckle snap, short', seconds: 1, loop: false },
+  'bin-tip': { prompt: 'a wheelie bin tipped into a garbage truck, bags and bottles and cans tumbling and rattling in, cartoon, short', seconds: 1.5, loop: false },
+  'bin-set': { prompt: 'an empty plastic wheelie bin set down on a pavement, a hollow plastic thunk, short', seconds: 0.6, loop: false },
+  'truck-dump': { prompt: 'a garbage truck tipping its whole load out at a recycling depot, a long rumbling cascade of trash, bottles and cans, short', seconds: 2.5, loop: false },
+  'jail-door': { prompt: 'a heavy barred jail door sliding shut with a clang and a lock clicking, cartoon, short', seconds: 1.2, loop: false },
   'ship-creak': { prompt: 'a wooden sailing ship at sea creaking gently, ropes and timber, soft waves against the hull, steady, no voices, seamless loop', seconds: 6, loop: true },
 } satisfies Record<string, SfxDef>;
 

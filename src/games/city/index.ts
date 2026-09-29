@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, type Quality } from '../../engine/settings.js';
-import { bakedNight } from '../../engine/baked.js';
+import { bakedNight, templateToMesh } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
@@ -64,6 +64,7 @@ import { CatLadderActivity, type CatVariant } from './activity/catLadder.js';
 import { RescueLadderActivity } from './activity/rescueLadder.js';
 import { RunActivity } from './activity/run.js';
 import { WinchActivity, type WinchVariant } from './activity/winch.js';
+import { TowActivity } from './activity/tow.js';
 import type { Objective } from './missions.js';
 import { Particles } from './particles.js';
 import { Transit } from './transit.js';
@@ -436,7 +437,7 @@ function musicNow(night: number, inScene: boolean, dt: number): MusicId {
 }
 /** the kid's engine sound, by vehicle */
 const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
-  : V.kind === 'rail' ? 'train' : MODE.id === 'truck' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
+  : V.kind === 'rail' ? 'train' : MODE.id === 'truck' || MODE.id === 'tow' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
 /** its siren's two tones */
 const SIREN_STYLE: SirenStyle = V.kind === 'heli' ? 'heli' : MODE.id === 'truck' ? 'fire' : MODE.id === 'police' ? 'police' : 'ambulance';
 let seaNear = 0, seaCheck = 0, lastCount = -1;
@@ -950,6 +951,7 @@ function load(kind: CargoKind, model?: string): void {
   destCheck = 0;
   showCargo(CARGO_ICON[kind]);
   toast = '';
+  if (kind === 'car' && MODE.id === 'tow') carryCar(model);
   narrator.say('toDest', CARGO_TO[kind]);
 }
 /** the world point where the kid hands the cargo over (and, for the
@@ -960,13 +962,42 @@ function destPoint(): { x: number; z: number; y: number; pad: boolean } | null {
   if (pad) return { x: pad.x, z: pad.z, y: pad.y, pad: true };
   return { x: dest.door.x + dest.ox, z: dest.door.z + dest.oz, y: 0, pad: false };
 }
+// the work trucks' amber beacon on the cab roof, flashing while there's a
+// load on board (G17: a work truck's own, not an emergency light bar)
+const workBeacon = MODE.id === 'tow' || MODE.calls.includes('trash') ? new THREE.Mesh(
+  new THREE.BoxGeometry(0.8, 0.2, 0.3), new THREE.MeshBasicMaterial({ color: 0x6b4410 })) : null;
+if (workBeacon) {
+  workBeacon.userData.extra = true;
+  workBeacon.position.set(0, 2.9, MODE.id === 'tow' ? 2.2 : 2.4);
+  player.car.add(workBeacon);
+}
+/** the broken-down car riding on the tow truck's bed (G17) */
+let carried: THREE.Object3D | null = null;
+let carriedFrom: THREE.Vector3 | null = null;
+function carryCar(model: string | undefined): void {
+  const tpl = model ? bakedModel(model) : null;
+  const g = new THREE.Group();
+  if (tpl) {
+    const m = templateToMesh(tpl);
+    m.scale.setScalar(3.7 / Math.max(tpl.size.x, tpl.size.z));
+    m.castShadow = true;
+    g.add(m);
+  } else g.add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.2, 3.6), new THREE.MeshLambertMaterial({ color: 0x7fb2d9 })));
+  g.position.set(0, 1.05, -1.55);
+  g.userData.extra = true;
+  player.car.add(g);
+  carried = g;
+}
 /** handing over: the kid stopped at the place */
 let handing: { kind: LandmarkKind; y: number; pad: boolean } | null = null;
+let handDoor: { x: number; z: number } | null = null;
+let handT = 0;
 function startHandover(): void {
   if (!cargo || !dest) return;
   const p = destPoint()!, st = player.state, kind = dest.kind;
   mode = 'activity';
   st.v = 0;
+  handT = 0;
   // from the vehicle's kerb side (or the helipad) to the building's door
   const lot = dest.lot;
   const nx = lot ? Math.sin(lot.ry) : 0, nz = lot ? Math.cos(lot.ry) : 0;
@@ -979,12 +1010,15 @@ function startHandover(): void {
   else if (V.kind === 'boat') handover.start(kind, { x: dest.ox + dest.x, z: dest.oz + dest.z }, door, 0.55, seed);
   else handover.start(kind, side, door, 0, seed);
   handing = { kind, y: p.y, pad: p.pad };
+  // (the repair shop: the car rolls off the bed and in through its door)
+  if (carried) { scene.attach(carried); carriedFrom = carried.position.clone(); handDoor = door; }
   narrator.say('arrive');
 }
 function finishHandover(): void {
   if (!handing) return;
   const kind = handing.kind;
   handing = null;
+  if (carried) { carried.removeFromParent(); carried = null; carriedFrom = null; }
   cargo = null;
   dest = null;
   showCargo(null);
@@ -1005,6 +1039,7 @@ function sceneFor(o: Objective): Activity {
   if (o.type === 'fire') return new HoseActivity(o.seed, o.variant as FireVariant, look);
   if (o.type === 'cat') return new CatLadderActivity(o.seed, o.variant as CatVariant, look);
   if (o.type === 'rescue') return new RescueLadderActivity(o.seed, look);
+  if (o.type === 'breakdown') return new TowActivity(o.seed, look);
   return V.kind === 'heli' ? new WinchActivity(o.seed, look, (q.get('variant') as WinchVariant | null) ?? undefined) : new RunActivity(o.seed, look);
 }
 
@@ -1048,6 +1083,11 @@ function sceneCue(c: SceneCue): void {
     case 'beep': audio.sceneShot('beep'); break;
     case 'dig': audio.sceneShot('dig'); break;
     case 'coins': audio.sceneShot('coins'); break;
+    case 'clank': audio.sceneShot('ramp-clank'); break;
+    case 'strap': audio.sceneShot('strap-click'); audio.star(); break;
+    case 'drift': narrator.say('towCentre'); break;
+    case 'tip': audio.sceneShot('bin-tip'); narrator.say('bin'); break;
+    case 'binSet': audio.sceneShot('bin-set', 0.7); break;
   }
 }
 
@@ -1064,6 +1104,9 @@ function openCall(o: Objective): void {
     } else if (o.type === 'cat' || o.type === 'rescue') {
       missions.sCats++; totals.cats++;
       toast = tr(o.type === 'cat' ? 'call.catSaved' : 'call.allSafe');
+    } else if (o.type === 'breakdown') {
+      // (the car rides on the flatbed to a repair shop, G16)
+      load('car', o.look?.model);
     } else {
       // (the patient rides to a hospital: the star comes with the handover, G16)
       load('patient');
@@ -1094,10 +1137,10 @@ function openCall(o: Objective): void {
     mode = 'activity';
     director.start(() => new ChaseActivity(Number(q.get('sceneSeed') ?? 1), V.kind === 'heli'), () => { mode = 'drive'; });
   }
-  if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient') {
+  if (sq === 'fire' || sq === 'cat' || sq === 'rescue' || sq === 'patient' || sq === 'tow') {
     const o = missions.objectives[0] ?? null;
     const fake = {
-      ...(o ?? {}), type: sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
+      ...(o ?? {}), type: sq === 'tow' ? 'breakdown' : sq, variant: q.get('variant') ?? (sq === 'fire' ? 'house' : 'tree'),
       // (&look=house-c | bldg-f | car-taxi | tree-oak: the thing the call showed)
       look: lookFromName(q.get('look')),
       seed: Number(q.get('sceneSeed') ?? 7),
@@ -1718,6 +1761,12 @@ const tick = (): void => {
     promptText.textContent = tr('deliver.handing');
     promptFill.style.width = '100%';
     if (handing.pad) st.alt += (handing.y + 1.7 - st.alt) * Math.min(1, dt * 2.5);
+    if (carried && carriedFrom && handDoor) {
+      handT += dt;
+      const f = Math.min(1, handT / 2.4);
+      carried.position.set(carriedFrom.x + (handDoor.x - carriedFrom.x) * f, carriedFrom.y * (1 - Math.min(1, f * 3)), carriedFrom.z + (handDoor.z - carriedFrom.z) * f);
+      carried.visible = f < 0.97;
+    }
     if (handover.update(dt)) finishHandover();
   } else if (cargo && dp && dest) {
     // ---- a pickup on board: to its place, and stop there ----
@@ -1924,6 +1973,12 @@ const tick = (): void => {
     }
   }
 
+  if (workBeacon) {
+    const lit = !!cargo && Math.floor(elapsed * 3) % 2 === 0;
+    (workBeacon.material as THREE.MeshBasicMaterial).color.setHex(lit ? 0xffb030 : 0x6b4410);
+    if (player.car.userData.top && !workBeacon.userData.placed) { workBeacon.position.y = (player.car.userData.top as number) + 0.1; workBeacon.userData.placed = true; }
+    if (lit && nightLights.dark) { const p = workBeacon.getWorldPosition(new THREE.Vector3()); nightLights.flash({ x: p.x, y: p.y, z: p.z, color: 0xffb030, size: 2, pool: 0 }); }
+  }
   if (player.crashT > 0) {
     promptEl.style.display = 'block';
     promptText.textContent = tr('call.oops');

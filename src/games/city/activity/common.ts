@@ -53,7 +53,12 @@ export type SceneCue =
   | 'map'        // a treasure map
   | 'beep'       // the treasure detector
   | 'dig'        // a spadeful of sand
-  | 'coins';     // the treasure's gold
+  | 'coins'      // the treasure's gold
+  | 'clank'      // the tow truck's ramps drop (G17)
+  | 'strap'      // the car strapped onto the bed
+  | 'drift'      // the towed car pulled off its line ("keep it in the middle!")
+  | 'tip'        // a bin tipped into the garbage truck
+  | 'binSet';    // an emptied bin set back down
 
 /** a sound a scene keeps going while it wants it */
 export type SceneLoop = 'pump' | 'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'waves';

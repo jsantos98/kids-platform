@@ -1813,7 +1813,7 @@ const tick = (): void => {
     if (handing.pad) st.alt += (handing.y + 1.7 - st.alt) * Math.min(1, dt * 2.5);
     if (carried && carriedFrom && handDoor) {
       handT += dt;
-      const f = Math.min(1, handT / 2.4);
+      const f = Math.min(1, Math.max(0, handT - 1.6) / 2.4);
       carried.position.set(carriedFrom.x + (handDoor.x - carriedFrom.x) * f, carriedFrom.y * (1 - Math.min(1, f * 3)), carriedFrom.z + (handDoor.z - carriedFrom.z) * f);
       carried.visible = f < 0.97;
     }
@@ -2020,6 +2020,17 @@ const tick = (): void => {
       // alternate the light bar: red flash / blue flash
       (sirenBar.red.material as THREE.MeshBasicMaterial).color.setHex(phase === 0 ? 0xff3b30 : 0x4a1616);
       (sirenBar.blue.material as THREE.MeshBasicMaterial).color.setHex(phase === 1 ? 0x3f7bff : 0x161d4a);
+    }
+    // at night the lit lamp throws a big halo and colours the street or the
+    // water round it — the flashing reads from across town (G10, G11)
+    if (sirenOn && nightLights.dark && V.kind !== 'heli') {
+      const lit: Array<[THREE.Object3D, number]> = own
+        ? [...own.red.filter(l => phase === 0).map(l => [l, 0xff2a22] as [THREE.Object3D, number]), ...own.blue.filter(l => phase === 1).map(l => [l, 0x3a6bff] as [THREE.Object3D, number])]
+        : [[phase === 0 ? sirenBar.red : sirenBar.blue, phase === 0 ? 0xff2a22 : 0x3a6bff]];
+      for (const [o, color] of lit) {
+        o.getWorldPosition(_lamp);
+        nightLights.flash({ x: _lamp.x, y: _lamp.y + 0.2, z: _lamp.z, color, size: 7, pool: 22, strength: 1.4 });
+      }
     }
   }
 

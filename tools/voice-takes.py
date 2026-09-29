@@ -13,7 +13,9 @@ Brazilian dominates it, so a Portugal voice drifts Brazilian on some lines
   C, D  v3 — the expressive model — with a neutral European-Portuguese accent cue and the line's
         emotion cue
 Run from the repository root:  python tools/voice-takes.py <voice_id> <name> [id ...] [--more]
-  (--more: eight more takes E–L of the lines named, for a line none of A–D got right)
+  (--more: eight more takes E–L of the lines named, for a line none of A–D got right;
+   --again: eight more still, M–T, for a line none of A–L got right — v2 held
+   steadier after other European-Portuguese sentences, v3 cued to a Lisbon accent)
 Needs ELEVENLABS_API_KEY in .env.local (a paid plan for a library voice).
 """
 import json
@@ -81,14 +83,35 @@ def more_takes(text: str, mood: str) -> dict:
             'K': {**turbo, 'seed': 101}, 'L': {**turbo, 'seed': 202}}
 
 
+# other European-Portuguese sentences heard before a line (the third round)
+CONTEXT3 = 'Então, miúdo, vamos a isso? Está calor lá fora, mas o autocarro já vem aí.'
+CONTEXT4 = 'Ó pá, que giro! Anda, despacha-te, que a tua mãe está à tua espera na paragem.'
+LISBON = '[European Portuguese accent from Lisbon, Portugal, not Brazilian]'
+
+
+def again_takes(text: str, mood: str) -> dict:
+    """eight more for a line none of A–L got right: v2 held steadier still
+    after other European sentences, and v3 cued to a Lisbon accent"""
+    st, style = V2[mood]
+    v2 = {'model_id': 'eleven_multilingual_v2', 'text': text,
+          'voice_settings': {'stability': max(st, 0.7), 'similarity_boost': 0.95, 'style': min(style, 0.2), 'use_speaker_boost': True}}
+    v3 = {'model_id': 'eleven_v3', 'text': f'{LISBON} {TAG[mood]} {text} [long pause]', 'language_code': 'pt'}
+    return {'M': {**v2, 'previous_text': CONTEXT3, 'seed': 505}, 'N': {**v2, 'previous_text': CONTEXT3, 'seed': 606},
+            'O': {**v2, 'previous_text': CONTEXT4, 'seed': 707}, 'P': {**v2, 'previous_text': CONTEXT4, 'seed': 808},
+            'Q': {**v3, 'seed': 505}, 'R': {**v3, 'seed': 606}, 'S': {**v3, 'seed': 707}, 'T': {**v3, 'seed': 808}}
+
+
 LABEL = {'A': 'v2 + contexto PT', 'B': 'v2 + contexto PT', 'C': 'v3 + sotaque neutro', 'D': 'v3 + sotaque neutro',
          'E': 'v2 estável', 'F': 'v2 estável', 'G': 'v2 estável', 'H': 'v2 + outro contexto',
-         'I': 'v3 + sotaque neutro', 'J': 'v3 + sotaque neutro', 'K': 'turbo v2.5 (pt)', 'L': 'turbo v2.5 (pt)'}
+         'I': 'v3 + sotaque neutro', 'J': 'v3 + sotaque neutro', 'K': 'turbo v2.5 (pt)', 'L': 'turbo v2.5 (pt)',
+         'M': 'v2 muito estável', 'N': 'v2 muito estável', 'O': 'v2 muito estável', 'P': 'v2 muito estável',
+         'Q': 'v3 sotaque de Lisboa', 'R': 'v3 sotaque de Lisboa', 'S': 'v3 sotaque de Lisboa', 'T': 'v3 sotaque de Lisboa'}
 
 
 def main() -> None:
     voice, name = sys.argv[1], sys.argv[2]
     more = '--more' in sys.argv
+    again = '--again' in sys.argv
     only = {a for a in sys.argv[3:] if not a.startswith('--')}
     got = json.loads(subprocess.run('npx tsx tools/voice-lines.ts', cwd=ROOT, shell=True, capture_output=True, check=True).stdout.decode('utf-8'))
     lines, moods = got['lines']['pt'], got['moods']
@@ -112,6 +135,8 @@ def main() -> None:
         todo = takes_for(text, moods.get(cid, 'lively'))
         if more:
             todo.update(more_takes(text, moods.get(cid, 'lively')))
+        if again:
+            todo.update(again_takes(text, moods.get(cid, 'lively')))
         for tag, body in todo.items():
             f = out / f'{cid}-{tag}.mp3'
             if f.exists():

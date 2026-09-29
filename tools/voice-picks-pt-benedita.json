@@ -123,5 +123,21 @@
  "say-catMoved": "J",
  "say-hearts": "F",
  "say-chaseRun": "J",
- "say-hold": "I"
+ "say-hold": "I",
+ "mode-pirate": "A",
+ "go-pirate": "D",
+ "say-start-pirate": "D",
+ "say-shipSpotted-1": "B",
+ "say-shipSpotted-2": "B",
+ "say-battle-1": "D",
+ "say-battle-2": "D",
+ "say-shipHit-1": "A",
+ "say-shipHit-2": "A",
+ "say-shipHit-3": "C",
+ "say-sunk-1": "D",
+ "say-sunk-2": "D",
+ "say-treasureMap": "D",
+ "say-dig": "D",
+ "say-treasure-1": "D",
+ "say-treasure-2": "C"
 }

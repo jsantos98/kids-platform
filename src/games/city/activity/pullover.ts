@@ -58,6 +58,8 @@ export class PullOverActivity implements Activity {
     this.amp = variant === 'rival' ? 4 + r() * 1.5 : 5 + r() * 1.5;
     this.w = variant === 'rival' ? 0.45 + r() * 0.15 : 0.6 + r() * 0.2;
     this.phase = r() * Math.PI * 2;
+    // (the pirate ship is 19 m long: it weaves further ahead)
+    if (variant === 'rival') this.bz = AHEAD_Z - 10;
 
     // the police boat: the blue and white speedboat, a light bar on it
     this.police.add(hullObject('boat-speed-g', 7, () => P.box(2.4, 1.2, 7, 0x3c63b8, 0, 0.6, 0)));
@@ -131,7 +133,7 @@ export class PullOverActivity implements Activity {
     } else {
       // it gives up: slows, lines up ahead of the police boat and stops
       this.stopT += dt;
-      this.bz += (POLICE_Z - 11 - this.bz) * Math.min(1, dt * 1.2);
+      this.bz += (POLICE_Z - (this.variant === 'rival' ? 22 : 11) - this.bz) * Math.min(1, dt * 1.2);
       this.bad.rotation.y *= 1 - Math.min(1, dt * 2);
     }
     this.place(elapsed);

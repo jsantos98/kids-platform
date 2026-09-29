@@ -5,6 +5,45 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-29 (evening) — somewhere to take them: hospitals, a prison, two work trucks and a police boat
+
+**Everyone goes somewhere now.** Every island has hospitals, a prison, repair
+shops, a recycling depot and a police pier. They are real buildings the city
+already had, with a sign over the door (a red cross, 🚔, 🔧, ♻️), and a
+helipad on each hospital's roof. After the stretcher run the ambulance takes the
+patient to the nearest hospital, and the other patients wait (their call
+icons go pale) until it's been. The rescue helicopter lands on the hospital's
+roof. The police car takes the robber it caught to the prison. Arriving, the
+crew walk them in, and that's the star.
+
+**Two new games: the tow truck and the garbage truck**, both trucks that
+already drive in the city's traffic.
+- *The tow truck* (the red flatbed) finds cars broken down on street corners:
+  bonnet up, hazard lamps blinking, the driver waving. It backs up, drops its
+  ramps and winches the car up. The car's flat tyre keeps pulling it to one
+  side, and the wheel keeps it in line. The car then rides on the truck to a
+  repair shop.
+- *The garbage truck* drives to full bins. Its side grabber takes each bin
+  the kid stops at, lifts it over the truck and tips it in, with bags,
+  bottles and cans tumbling. After three stops the truck is full and goes to
+  the recycling depot.
+
+**Another new game: the police boat.** It chases speedboats racing and
+weaving where they shouldn't, and the pirate ship. Catch one and it's a chase
+down the waves: stay in its wake until it gives up, then bring the crew to
+the police pier.
+
+All the new lines are recorded, in both languages. The Portuguese ones still
+need picking by ear.
+
+| | |
+|---|---|
+| ![The rescue helicopter landing on a hospital's roof helipad](history/2026-09-29-deliveries/heli-helipad.jpg) | ![The police car at the prison: the thief is led in](history/2026-09-29-deliveries/prison.jpg) |
+| ![The tow scene: the winch pulls the car up the ramps](history/2026-09-29-deliveries/tow-scene.jpg) | ![The tow truck carrying the car to the repair shop](history/2026-09-29-deliveries/tow-carry.jpg) |
+| ![The bins: the grabber tips one into the garbage truck](history/2026-09-29-deliveries/bins-scene.jpg) | ![The pull-over: the police boat in the speedboat's wake](history/2026-09-29-deliveries/pull-over.jpg) |
+
+---
+
 ## 2026-09-29 (later) — after the first voyage
 
 The kid tried the pirate ship and we fixed what came up. The next ship to catch

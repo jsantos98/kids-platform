@@ -38,17 +38,20 @@ briefing and cheers every success.
 Nobody can be run over, and a bump never ends the game: the vehicle flashes
 and carries on from a spot just behind.
 
-### The nine play modes
+### The play modes
 
 | Mode | What the kid does |
 |---|---|
 | 🚒 Fire truck | Drive to fires and cats in trees; spray the hose, raise the ladder |
-| 🚓 Police car | Chase the getaway cars — bump one and it dashes off; stay right behind it to catch it |
-| 🚑 Ambulance | Drive to people who need help, then steer the stretcher run round the bumps and back to the ambulance |
-| 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up |
+| 🚓 Police car | Chase the getaway cars — bump one and it dashes off; stay right behind it to catch it, then take the thief to the prison |
+| 🚑 Ambulance | Drive to people who need help, steer the stretcher run round the bumps and back to the ambulance, then take them to a hospital (the next patients wait) |
+| 🛻 Tow truck | Find broken-down cars, winch them up onto the flatbed (keep the car in line as its flat tyre pulls), and take them to a repair shop |
+| 🚛 Garbage truck | Drive to full bins, stop the side grabber at each one to tip it in; three stops fill the truck — then off to the recycling depot |
+| 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up, then land on a hospital's roof helipad |
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
 | ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
 | 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
+| 🚨 Police boat | Chase the speedboats breaking the rules and the pirate ship; stay in their wake till they give up, then bring them to the police pier |
 | 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |
 | 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off; nothing brakes for you, and roll past it and the people waiting are cross |
 | 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
@@ -60,6 +63,7 @@ and carries on from a spot just behind.
 | ![Kart race](docs/screenshots/race.jpg) | ![The train at a station](docs/screenshots/train.jpg) |
 | ![Sunset from the plane](docs/screenshots/sunset.jpg) | ![The pirate ship and a treasure island](docs/screenshots/pirate.jpg) |
 | ![The race at night](docs/screenshots/race-night.jpg) | ![Smoke from two fires over the town at dusk](docs/screenshots/smoke-dusk.jpg) |
+| ![The tow truck with a car on its bed](docs/screenshots/tow-truck.jpg) | ![The rescue helicopter on a hospital's roof helipad](docs/screenshots/heli-helipad.jpg) |
 
 Reaching a call opens its **mission scene** — a street built from the same
 kits as the city, with the very house, car or tree the call showed on fire,
@@ -68,7 +72,7 @@ only input there, and nothing can be lost: sweep the hose over flames that
 flare up one after another, drive the ladder truck under the cat (or the
 people at the windows) and watch the ladder rise, steer the stretcher round
 cones, puddles and a dog while picking up hearts, hold the helicopter against
-the wind over the person, chase the robber across a town square, swing the pirate ship's cannon in a sea battle, or follow the treasure detector's beeps to the chest.
+the wind over the person, chase the robber across a town square, swing the pirate ship's cannon in a sea battle, follow the treasure detector's beeps to the chest, keep a broken-down car in line as the winch pulls it onto the tow truck, stop the garbage truck's grabber at each bin, or keep the police boat in a speedboat's wake.
 
 | | |
 |---|---|
@@ -76,6 +80,8 @@ the wind over the person, chase the robber across a town square, swing the pirat
 | ![Burning building at dusk](docs/screenshots/scene-rescue-dusk.jpg) | ![The stretcher run](docs/screenshots/scene-run.jpg) |
 | ![The winch at sea](docs/screenshots/scene-winch.jpg) | ![Caught: the foot chase](docs/screenshots/scene-chase.jpg) |
 | ![The sea battle](docs/screenshots/scene-battle.jpg) | ![Digging up the treasure](docs/screenshots/scene-dig.jpg) |
+| ![The tow: the winch and the ramps](docs/screenshots/scene-tow.jpg) | ![The pull-over](docs/screenshots/scene-pullover.jpg) |
+| ![The bins: the grabber tips one in](docs/screenshots/scene-bins.jpg) | ![The prison: the thief is led in](docs/screenshots/prison.jpg) |
 
 ## How to play
 
@@ -143,12 +149,12 @@ The game page is `play/city.html`.
 
 | Option | Effect |
 |---|---|
-| `?mode=truck\|police\|ambulance\|heliMedical\|heliPolice\|plane\|boat\|train\|race` | pick the play mode directly |
+| `?mode=truck\|police\|ambulance\|tow\|garbage\|heliMedical\|heliPolice\|plane\|boat\|policeBoat\|pirate\|train\|race` | pick the play mode directly |
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |
 | `?time=night\|dusk\|noon\|22` | start at a time of day (a name or an hour; every game starts at 8:00) |
-| `?scene=fire\|cat\|rescue\|patient\|caught` | open a mission scene straight away |
+| `?scene=fire\|cat\|rescue\|patient\|caught\|tow\|bins\|pullover\|battle\|dig` | open a mission scene straight away |
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |
 
@@ -209,6 +215,8 @@ npx tsx tools/audit-world.ts 7        # every world rule, for one seed (try seve
 npx tsx tools/check-walkers.ts        # nobody can be run over
 npx tsx tools/check-traffic.ts        # the traffic never jams
 npx tsx tools/check-i18n.ts           # every text is translated
+npx tsx tools/check-scenes.ts         # every mission scene can be won and can't be lost
+npx tsx tools/check-landmarks.ts      # every island has its hospitals, prison, repair shops, depot
 npx tsx tools/plan-hash.ts            # for refactors: the cities must not change
 ```
 

@@ -86,6 +86,11 @@ export const GAMES: GameEntry[] = [
     url: mode('boat'), model: { glb: 'assets/kenney/watercraft/boat-speed-a.glb', len: 6.5 },
   }),
   entry({
+    id: 'policeBoat', icon: '🚨', color: '#2c5fb8',
+    controls: { drive: 'boat', siren: true },
+    url: mode('policeBoat'), model: { glb: 'assets/kenney/watercraft/boat-speed-g.glb', len: 7 },
+  }),
+  entry({
     id: 'pirate', icon: '🏴‍☠️', color: '#6b4a2f',
     controls: { drive: 'boat', siren: false },
     url: mode('pirate'), model: { glb: 'assets/kenney/pirate/ship-pirate-medium.glb', len: 12 },

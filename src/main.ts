@@ -55,7 +55,7 @@ interface Item {
 }
 const STAGE: Record<string, StageKind> = {
   truck: 'road', police: 'road', ambulance: 'road', tow: 'road', garbage: 'road', heliMedical: 'helipad', heliPolice: 'helipad',
-  plane: 'runway', boat: 'canal', pirate: 'canal', train: 'rail', race: 'track',
+  plane: 'runway', boat: 'canal', policeBoat: 'canal', pirate: 'canal', train: 'rail', race: 'track',
 };
 const SOUND: Record<string, Item['sound']> = {
   truck: { id: 'siren-fire', secs: 1.1, gain: 0.35, bus: 'sfx' },
@@ -67,6 +67,7 @@ const SOUND: Record<string, Item['sound']> = {
   heliPolice: { id: 'engine-heli', secs: 1.4, gain: 0.8, bus: 'engine' },
   plane: { id: 'engine-plane', secs: 1.4, gain: 0.8, bus: 'engine' },
   boat: { id: 'engine-boat', secs: 1.4, gain: 0.8, bus: 'engine' },
+  policeBoat: { id: 'siren-police', secs: 1.1, gain: 0.35, bus: 'sfx' },
   pirate: { id: 'ship-creak', secs: 1.8, gain: 0.9, bus: 'engine' },
   train: { id: 'train-horn', secs: 1.4, gain: 0.45, bus: 'sfx' },
   race: { id: 'race-f1', secs: 1.2, gain: 0.7, bus: 'engine' },

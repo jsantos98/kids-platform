@@ -12,7 +12,7 @@ import { EN } from './en.js';
 import { RACE_CARS } from '../games/raceCars.js';
 
 /** the garage's play modes (registry.ts), whose names it says */
-export const SPOKEN_MODES = ['truck', 'police', 'ambulance', 'tow', 'garbage', 'heliMedical', 'heliPolice', 'plane', 'boat', 'pirate', 'train', 'race'] as const;
+export const SPOKEN_MODES = ['truck', 'police', 'ambulance', 'tow', 'garbage', 'heliMedical', 'heliPolice', 'plane', 'boat', 'policeBoat', 'pirate', 'train', 'race'] as const;
 
 /** every spoken line: clip id → its text in the current language */
 export function voiceLines(): Record<string, string> {

@@ -116,6 +116,15 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     wheelbase: 3.4, steerMax: 0.6, cabF: 1.2, cabY: 2.2,
     front: 3, halfW: 1.4, frontR: 1.4,
   },
+  // the police boat (G15): the blue and white speedboat, quicker than the
+  // speedboats it pulls over (they run at 10 m/s)
+  policeBoat: {
+    make: () => new THREE.Group(), glb: '/assets/kenney/watercraft/boat-speed-g.glb', glbLen: 7, kind: 'boat', fly: false,
+    accel: 6.5, brake: 8, maxF: 15, maxR: 3, radius: 2,
+    camBack: 15, camUp: 12.2, camAhead: 12, highBack: 18, highUp: 27, highAhead: 8,
+    wheelbase: 3.4, steerMax: 0.6, cabF: 1.2, cabY: 2.2,
+    front: 3, halfW: 1.4, frontR: 1.4,
+  },
   // the pirate ship (G15): a boat on the same water, bigger and slower to turn
   pirate: {
     make: () => new THREE.Group(), glb: '/assets/kenney/pirate/ship-pirate-medium.glb', glbLen: 16, kind: 'boat', fly: false,

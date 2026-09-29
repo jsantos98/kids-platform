@@ -49,6 +49,7 @@ import { Robber, CATCH_R, CATCH_T, ROBBERS } from './robber.js';
 import { ChaseActivity } from './activity/chase.js';
 import { BattleActivity } from './activity/battle.js';
 import { DigActivity } from './activity/dig.js';
+import { PullOverActivity } from './activity/pullover.js';
 import { Pirates, CATCH_R as SHIP_CATCH_R, CATCH_T as SHIP_CATCH_T, type Ship } from './pirates.js';
 import { isletsFor, type Islet } from './islets.js';
 import { railNetFor } from '../../worlds/railRoute.js';
@@ -428,6 +429,13 @@ function musicNow(night: number, inScene: boolean, dt: number): MusicId {
   if (inScene) return 'scene';
   if (MODE.id === 'race') return 'race';
   if (MODE.pirate) return 'pirate';
+  // (the police boat: the chase tune while a law-breaker is near)
+  if (MODE.quarry && pirates) {
+    chaseHold = Math.max(0, chaseHold - dt);
+    const s = pirates.nearest(player.state.x, player.state.z);
+    if (s && !cargo && Math.hypot(s.x - player.state.x, s.z - player.state.z) < 160) chaseHold = CHASE_HOLD;
+    if (chaseHold > 0) return 'chase';
+  }
   if (MODE.chase) {
     watchRobbers(dt);
     if (chaseHold > 0) return 'chase';
@@ -440,7 +448,7 @@ function musicNow(night: number, inScene: boolean, dt: number): MusicId {
 const ENGINE: EngineKind = V.kind === 'heli' ? 'heli' : V.kind === 'plane' ? 'plane' : V.kind === 'boat' ? 'boat'
   : V.kind === 'rail' ? 'train' : MODE.id === 'truck' || MODE.id === 'tow' || MODE.id === 'garbage' ? 'truck' : MODE.id === 'race' ? 'kart' : 'car';
 /** its siren's two tones */
-const SIREN_STYLE: SirenStyle = V.kind === 'heli' ? 'heli' : MODE.id === 'truck' ? 'fire' : MODE.id === 'police' ? 'police' : 'ambulance';
+const SIREN_STYLE: SirenStyle = V.kind === 'heli' ? 'heli' : MODE.id === 'truck' ? 'fire' : MODE.id === 'police' || MODE.id === 'policeBoat' ? 'police' : 'ambulance';
 let seaNear = 0, seaCheck = 0, lastCount = -1;
 /** back to the garage (the launcher) */
 function goHome(): void { location.href = new URL('../index.html', location.href).href; }
@@ -784,7 +792,7 @@ const robberWait = robbers.map(() => 0);
 let robberCount = 0;
 /** the pirate mode (G15): the ships to catch on this island, the treasure
  * maps won and the islet whose treasure the next one marks */
-const pirates = MODE.pirate ? new Pirates(scene) : null;
+const pirates = MODE.pirate ? new Pirates(scene) : MODE.quarry ? new Pirates(scene, ['speeder', 'speeder', 'rival']) : null;
 let maps = 0;
 let treasure: { bx: number; by: number; k: number; islet: Islet } | null = null;
 /** islets already dug, per island ("bx,by,k") */
@@ -1007,7 +1015,7 @@ function startHandover(): void {
   const nx = lot ? Math.sin(lot.ry) : 0, nz = lot ? Math.cos(lot.ry) : 0;
   const door = lot
     ? { x: dest.ox + lot.x + nx * (lot.d / 2 - 1.2), z: dest.oz + lot.z + nz * (lot.d / 2 - 1.2) }
-    : { x: dest.ox + dest.x - Math.sin(dest.door.heading) * 12, z: dest.oz + dest.z - Math.cos(dest.door.heading) * 12 };
+    : { x: dest.ox + dest.x + Math.sin(dest.door.heading) * 14, z: dest.oz + dest.z + Math.cos(dest.door.heading) * 14 };
   const side = { x: st.x - Math.cos(st.heading) * (V.halfW + 0.9), z: st.z + Math.sin(st.heading) * (V.halfW + 0.9) };
   const seed = citySeed(dest.bx, dest.by) + runStars;
   if (p.pad) handover.start(kind, { x: p.x, z: p.z }, { x: p.x - nx * 4, z: p.z - nz * 4 }, p.y, seed);
@@ -1152,6 +1160,10 @@ function openCall(o: Objective): void {
     mode = 'activity';
     const ss = Number(q.get('sceneSeed') ?? 1);
     director.start(() => (sq === 'dig' ? new DigActivity(ss) : new BattleActivity(ss, sq === 'battle' ? 'pirate' : 'merchant')), () => { mode = 'drive'; });
+  }
+  if (sq === 'pullover') {
+    mode = 'activity';
+    director.start(() => new PullOverActivity(Number(q.get('sceneSeed') ?? 1), q.get('variant') === 'rival' ? 'rival' : 'speeder'), () => { mode = 'drive'; });
   }
   if (sq === 'caught') {
     mode = 'activity';
@@ -1423,17 +1435,33 @@ const tick = (): void => {
   // beside it opens the dig
   if (pirates) {
     pirates.update(dt, elapsed, st.x, st.z, director.busy);
-    setFleetThreat(mode === 'drive' ? { x: st.x, z: st.z } : null);
+    setFleetThreat(mode === 'drive' && MODE.pirate ? { x: st.x, z: st.z } : null);
     for (const s of pirates.ships) {
       if (!s.active || mode !== 'drive' || player.crashT > 0) continue;
       const d = Math.hypot(s.x - st.x, s.z - st.z);
       // (a ship in sight: the narrator calls it, and the parrot squawks)
-      if (d < 150 && s.caught === 0 && !s.seen) { s.seen = true; narrator.say('shipSpotted'); audio.sceneShot('parrot', 0.6); }
-      if (d < SHIP_CATCH_R && s.bolt <= 0) s.caught += dt;
+      if (d < 150 && s.caught === 0 && !s.seen) {
+        s.seen = true;
+        if (MODE.pirate) { narrator.say('shipSpotted'); audio.sceneShot('parrot', 0.6); }
+        else if (!cargo) narrator.say('spotted', sideOf(s.x, s.z));
+      }
+      if (d < SHIP_CATCH_R && s.bolt <= 0 && !cargo) s.caught += dt;
       if (s.caught >= SHIP_CATCH_T) {
         const ship: Ship = s;
         mode = 'activity';
         ship.group.visible = ship.icon.visible = false;
+        if (MODE.quarry) {
+          // (the police boat: the pull-over; caught, its crew ride to the
+          // police pier — G15, G16)
+          narrator.say('pullover');
+          director.start(() => new PullOverActivity(citySeed(curCity.bx, curCity.by) + ++pirateCount, ship.kind === 'rival' ? 'rival' : 'speeder'), () => {
+            mode = 'drive';
+            pirates.beaten(ship);
+            earnStar(tr('quarry.caught'), player.car.position.clone());
+            load('crew');
+          }, () => narrator.say('caught'));
+          break;
+        }
         narrator.say('battle');
         director.start(() => new BattleActivity(citySeed(curCity.bx, curCity.by) + ++pirateCount, ship.kind === 'rival' ? 'pirate' : 'merchant'), won => {
           mode = 'drive';
@@ -1825,7 +1853,7 @@ const tick = (): void => {
     const sd = Math.hypot(ship.x - st.x, ship.z - st.z);
     showGuide(GOAL_ICON[ship.kind], sd, Math.round((5 * ship.caught) / SHIP_CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * ship.caught) / SHIP_CATCH_T)}%`;
-    promptText.textContent = tr(sd < SHIP_CATCH_R * 1.6 ? 'pirate.close' : 'pirate.hunt');
+    promptText.textContent = tr(MODE.quarry ? (sd < SHIP_CATCH_R * 1.6 ? 'quarry.close' : 'quarry.hunt') : sd < SHIP_CATCH_R * 1.6 ? 'pirate.close' : 'pirate.hunt');
   } else if (race) {
     // ---- the race: lap, place, countdown ----
     const rv = race.view();
@@ -1967,8 +1995,8 @@ const tick = (): void => {
   audio.setMusic(musicNow(day.night, !!view.scene, dt));
   // (the tracks likely next, fetched ahead: a mission's scene, the chase, the night)
   if (elapsed > 4) {
-    if (MODE.calls.length || MODE.pirate) audio.preloadMusic('scene');
-    if (MODE.chase) audio.preloadMusic('chase');
+    if (MODE.calls.length || MODE.pirate || MODE.quarry) audio.preloadMusic('scene');
+    if (MODE.chase || MODE.quarry) audio.preloadMusic('chase');
     if (MODE.id !== 'race' && !MODE.pirate) audio.preloadMusic(musicNight ? 'day' : 'night');
   }
   {

@@ -97,28 +97,32 @@ export class Pirates {
     }
   }
 
-  /** a free spot in the island's open water, at least `away` m from (x, z) */
-  private spot(x: number, z: number, away: number): { x: number; z: number } | null {
+  /** a free spot in the island's open water, `away`–`far` m from (x, z)
+   * (and, for a waypoint, within `reach` of the kid at (kx, kz)) */
+  private spot(x: number, z: number, away: number, far = Infinity, kx = x, kz = z, reach = Infinity): { x: number; z: number } | null {
     const coast = coastFor(this.bx, this.by), ox = this.bx * CITY_PITCH, oz = this.by * CITY_PITCH;
-    for (let k = 0; k < 120; k++) {
+    for (let k = 0; k < 400; k++) {
       const th = this.r() * Math.PI * 2;
       const s = coast.shoreToward(CENTER + Math.cos(th) * 100, CENTER + Math.sin(th) * 100, 170 + this.r() * 140);
       const px = ox + s.x, pz = oz + s.z;
-      if (Math.hypot(px - x, pz - z) < away) continue;
+      const d = Math.hypot(px - x, pz - z);
+      if (d < away || d > far || Math.hypot(px - kx, pz - kz) > reach) continue;
       if (openWater(px, pz, 12)) return { x: px, z: pz };
     }
     return null;
   }
 
-  /** the kid is on island (bx, by): its ships put out to sea, far from the kid */
+  /** the kid is on island (bx, by): its ships put out to sea, 180–450 m
+   * from the kid — never so far that the next one is a long sail away (a
+   * kilometre off, it was) */
   start(bx: number, by: number, kidX: number, kidZ: number, seed: number): void {
     this.bx = bx; this.by = by;
     this.r = rng(seed * 31 + bx * 7 + by * 13);
-    for (const s of this.ships) this.launch(s, kidX, kidZ, 200);
+    for (const s of this.ships) this.launch(s, kidX, kidZ, 180, 450);
   }
 
-  private launch(s: Ship, kidX: number, kidZ: number, away: number): void {
-    const p = this.spot(kidX, kidZ, away) ?? this.spot(kidX, kidZ, 0);
+  private launch(s: Ship, kidX: number, kidZ: number, away: number, far: number): void {
+    const p = this.spot(kidX, kidZ, away, far) ?? this.spot(kidX, kidZ, away, far * 1.8) ?? this.spot(kidX, kidZ, 0);
     s.active = !!p;
     s.group.visible = s.icon.visible = !!p;
     if (!p) return;
@@ -126,11 +130,11 @@ export class Pirates {
     s.caught = 0; s.bolt = 0; s.wait = 0; s.way = null; s.seen = false;
   }
 
-  /** beaten: gone for a while, then another puts out far from the kid */
+  /** beaten: gone for a moment, then another puts out 200–380 m from the kid */
   beaten(s: Ship): void {
     s.active = false;
     s.group.visible = s.icon.visible = false;
-    s.wait = 8;
+    s.wait = 5;
   }
 
   /** it got away in its battle: it runs flat out for a few seconds */
@@ -157,10 +161,25 @@ export class Pirates {
     return this.ships.filter(s => s.active).map(s => ({ x: s.x, z: s.z, h: s.h, hl: s.len / 2, hw: s.len * 0.23 }));
   }
 
+  private recall = 0;
+
   update(dt: number, elapsed: number, kidX: number, kidZ: number, frozen: boolean): void {
+    // (the kid sailed off and every ship is far away: the farthest one, out
+    // of sight in the fog, puts out again 250–400 m from the kid)
+    this.recall -= dt;
+    if (!frozen && this.recall <= 0) {
+      this.recall = 2;
+      const live = this.ships.filter(o => o.active);
+      const dist = (o: Ship): number => Math.hypot(o.x - kidX, o.z - kidZ);
+      if (live.length && Math.min(...live.map(dist)) > 600) {
+        const far = live.reduce((a, b) => (dist(a) > dist(b) ? a : b));
+        this.launch(far, kidX, kidZ, 250, 400);
+        this.recall = 10;
+      }
+    }
     for (const s of this.ships) {
       if (!s.active) {
-        if (s.wait > 0 && (s.wait -= dt) <= 0) this.launch(s, kidX, kidZ, 250);
+        if (s.wait > 0 && (s.wait -= dt) <= 0) this.launch(s, kidX, kidZ, 200, 380);
         continue;
       }
       if (!frozen) this.steer(s, dt, kidX, kidZ);
@@ -182,7 +201,9 @@ export class Pirates {
     let want: number;
     if (fleeing) want = Math.atan2(s.x - kidX, s.z - kidZ);
     else {
-      if (!s.way || Math.hypot(s.way.x - s.x, s.way.z - s.z) < 30) s.way = this.spot(s.x, s.z, 150);
+      // (waypoints within 450 m of the kid: wandering the whole island they
+      // drifted a kilometre off)
+      if (!s.way || Math.hypot(s.way.x - s.x, s.way.z - s.z) < 30) s.way = this.spot(s.x, s.z, 100, 300, kidX, kidZ, 450) ?? this.spot(s.x, s.z, 100);
       want = s.way ? Math.atan2(s.way.x - s.x, s.way.z - s.z) : s.h;
     }
     // the first heading near the wanted one whose way ahead is clear (open

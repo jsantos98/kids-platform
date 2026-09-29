@@ -177,7 +177,9 @@ export class GuideArrow {
 
 /** each goal's icon — the HUD badge shows it and the goal floats it over
  * itself (makeIconSprite), so the kid sees there is a goal and what it is */
-export const GOAL_ICON = { robber: '🦹', gates: '🏁', rings: '⭕', buoys: '🚩', station: '🚉', rival: '🏴', merchant: '🏳️', treasure: '💰' } as const;
+export const GOAL_ICON = { robber: '🦹', gates: '🏁', rings: '⭕', buoys: '🚩', station: '🚉', rival: '🏴', merchant: '🏳️', treasure: '💰',
+  speeder: '🚤', breakdown: '🚗', trash: '🗑️',
+  hospital: '🏥', prison: '🚔', repair: '🔧', depot: '♻️', pier: '⚓' } as const;
 
 const iconTex = new Map<string, THREE.CanvasTexture>();
 

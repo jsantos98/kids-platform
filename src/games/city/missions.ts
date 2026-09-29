@@ -17,6 +17,7 @@ import { graphFor, type StreetGraph, type SNode } from '../../worlds/streetGraph
 import { cityPlanFor, type District } from '../../worlds/cityPlan.js';
 import { lotBuilding } from '../../worlds/cityChunk.js';
 import { makeBeacon, makeIconSprite } from './guide3d.js';
+import { isLandmarkLot } from './landmarks.js';
 import { FireSystem, type Fire } from './fx/fire.js';
 import { SmokeSystem, type SmokeEmitter } from './fx/smoke.js';
 import type { CallLook } from './activity/common.js';
@@ -261,7 +262,8 @@ export class Missions {
         for (let cz = Math.floor(czl / 64) - 1; cz <= Math.floor(czl / 64) + 1; cz++) {
           for (const lot of plan.lots(cx, cz)) {
             const b = lotBuilding(lot, plan.districtAt(lot.x, lot.z) === 'industrial');
-            if (!b || b.top < 4) continue;
+            // (never a hospital or the prison: G16)
+            if (!b || b.top < 4 || isLandmarkLot(this.bx, this.by, lot)) continue;
             const nx = Math.sin(b.ry), nz = Math.cos(b.ry);
             const fx = b.x + nx * b.hz, fz = b.z + nz * b.hz;
             const d = Math.hypot(fx - cxl, fz - czl);

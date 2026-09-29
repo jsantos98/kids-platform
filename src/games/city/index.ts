@@ -26,6 +26,8 @@ import { GuideArrow, setGuideNight, pulseBeacon, makeIconSprite, GOAL_ICON } fro
 import { ChunkManager } from './chunks.js';
 import { createSea, boatLoop, waveAt, setFleetThreat, setFleetViewer } from './sea.js';
 import { CityScenery } from './scenery.js';
+import { LandmarkLayer } from './landmarkLayer.js';
+import { landmarksFor, nearestLandmark, type LandmarkKind } from './landmarks.js';
 import { PatrolHeli } from './patrol.js';
 import { IslandManager } from './island/manager.js';
 import { setCarDrawScale } from './island/cars.js';
@@ -582,6 +584,10 @@ const scenery = new CityScenery(scene);
 // the causeway decks between the islands, streamed on their own (R29)
 const causeways = new Causeways(scene);
 scenery.night = nightLights;
+// the island's hospitals, prison, repair shops, depot and police pier,
+// signed on the buildings the city bakes (G16)
+const landmarkLayer = new LandmarkLayer(scene);
+landmarkLayer.night = nightLights;
 
 // ---- mission scenes: arriving at a call fades into its own little scene ----
 const director = new Director(document.getElementById('fade')!);
@@ -684,6 +690,9 @@ if (q.get('debugsea') === '1') {
     pirates: () => pirates,
     treasure: () => treasure,
     robberInSight,
+    /** the island's landmarks (G16), city-local */
+    landmarks: () => landmarksFor(curCity.bx, curCity.by),
+    curCity: () => curCity,
     /** the platforms' passengers */
     boarding: () => boarding.list(),
     stationState: () => ({ done: stationDone, aim: stationAim, next: V.kind === 'rail' ? nextStation() : null }),
@@ -829,6 +838,7 @@ function applyCity(c: CityRef): void {
   transit.setCity(c.bx, c.by, c.ox, c.oz);
   sea.setCity(c.ox, c.oz);
   scenery.ensure(c.bx, c.by, c.ox, c.oz);
+  landmarkLayer.ensure(c.bx, c.by, c.ox, c.oz);
   minimap.setCity(c.bx, c.by, c.ox, c.oz);
   missions.setCity(c.bx, c.by, c.ox, c.oz);
   boarding.setCity(c.bx, c.by, c.ox, c.oz);
@@ -1474,6 +1484,7 @@ const tick = (): void => {
   transit.update(dt, elapsed, railway);
   sea.update(elapsed);
   scenery.update(elapsed, day.night);
+  landmarkLayer.update(day.night, st.x, st.z);
   patrol?.update(dt, elapsed, st.x, st.z);
   if (V.kind === 'ground' && st.alt < 0.3 && river.inWater(st.x - curCity.ox, st.z - curCity.oz)) {
     st.v *= 1 - Math.min(0.5, dt * 1.6);

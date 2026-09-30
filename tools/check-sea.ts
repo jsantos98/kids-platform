@@ -21,6 +21,8 @@ import { overlapDepth } from '../src/games/city/island/obb.js';
 import { createPlayer, physicsStep, VEHICLES } from '../src/games/city/player.js';
 import { citySeed } from '../src/worlds/cityGrid.js';
 import type { CollisionBox } from '../src/worlds/cityChunk.js';
+import { Pirates } from '../src/games/city/pirates.js';
+import { boatLoop } from '../src/games/city/sea.js';
 
 const base = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 7) | 0;
 setCityBase(base);
@@ -135,5 +137,28 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
     (x, z) => x > I.x1 + 0.5 && x < I.x2 - 0.5 && z > I.z1 + 0.5 && z < I.z2 - 0.5);
 }
 
+// ---- the pirate's quarry puts out near a treasure islet (G15): the map a
+// battle wins marks the nearest islet — it was a kilometre's sail away ----
+{
+  let worst = 0, where = '';
+  for (const [bx, by] of [[1, 0], [1, 1], [2, 1]] as Array<[number, number]>) {
+    const ox = bx * CITY_PITCH, oz = by * CITY_PITCH, I = isletsFor(bx, by);
+    if (!I.length) continue;
+    const loop = boatLoop(bx, by);
+    const P = new Pirates(scene);
+    P.anchor = (x, z) => I.some(i => Math.hypot(ox + i.x - x, oz + i.z - z) < 280);
+    for (let k = 0; k < 8; k++) {
+      const p = loop[Math.floor((k / 8) * loop.length)];
+      P.start(bx, by, ox + p.x, oz + p.z, base + k);
+      for (const sh of P.ships) {
+        if (!sh.active) continue;
+        const d = Math.min(...I.map(i => Math.hypot(ox + i.x - sh.x, oz + i.z - sh.z)));
+        if (d > worst) { worst = d; where = `(${bx},${by})`; }
+      }
+    }
+  }
+  if (worst > 480) fail(`a pirate ship put out ${worst.toFixed(0)} m from the nearest treasure islet on ${where}`);
+  console.log(`pirates: the farthest a ship put out from a treasure islet ${worst.toFixed(0)} m`);
+}
 console.log(fails ? `FAIL — ${fails} problem(s) at sea (G14)` : 'PASS — the boats never run into anything, and the sea is solid (G14)');
 process.exit(fails ? 1 : 0);

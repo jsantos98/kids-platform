@@ -16,6 +16,11 @@ aboard the bell rings; the kid turns the wheel left, the doors close, the
 guard waves and the train eases forward. Then it fades back to the world
 and the train can go on.
 
+In the pirate ship, the treasure is never a long sail away any more.
+Every corner of an island now has its treasure islets, the ships to catch
+sail near them, and the map marks the nearest islet. Before, after sinking a
+ship the treasure could be a kilometre off.
+
 | |
 |---|
 | ![The station scene: the doors open, people walking in](history/2026-09-30-train/doors-scene.jpg) |

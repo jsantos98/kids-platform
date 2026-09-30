@@ -422,6 +422,7 @@ export class Fleet {
     }
     // a small boat or two circling every treasure islet, 13 m off its sand
     for (const I of isletsFor(bx, by)) {
+      if (I.close) continue;
       const R = I.r + 13, pts: Pt[] = [];
       for (let k = 0; k < 48; k++) pts.push({ x: I.x + Math.cos((k / 48) * Math.PI * 2) * R, z: I.z + Math.sin((k / 48) * Math.PI * 2) * R });
       const lane = makeLane(pts);

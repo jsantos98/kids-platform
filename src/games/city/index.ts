@@ -802,21 +802,29 @@ let robberCount = 0;
 const pirates = MODE.pirate ? new Pirates(scene) : MODE.quarry ? new Pirates(scene, ['speeder', 'speeder', 'rival']) : null;
 let maps = 0;
 let treasure: { bx: number; by: number; k: number; islet: Islet } | null = null;
-/** islets already dug, per island ("bx,by,k") */
-const dug = new Set<string>();
+/** the islet dug last ("bx,by,k"): the next map never marks it again at once
+ * — every other islet's chest has filled up again (keeping every dug islet
+ * off the map left only far ones, a kilometre's sail away) */
+let lastDug = '';
 let pirateCount = 0;
-/** the islet the next map marks: the nearest one of this island not dug yet */
+// (the pirate mode: the ships stay within ISLET_NEAR of a treasure islet not
+// yet dug, so the one the next map marks is close — G15)
+const ISLET_NEAR = 280;
+if (pirates && MODE.pirate) {
+  pirates.anchor = (x, z) => isletsFor(curCity.bx, curCity.by).some((I, k) => lastDug !== `${curCity.bx},${curCity.by},${k}`
+    && Math.hypot(curCity.ox + I.x - x, curCity.oz + I.z - z) < ISLET_NEAR);
+}
+/** the islet the next map marks: the nearest one of this island, but for the one just dug */
 function markTreasure(c: CityRef): void {
   if (!pirates || treasure || maps <= 0) return;
   const list = isletsFor(c.bx, c.by);
   let best = -1, bd = Infinity;
   list.forEach((I, k) => {
-    if (dug.has(`${c.bx},${c.by},${k}`)) return;
+    if (lastDug === `${c.bx},${c.by},${k}`) return;
     const d = Math.hypot(c.ox + I.x - player.state.x, c.oz + I.z - player.state.z);
     if (d < bd) { bd = d; best = k; }
   });
-  // (every islet here dug: they're all full again)
-  if (best < 0 && list.length) { for (let k = 0; k < list.length; k++) dug.delete(`${c.bx},${c.by},${k}`); best = 0; }
+  if (best < 0 && list.length) best = 0;
   if (best < 0) return;
   treasure = { bx: c.bx, by: c.by, k: best, islet: list[best] };
   scenery.showTreasure(c.bx, c.by, best, true);
@@ -1501,7 +1509,7 @@ const tick = (): void => {
         director.start(() => new DigActivity(citySeed(T.bx, T.by) + T.k * 101 + ++pirateCount), won => {
           mode = 'drive';
           if (!won) return;
-          dug.add(`${T.bx},${T.by},${T.k}`);
+          lastDug = `${T.bx},${T.by},${T.k}`;
           scenery.showTreasure(T.bx, T.by, T.k, false);
           treasure = null;
           maps = Math.max(0, maps - 1);

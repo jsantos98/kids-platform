@@ -173,5 +173,7 @@
  "say-bin-1": "C",
  "say-bin-2": "D",
  "say-pullover": "K",
- "say-latecomer": "C"
+ "say-latecomer": "C",
+ "say-doorsOpen": "G",
+ "say-doorsClose": "J"
 }

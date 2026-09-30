@@ -116,6 +116,20 @@ export class Pirates {
   /** a free spot in the island's open water, `away`–`far` m from (x, z)
    * (and, for a waypoint, within `reach` of the kid at (kx, kz)) */
   private spot(x: number, z: number, away: number, far = Infinity, kx = x, kz = z, reach = Infinity): { x: number; z: number } | null {
+    // (near a treasure islet first: the map a battle wins marks the nearest
+    // one, and it was a kilometre's sail away on the island's far side)
+    if (this.anchor) {
+      const a = this.spotIn(x, z, away, far, kx, kz, reach, this.anchor);
+      if (a) return a;
+    }
+    return this.spotIn(x, z, away, far, kx, kz, reach, null);
+  }
+
+  /** where the ships should stay near (world): the pirate mode's treasure
+   * islets not yet dug — null anywhere in the open water */
+  anchor: ((x: number, z: number) => boolean) | null = null;
+
+  private spotIn(x: number, z: number, away: number, far: number, kx: number, kz: number, reach: number, near: ((x: number, z: number) => boolean) | null): { x: number; z: number } | null {
     const coast = coastFor(this.bx, this.by), ox = this.bx * CITY_PITCH, oz = this.by * CITY_PITCH;
     for (let k = 0; k < 400; k++) {
       const th = this.r() * Math.PI * 2;
@@ -123,6 +137,7 @@ export class Pirates {
       const px = ox + s.x, pz = oz + s.z;
       const d = Math.hypot(px - x, pz - z);
       if (d < away || d > far || Math.hypot(px - kx, pz - kz) > reach) continue;
+      if (near && !near(px, pz)) continue;
       if (openWater(px, pz, 12)) return { x: px, z: pz };
     }
     return null;
@@ -138,7 +153,14 @@ export class Pirates {
   }
 
   private launch(s: Ship, kidX: number, kidZ: number, away: number, far: number): void {
-    const p = this.spot(kidX, kidZ, away, far) ?? this.spot(kidX, kidZ, away, far * 1.8) ?? this.spot(kidX, kidZ, 0);
+    // (near a treasure islet first — even further from the pirate — and only
+    // then anywhere in the open water)
+    // (never so far from the pirate that the next one is a long sail away:
+    // near an islet within far × 1.8 of it, else anywhere near it)
+    const a = this.anchor;
+    const p = (a ? this.spotIn(kidX, kidZ, away, far, kidX, kidZ, Infinity, a) ?? this.spotIn(kidX, kidZ, away, far * 1.8, kidX, kidZ, Infinity, a) : null)
+      ?? this.spotIn(kidX, kidZ, away, far, kidX, kidZ, Infinity, null) ?? this.spotIn(kidX, kidZ, away, far * 1.8, kidX, kidZ, Infinity, null)
+      ?? this.spotIn(kidX, kidZ, 0, Infinity, kidX, kidZ, Infinity, null);
     s.active = !!p;
     s.group.visible = s.icon.visible = !!p;
     if (!p) return;
@@ -222,7 +244,11 @@ export class Pirates {
     else {
       // (waypoints within 450 m of the kid: wandering the whole island they
       // drifted a kilometre off)
-      if (!s.way || Math.hypot(s.way.x - s.x, s.way.z - s.z) < 30) s.way = this.spot(s.x, s.z, 100, 300, kidX, kidZ, 450) ?? this.spot(s.x, s.z, 100);
+      if (!s.way || Math.hypot(s.way.x - s.x, s.way.z - s.z) < 30) {
+        const a = this.anchor;
+        s.way = (a ? this.spotIn(s.x, s.z, 100, 300, kidX, kidZ, 450, a) ?? this.spotIn(s.x, s.z, 60, 400, kidX, kidZ, 700, a) : null)
+          ?? this.spot(s.x, s.z, 100, 300, kidX, kidZ, 450) ?? this.spot(s.x, s.z, 100);
+      }
       want = s.way ? Math.atan2(s.way.x - s.x, s.way.z - s.z) : s.h;
       // (a speedboat weaves as it races: breaking the rules)
       if (s.kind === 'speeder') want += Math.sin(this.clock * 1.3 + s.len) * 0.7;

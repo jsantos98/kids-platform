@@ -14,6 +14,7 @@ import { rng, chunkSeed, type Rng } from '../../engine/rng.js';
 import { templateToMesh } from '../../engine/baked.js';
 import type { BakedTemplate } from '../../engine/assets.js';
 import { cityPlanFor, platformPoint, type Station } from '../../worlds/cityPlan.js';
+import { PLATFORM_MID, PLATFORM_EDGE } from './platform.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import type { Railway, Dwelling } from './railway.js';
 
@@ -46,6 +47,9 @@ interface Platform {
   face: number;
   /** seconds left of being cross: the kid's train rolled past (G6) */
   angry: number;
+  /** seconds the train now served has stood here, and its doors (world) */
+  servedT: number;
+  doors: Array<{ x: number; z: number }>;
 }
 
 export class Boarding {
@@ -74,8 +78,8 @@ export class Boarding {
     const plan = cityPlanFor(bx, by);
     plan.stations.forEach((st, i) => {
       const r = rng(chunkSeed(citySeed(bx, by), 0xb0a4, i));
-      const a = platformPoint(st, 0, 3.5), b = platformPoint(st, 0, 0);
-      const p: Platform = { st, riders: [], nextIn: 0, serving: null, r, face: Math.atan2(b.x - a.x, b.z - a.z), angry: 0 };
+      const a = platformPoint(st, 0, PLATFORM_MID), b = platformPoint(st, 0, 0);
+      const p: Platform = { st, riders: [], nextIn: 0, serving: null, r, face: Math.atan2(b.x - a.x, b.z - a.z), angry: 0, servedT: 0, doors: [] };
       const n = 2 + ((r() * (QUEUE - 1)) | 0);
       for (let k = 0; k < n; k++) this.addRider(p, true);
       this.platforms.push(p);
@@ -85,13 +89,13 @@ export class Boarding {
   /** a waiting spot on the platform (world): spread along it, a little in
    * from the track edge */
   private waitSpot(p: Platform): { x: number; z: number } {
-    const q = platformPoint(p.st, (p.r() - 0.5) * 12, 3.0 + p.r() * 1.0);
+    const q = platformPoint(p.st, (p.r() - 0.5) * 12, PLATFORM_MID - 0.5 + p.r() * 1.0);
     return { x: q.x + this.ox, z: q.z + this.oz };
   }
 
   /** a platform end (world), where newcomers arrive and leavers go */
   private endSpot(p: Platform): { x: number; z: number } {
-    const q = platformPoint(p.st, (p.r() < 0.5 ? -1 : 1) * 7.2, 3.5 + (p.r() - 0.5) * 1.6);
+    const q = platformPoint(p.st, (p.r() < 0.5 ? -1 : 1) * 7.2, PLATFORM_MID + (p.r() - 0.5) * 1.6);
     return { x: q.x + this.ox, z: q.z + this.oz };
   }
 
@@ -114,11 +118,20 @@ export class Boarding {
     for (const p of this.platforms) {
       p.angry = Math.max(0, p.angry - dt);
       const sx = p.st.x + this.ox, sz = p.st.z + this.oz;
-      const train: Dwelling | undefined = standing.find(d => d.passenger && d.doors.length && Math.hypot(d.x - sx, d.z - sz) < 3);
+      let train: Dwelling | undefined = standing.find(d => d.passenger && d.doors.length && Math.hypot(d.x - sx, d.z - sz) < 3);
       if (train && p.serving !== train.id) {
         // the doors open: a few riders step off, the queue heads for the doors
+        // (each door where it meets the platform's edge, not inside the train)
         p.serving = train.id;
+        p.servedT = 0;
         if (train.id === 'kid') this.boardedKid = 0;
+        const ux = Math.sin(p.st.h), uz = Math.cos(p.st.h);
+        train = { ...train, doors: train.doors.map(d => {
+          const along = (d.x - sx) * ux + (d.z - sz) * uz;
+          const q = platformPoint(p.st, along, PLATFORM_EDGE - 0.35);
+          return { x: q.x + this.ox, z: q.z + this.oz };
+        }) };
+        p.doors = train.doors;
         const off = 1 + ((p.r() * 3) | 0);
         for (let k = 0; k < off; k++) {
           const d = train.doors[k % train.doors.length];
@@ -134,7 +147,15 @@ export class Boarding {
           rd.goal = 'board';
           rd.tx = best.x; rd.tz = best.z;
         }
+      } else if (train && p.serving === train.id && p.doors.length) {
+        // (a newcomer arriving while the doors are open walks straight on)
+        for (const rd of p.riders) {
+          if (rd.goal !== 'wait') continue;
+          const d = p.doors[(p.r() * p.doors.length) | 0];
+          rd.goal = 'board'; rd.tx = d.x; rd.tz = d.z;
+        }
       }
+      if (train && p.serving === train.id) p.servedT += dt;
       if (!train && p.serving) {
         // gone: anyone still on the way to a door waits for the next one
         p.serving = null;
@@ -173,6 +194,14 @@ export class Boarding {
         if (!moving) rd.mesh.rotation.y = p.face; // waiting: face the track
       }
     }
+  }
+
+  /** the kid's train is being served: somebody is still getting off (the
+   * first 2 s) or on (the doors game waits for them, G6) */
+  kidBusy(): boolean {
+    const p = this.platforms.find(o => o.serving === 'kid');
+    if (!p) return false;
+    return p.servedT < 2 || p.riders.some(r => r.goal === 'board');
   }
 
   /** the kid's train rolled past the station at world (x, z) without

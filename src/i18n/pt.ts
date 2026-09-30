@@ -362,4 +362,12 @@ export const PT: Record<Key, string> = {
   'say.bin.1': 'Lá vai ele!',
   'say.bin.2': 'Mais um caixote! Muito bem!',
   'say.pullover': 'Polícia! Pare o barco!',
+  // ---- the train's doors (G6) ----
+  'keys.doors': 'portas (na estação)',
+  'train.openDoors': 'RODA O VOLANTE PARA A DIREITA: ABRE AS PORTAS! 🚪',
+  'train.closeDoors': 'RODA O VOLANTE PARA A ESQUERDA: FECHA AS PORTAS!',
+  'train.boarding': 'AS PORTAS…',
+  'train.waitCrossing': 'ESPERA! ESTÁ ALGUÉM NA PASSAGEM!',
+  'say.doorsOpen': 'Roda o volante para abrir as portas!',
+  'say.doorsClose': 'Já entraram todos! Fecha as portas!',
 };

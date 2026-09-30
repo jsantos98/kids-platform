@@ -683,6 +683,23 @@ export class IslandCars {
             if (c.s <= short + 0.3) holdAt = Math.min(holdAt, short);
           }
         }
+        // a level crossing just past the junction whose warning is on: don't
+        // turn into that street — once round the curve a car couldn't stop
+        // short of the boom, and drove on over the crossing in front of the
+        // train (R13, G5); it waits short of this junction instead
+        if (rail && !end.mouth && c.next !== undefined && c.next !== null && g.edges[c.next]) {
+          const next = g.edges[c.next];
+          const nd = next.a === end.id ? 1 : -1;
+          for (const cr of next.crossings) {
+            const stop = (nd > 0 ? cr.s : next.len - cr.s) - CROSSING_BOOM - 1.2;
+            if (stop > 45) continue;
+            if (!rail.crossingWarns(this.bx, this.by, cr.c.line, cr.c.d, elapsed)) continue;
+            const cw = cws.at(end.id, e.id);
+            const short = cw ? e.len - cw.far - 1.2 - c.len / 2 : e.len - TURN_IN - 0.05;
+            if (c.s <= short + 0.3) holdAt = Math.min(holdAt, short);
+            break;
+          }
+        }
         if (holdAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (holdAt - c.s) * 1.4));
         // a crosswalk with somebody waiting at it or on it: stop with the nose
         // 1.2 m short of the stripes — this street's at the junction ahead,

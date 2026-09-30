@@ -5,6 +5,39 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-30 — the train: clear platforms, safe crossings, and doors to open
+
+**The station roofs no longer cut into the train.** The platform canopy
+reached out over the track, and every train drove through it, the STOP board
+and the posts. The platform now starts further from the track and its roof
+covers only the platform, clear of the widest train in the game. A new check
+measures every train model and holds the platforms clear.
+
+**No more cars in front of the train.** The level crossings only started to
+close as the kid's train moved off, and cars could still turn into a crossing
+that was already closing. Now:
+- the crossings see the train coming, from its real front;
+- pulling away near a crossing, the train waits a moment while the booms come
+  down, and sounds its horn;
+- a car won't turn into a street whose crossing is closing;
+- if someone is still on a crossing ahead, the train waits and toots.
+
+A new check drives the kid's train through the city's traffic and fails if
+anyone is on a crossing as the train reaches it.
+
+**Stopping is easier, and the doors are the kid's job.** A stop counts
+anywhere along the platform, even well past the STOP board. Then the kid
+turns the wheel right and the doors slide open. The people get off and on.
+When everyone is aboard a bell rings, and turning the wheel left closes the
+doors: a star, and off we go. The train won't move while the doors are open,
+and if nobody turns the wheel the doors move by themselves after a while.
+
+| | |
+|---|---|
+| ![The platform clear of the train, its doors open, people boarding](history/2026-09-30-train/platform-doors.jpg) | ![The doors open along the train](history/2026-09-30-train/doors-open.jpg) |
+
+---
+
 ## 2026-09-29 (evening) — somewhere to take them: hospitals, a prison, two work trucks and a police boat
 
 **Everyone goes somewhere now.** Every island has hospitals, a prison, repair

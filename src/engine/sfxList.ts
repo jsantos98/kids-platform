@@ -96,6 +96,7 @@ export const SFX = {
   'bin-tip': { prompt: 'a wheelie bin tipped into a garbage truck, bags and bottles and cans tumbling and rattling in, cartoon, short', seconds: 1.5, loop: false },
   'bin-set': { prompt: 'an empty plastic wheelie bin set down on a pavement, a hollow plastic thunk, short', seconds: 0.6, loop: false },
   'truck-dump': { prompt: 'a garbage truck tipping its whole load out at a recycling depot, a long rumbling cascade of trash, bottles and cans, short', seconds: 2.5, loop: false },
+  'train-doors': { prompt: 'electric train sliding doors, a short pneumatic hiss and the doors sliding with a soft thud at the end, short', seconds: 1.5, loop: false },
   'jail-door': { prompt: 'a heavy barred jail door sliding shut with a clang and a lock clicking, cartoon, short', seconds: 1.2, loop: false },
   'ship-creak': { prompt: 'a wooden sailing ship at sea creaking gently, ropes and timber, soft waves against the hull, steady, no voices, seamless loop', seconds: 6, loop: true },
 } satisfies Record<string, SfxDef>;

@@ -22,7 +22,7 @@ export function keysHtml(e: GameEntry): string {
   const k = (keys: string, what: Key): string => `<span class="k"><b>${keys}</b> ${t(what)}</span>`;
   const [gas, brake] = GAS_BRAKE[drive];
   const parts = [
-    ...(drive === 'train' ? [] : [k('A D / ← →', 'keys.steer')]),
+    ...(drive === 'train' ? [k('A D / ← →', 'keys.doors')] : [k('A D / ← →', 'keys.steer')]),
     k('W / ↑', gas),
     k('S / ↓', brake),
     ...(siren ? [k('E', 'keys.siren')] : []),

@@ -361,6 +361,14 @@ export const EN = {
   'say.bin.1': 'In it goes!',
   'say.bin.2': 'Another bin! Well done!',
   'say.pullover': 'Police! Stop the boat!',
+  // ---- the train's doors (G6) ----
+  'keys.doors': 'doors (at a station)',
+  'train.openDoors': 'TURN THE WHEEL RIGHT: OPEN THE DOORS! 🚪',
+  'train.closeDoors': 'TURN THE WHEEL LEFT: CLOSE THE DOORS!',
+  'train.boarding': 'THE DOORS…',
+  'train.waitCrossing': 'WAIT! SOMEONE IS ON THE CROSSING!',
+  'say.doorsOpen': 'Turn the wheel to open the doors!',
+  'say.doorsClose': 'Everyone is aboard! Close the doors!',
 } as const;
 
 export type Key = keyof typeof EN;

@@ -177,7 +177,9 @@
     "say-towCentre": "cheer",
     "say-bin-1": "cheer",
     "say-bin-2": "cheer",
-    "say-pullover": "lively"
+    "say-pullover": "lively",
+    "say-doorsOpen": "lively",
+    "say-doorsClose": "lively"
   },
   "pt": {
     "mode-truck": "Camião dos Bombeiros",
@@ -353,7 +355,9 @@
     "say-towCentre": "Mantém o carro no meio!",
     "say-bin-1": "Lá vai ele!",
     "say-bin-2": "Mais um caixote! Muito bem!",
-    "say-pullover": "Polícia! Pare o barco!"
+    "say-pullover": "Polícia! Pare o barco!",
+    "say-doorsOpen": "Roda o volante para abrir as portas!",
+    "say-doorsClose": "Já entraram todos! Fecha as portas!"
   },
   "en": {
     "mode-truck": "Fire Truck",
@@ -529,6 +533,8 @@
     "say-towCentre": "Keep the car in the middle!",
     "say-bin-1": "In it goes!",
     "say-bin-2": "Another bin! Well done!",
-    "say-pullover": "Police! Stop the boat!"
+    "say-pullover": "Police! Stop the boat!",
+    "say-doorsOpen": "Turn the wheel to open the doors!",
+    "say-doorsClose": "Everyone is aboard! Close the doors!"
   }
 }

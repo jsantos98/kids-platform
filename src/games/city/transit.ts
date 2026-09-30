@@ -13,6 +13,7 @@ import { riverDecksFor, riverDeckProfile, type RiverDeck } from '../../worlds/ri
 import { riverFor, type RiverRoute } from '../../worlds/riverRoute.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor, platformSide, type Crossing, type Station } from '../../worlds/cityPlan.js';
+import { PLATFORM_EDGE, PLATFORM_W, PLATFORM_MID, PLATFORM_LEN, CANOPY_IN, CANOPY_OUT, CANOPY_Y, STOP_POST, STOP_HALF } from './platform.js';
 import { citySeed } from '../../worlds/cityGrid.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
 import type { Railway } from './railway.js';
@@ -186,40 +187,49 @@ export class Transit {
     return inst;
   }
 
-  // ---- station platform beside a straight stretch of the line ----
+  // ---- station platform beside a straight stretch of the line: the deck,
+  // its canopy, posts and STOP board all clear of the widest train
+  // (platform.ts) ----
   private bakeStation(B: Baked, st: Station, r: () => number, ox: number, oz: number, inst: CityInst): void {
     const side = platformSide(st);
-    const nx = Math.cos(st.h), nz = -Math.sin(st.h);   // right of travel
-    const px = ox + st.x + nx * 3.5 * side, pz = oz + st.z + nz * 3.5 * side;
-    B.box(3.4, 0.36, 15, WOOD, px, 0.28, pz, 0, st.h, 0);
-    B.box(0.55, 0.05, 15, CREAM, px - nx * 1.5 * side, 0.48, pz - nz * 1.5 * side, 0, st.h, 0);
-    // canopy posts + roof
-    for (const [al, ac] of [[5.4, 1.35], [5.4, -1.35], [-5.4, 1.35], [-5.4, -1.35]]) {
-      B.cyl(0.09, 0.11, 3.1, 8, STEEL, px + Math.sin(st.h) * al + nx * ac, 1.55, pz + Math.cos(st.h) * al + nz * ac);
+    const nx = Math.cos(st.h) * side, nz = -Math.sin(st.h) * side;   // toward the platform
+    const ux = Math.sin(st.h), uz = Math.cos(st.h);
+    const at = (along: number, across: number): [number, number] => [ox + st.x + ux * along + nx * across, oz + st.z + uz * along + nz * across];
+    const [px, pz] = at(0, PLATFORM_MID);
+    B.box(PLATFORM_W, 0.36, PLATFORM_LEN, WOOD, px, 0.28, pz, 0, st.h, 0);
+    const [ex, ez] = at(0, PLATFORM_EDGE + 0.3);
+    B.box(0.55, 0.05, PLATFORM_LEN, CREAM, ex, 0.48, ez, 0, st.h, 0);
+    // canopy posts + roof (over the platform only)
+    for (const [al, ac] of [[5.4, 1.0], [5.4, -1.0], [-5.4, 1.0], [-5.4, -1.0]]) {
+      const [cx, cz] = at(al, PLATFORM_MID + ac);
+      B.cyl(0.09, 0.11, 3.1, 8, STEEL, cx, 1.55, cz);
     }
-    B.box(4.4, 0.16, 13.5, CREAM, px, 3.15, pz, 0, st.h, 0);
+    const [rx, rz] = at(0, (CANOPY_IN + CANOPY_OUT) / 2);
+    B.box(CANOPY_OUT - CANOPY_IN, 0.16, 13.5, CREAM, rx, CANOPY_Y, rz, 0, st.h, 0);
     // two benches + a name sign
     for (const al of [2.2, -2.2]) {
-      B.box(1.6, 0.09, 0.45, 0xa9805a, px + Math.sin(st.h) * al, 0.62, pz + Math.cos(st.h) * al, 0, st.h, 0);
+      const [bx, bz] = at(al, PLATFORM_MID + 0.4);
+      B.box(1.6, 0.09, 0.45, 0xa9805a, bx, 0.62, bz, 0, st.h, 0);
     }
-    const sx = px + nx * 0.4 * side, sz = pz + nz * 0.4 * side;
-    B.cyl(0.06, 0.08, 2.6, 8, STEEL, sx + Math.sin(st.h) * 6.8, 1.3, sz + Math.cos(st.h) * 6.8);
-    B.cyl(0.55, 0.55, 0.08, 12, 0x4a90d9, sx + Math.sin(st.h) * 6.8, 2.5, sz + Math.cos(st.h) * 6.8, Math.PI / 2, st.h, 0);
-    // the stop board: a train's head stops level with it (the kid's train
-    // opens its doors there) — a yellow board on a post at the platform's
-    // track edge, and a yellow line painted across the platform
+    const [sx, sz] = at(6.8, PLATFORM_MID + 0.4);
+    B.cyl(0.06, 0.08, 2.6, 8, STEEL, sx, 1.3, sz);
+    B.cyl(0.55, 0.55, 0.08, 12, 0x4a90d9, sx, 2.5, sz, Math.PI / 2, st.h, 0);
+    // the stop board: a train's head stops level with it — a yellow board on
+    // a post near the platform's track edge, and a yellow line painted
+    // across the platform
     {
-      const bx = ox + st.x + nx * 1.9 * side, bz = oz + st.z + nz * 1.9 * side;
+      const [bx, bz] = at(0, STOP_POST);
       B.cyl(0.07, 0.07, 2.4, 8, STEEL, bx, 1.2, bz);
-      B.box(0.12, 0.8, 1.1, 0xffd23f, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
-      B.box(0.14, 0.18, 1.12, 0x2b2b2b, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
-      B.box(3.2, 0.02, 0.35, 0xffd23f, px, 0.47, pz, 0, st.h, 0);
+      B.box(0.12, 0.8, STOP_HALF * 2, 0xffd23f, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
+      B.box(0.14, 0.18, STOP_HALF * 2 + 0.02, 0x2b2b2b, bx, 2.35, bz, 0, st.h + Math.PI / 2, 0);
+      B.box(PLATFORM_W - 0.2, 0.02, 0.35, 0xffd23f, px, 0.47, pz, 0, st.h, 0);
     }
     // platform collision: approximate AABB of the rotated deck
     const alongZ = Math.abs(Math.sin(st.h)) > Math.abs(Math.cos(st.h));
+    const hw = PLATFORM_W / 2 + 0.1, hl = PLATFORM_LEN / 2 + 0.3;
     inst.boxes.push({
-      x1: px - (alongZ ? 1.8 : 7.8), x2: px + (alongZ ? 1.8 : 7.8),
-      z1: pz - (alongZ ? 7.8 : 1.8), z2: pz + (alongZ ? 7.8 : 1.8),
+      x1: px - (alongZ ? hw : hl), x2: px + (alongZ ? hw : hl),
+      z1: pz - (alongZ ? hl : hw), z2: pz + (alongZ ? hl : hw),
     });
   }
 

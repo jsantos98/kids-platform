@@ -63,6 +63,12 @@ const PASSENGER_SETS = [
   ['train-electric-subway-a', 'train-electric-subway-b', 'train-electric-subway-c'],
 ].map(set => set.map(T));
 const PASSENGER = PASSENGER_SETS[0];
+/** every model a train is built from, at its length (tools/check-trains.ts
+ * holds the platforms clear of the widest) */
+export const TRAIN_MODELS: Array<{ url: string; len: number }> = [
+  ...LOCOS.map(url => ({ url, len: LOCO_LEN })), ...CARS.map(url => ({ url, len: CAR_LEN })),
+  ...PASSENGER_SETS.flat().map(url => ({ url, len: CAR_LEN + 1.5 })),
+];
 /** how far along a platform a door may stand from the stop point and still
  * be served (the platform runs 7.5 m either side) */
 const PLATFORM_REACH = 10;
@@ -429,6 +435,15 @@ interface Kid {
   v: number;
   spec: ConsistSpec;
   view: View | null;
+  /** its doors are open at a platform: it can't move (the doors game, G6) */
+  doorsOpen: boolean;
+  /** pulling away from a standstill near a level crossing: held this long
+   * more while the booms come down (R13) */
+  hold: number;
+  /** it means to go: gas held, or rolling */
+  going: boolean;
+  /** held for somebody on a crossing ahead (R13) */
+  blocked: boolean;
 }
 
 export class Railway {
@@ -458,8 +473,32 @@ export class Railway {
     this.kid = {
       line, bx, by, s: seg.dir > 0 ? arc : seg.route.total - arc, v: 0,
       spec: { units: PASSENGER.map((url, k) => ({ url, len: CAR_LEN + 1.5, back: k * (CAR_LEN + 1.5 + GAP) })), length: 3 * (CAR_LEN + 1.5 + GAP), passenger: true },
-      view: null,
+      view: null, doorsOpen: false, hold: 0, going: false, blocked: false,
     };
+  }
+
+  /** the kid's train's drawn units (null until each model is in) */
+  kidUnits(): Array<THREE.Object3D | null> { return this.kid?.view?.objs ?? []; }
+
+  /** open or shut the kid's train's doors (G6): open, it can't move */
+  setKidDoors(open: boolean): void { if (this.kid) this.kid.doorsOpen = open; }
+
+  /** the kid's train is held for a moment before pulling away (the booms
+   * coming down at a crossing ahead), or for somebody on a crossing */
+  kidHeld(): { departing: boolean; blocked: boolean } {
+    return { departing: (this.kid?.hold ?? 0) > 0, blocked: !!this.kid?.blocked };
+  }
+
+  /** who is on the road at world (x, z) within r — the kid's train waits for
+   * anybody on a crossing ahead (index.ts hands it the islands' cars and
+   * walkers) */
+  obstacleAt: ((x: number, z: number, r: number) => boolean) | null = null;
+
+  /** where the kid's train's doors are, as arcs back from its pose point */
+  private kidDoorArcs(): number[] {
+    const out: number[] = [];
+    for (const u of this.kid?.spec.units ?? []) for (const f of [0.3, 0.7]) out.push(u.back + u.len * f - u.len / 2);
+    return out;
   }
 
   setControls(gas: number, brake: number, stationGap = Infinity): void {
@@ -483,20 +522,28 @@ export class Railway {
     return u ? u.len / 2 - u.back : 0;
   }
 
-  /** the next station ahead of the kid's train: world position + gap */
-  nextStation(skip = 0): { x: number; z: number; gap: number } | null {
+  /** the next station ahead of the kid's train: world position, the gap
+   * from its nose to the stop board (negative once past it), and whether it
+   * stands at the platform — any of its doors within reach of the stop
+   * point, however far past the board it came to a halt (the kid doesn't
+   * judge distances: G6). A station counts as behind once the last door is
+   * past the platform. */
+  nextStation(skip = 0): { x: number; z: number; gap: number; at: boolean } | null {
     const k = this.kid;
     if (!k) return null;
+    const doors = this.kidDoorArcs(), nose = this.kidNose();
+    const lastDoor = Math.max(...doors), firstDoor = Math.min(...doors);
     let bx = k.bx, by = k.by, off = -k.s, found = 0;
     for (let hop = 0; hop < 4; hop++) {
       const seg = segment(bx, by, k.line.kind);
       for (const st of seg.stops) {
         if (!st.station) continue;
-        const gap = off + st.s;
-        if (gap < -12) continue;
+        const rel = off + st.s;          // the stop point ahead of the pose point
+        if (rel < -lastDoor - PLATFORM_REACH) continue;
         if (found++ < skip) continue;
         const p = this.pose(k.line.kind, bx, by, st.s);
-        return { x: p.x, z: p.z, gap: Math.max(0, gap) };
+        const at = rel <= -firstDoor + PLATFORM_REACH && rel >= -lastDoor - PLATFORM_REACH;
+        return { x: p.x, z: p.z, gap: rel - nose, at };
       }
       off += seg.route.total;
       [bx, by] = stepIsland(k.line.kind, bx, by, 1);
@@ -610,10 +657,21 @@ export class Railway {
       const di = kind === 'ns' ? kd.by - by : kd.bx - bx;
       if (Math.abs(di) <= 1) {
         const off = di === 0 ? 0 : di < 0 ? -segment(kd.bx, kd.by, kind).route.total : seg.route.total;
-        const head = kd.s + off, tail = head - kd.spec.length;
-        // (the kid drives it: down while it's on the crossing, close to it,
-        // or near and moving toward it)
-        if (tail - 2 <= sD && (head >= sD || sD - head < 20 || (sD - head < warn && kd.v > 0.5))) return true;
+        // (from its real nose and tail — the pose point is the first car's
+        // middle, 4.5 m behind the nose)
+        const last = kd.spec.units[kd.spec.units.length - 1];
+        const nose = kd.s + off + this.kidNose(), tail = kd.s + off - last.back - last.len / 2;
+        if (tail - 2 > sD) return false;                // gone past
+        if (nose >= sD - 1) return true;                // on it
+        // standing with its doors open, or standing still with no mind to go,
+        // it can't reach the crossing: it doesn't hold it down (R13)
+        if (kd.doorsOpen || (!kd.going && kd.v < 0.3 && kd.hold <= 0)) return false;
+        // how far it can get in `lead` s from here, pulling away flat out
+        const v = kd.v, tA = Math.max(0, (PLAYER_MAX - v) / PLAYER_ACCEL);
+        const reach = lead <= tA ? v * lead + 0.5 * PLAYER_ACCEL * lead * lead
+          : v * tA + 0.5 * PLAYER_ACCEL * tA * tA + PLAYER_MAX * (lead - tA);
+        const ahead = sD - nose;
+        if (ahead < Math.min(warn, reach + 3)) return true;
       }
     }
     return false;
@@ -633,7 +691,9 @@ export class Railway {
       const doors: Array<{ x: number; z: number }> = [];
       for (const u of spec.units) {
         for (const f of [0.3, 0.7]) {
-          const p = this.pose(kind, sbx, sby, s - u.back - u.len * f);
+          // (a unit's middle sits u.back behind the train's pose point: its
+          // doors a fifth of its length either side of it)
+          const p = this.pose(kind, sbx, sby, s - u.back - u.len * (f - 0.5));
           if (Math.hypot(p.x - stop.x, p.z - stop.z) < PLATFORM_REACH) doors.push({ x: p.x, z: p.z });
         }
       }
@@ -653,9 +713,10 @@ export class Railway {
       }
     }
     const k = this.kid;
-    if (k && k.bx === bx && k.by === by && k.v < 0.3) {
+    if (k && k.bx === bx && k.by === by && k.v < 0.3 && k.doorsOpen) {
       const seg = segment(k.bx, k.by, 'ns');
-      const st = seg.stops.find(o => o.station && Math.abs(o.s - k.s) < 12);
+      const doors = this.kidDoorArcs();
+      const st = seg.stops.find(o => o.station && doors.some(d => Math.abs(o.s - (k.s - d)) < PLATFORM_REACH));
       if (st) {
         const stop = this.pose('ns', k.bx, k.by, st.s);
         out.push({ id: 'kid', passenger: true, x: stop.x, z: stop.z, doors: doorsOf(k.spec, 'ns', k.bx, k.by, k.s, stop) });
@@ -739,6 +800,34 @@ export class Railway {
     const seg = segment(k.bx, k.by, 'ns');
     const { gas, brake } = this.controls;
     let vTarget = gas > 0.05 ? PLAYER_MAX : brake > 0.05 ? 0 : Math.max(0, k.v - 0.5);
+    // the doors open: it stays put (G6)
+    if (k.doorsOpen) vTarget = 0;
+    const wantGo = gas > 0.05 && !k.doorsOpen;
+    // pulling away from a standstill with a level crossing within 60 m
+    // ahead: first the warning — the lamps, the booms coming down — then it
+    // goes (R13: a car right at the crossing when it set off was hit)
+    const plan = cityPlanFor(k.bx, k.by);
+    const nose = k.s + this.kidNose();
+    const crossAhead = plan.crossings.filter(c => c.line === 0)
+      .map(c => ({ c, sD: seg.dir > 0 ? c.d : seg.route.total - c.d }))
+      .filter(o => o.sD - nose > -2)
+      .sort((a, b) => a.sD - b.sD);
+    if (wantGo && k.v < 0.3 && !k.going && k.hold <= 0 && crossAhead.some(o => o.sD - nose < CROSSING_WARN)) k.hold = 2.6;
+    k.going = wantGo || k.v > 0.3;
+    if (k.hold > 0) { k.hold -= dt; vTarget = 0; }
+    // somebody on a crossing ahead within its stopping distance (and some):
+    // it waits, short of it (R13)
+    k.blocked = false;
+    if (this.obstacleAt) {
+      const reachStop = (k.v * k.v) / (2 * PLAYER_BRAKE) + 12;
+      for (const o of crossAhead) {
+        const ahead = o.sD - nose;
+        if (ahead > reachStop || ahead < -1) continue;
+        const p = this.pose('ns', k.bx, k.by, o.sD);
+        if (this.obstacleAt(p.x, p.z, 5)) { k.blocked = true; vTarget = Math.min(vTarget, Math.max(0, (ahead - 5) * 0.8)); }
+        break;
+      }
+    }
     const net = railNetFor(k.bx, k.by);
     const sD = seg.dir > 0 ? net.diamond.d[0] : seg.route.total - net.diamond.d[0];
     const toD = sD - k.s;                 // head to the diamond

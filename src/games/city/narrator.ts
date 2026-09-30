@@ -20,7 +20,7 @@ export const MOMENTS = ['start', 'call', 'arrive', 'praise', 'gate', 'gateTwo', 
   'raceCount', 'lastLap', 'place', 'raceUp', 'raceDown', 'raceLead', 'almost', 'station', 'brake', 'missed', 'night', 'morning',
   'flame', 'catMoved', 'hearts', 'chaseRun', 'hold',
   'shipSpotted', 'battle', 'shipHit', 'sunk', 'surrender', 'treasureMap', 'dig', 'treasure',
-  'toDest', 'delivered', 'first', 'towCentre', 'bin', 'pullover'] as const;
+  'toDest', 'delivered', 'first', 'towCentre', 'bin', 'pullover', 'doorsOpen', 'doorsClose'] as const;
 export type Moment = typeof MOMENTS[number];
 
 /** how many variants each moment has (say.<moment>.<n>) */
@@ -31,7 +31,7 @@ const VARIANTS: Partial<Record<Moment, number>> = {
 /** the fewest seconds between two lines of the same kind of moment */
 const COOLDOWN: Partial<Record<Moment, number>> = {
   arrive: 8, gate: 6, oops: 10, call: 6, praise: 3, spotted: 15, closing: 8, dashed: 6, raceUp: 3, raceDown: 12, raceLead: 25, brake: 20, flame: 7, catMoved: 8, hold: 6,
-  shipSpotted: 20, shipHit: 2.5, first: 8, towCentre: 10, bin: 2.5,
+  shipSpotted: 20, shipHit: 2.5, doorsOpen: 6, doorsClose: 6, first: 8, towCentre: 10, bin: 2.5,
 };
 /** moments that cut in over whatever is being said */
 const URGENT = new Set<Moment>(['start', 'raceCount', 'place', 'lastLap', 'brake', 'missed']);

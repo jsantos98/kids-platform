@@ -340,6 +340,11 @@
     "seconds": 2.5,
     "loop": false
   },
+  "train-doors": {
+    "prompt": "electric train sliding doors, a short pneumatic hiss and the doors sliding with a soft thud at the end, short",
+    "seconds": 1.5,
+    "loop": false
+  },
   "jail-door": {
     "prompt": "a heavy barred jail door sliding shut with a clang and a lock clicking, cartoon, short",
     "seconds": 1.2,

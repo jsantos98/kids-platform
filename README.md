@@ -53,7 +53,7 @@ and carries on from a spot just behind.
 | 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
 | 🚨 Police boat | Chase the speedboats breaking the rules and the pirate ship; stay in their wake till they give up, then bring them to the police pier |
 | 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |
-| 🚆 Train | Drive the train and stop at the yellow STOP board — passengers get on and off; nothing brakes for you, and roll past it and the people waiting are cross |
+| 🚆 Train | Drive the train and stop at the platform, then turn the wheel to open the doors: passengers get off and on. When everyone is aboard, turn the wheel back to close the doors and drive on. Roll past the platform and the people waiting are cross |
 | 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
 
 | | |
@@ -217,6 +217,8 @@ npx tsx tools/check-traffic.ts        # the traffic never jams
 npx tsx tools/check-i18n.ts           # every text is translated
 npx tsx tools/check-scenes.ts         # every mission scene can be won and can't be lost
 npx tsx tools/check-landmarks.ts      # every island has its hospitals, prison, repair shops, depot
+npx tsx tools/check-trains.ts         # the platforms clear every train, the doors game always ends
+npx tsx tools/check-traffic.ts --kid  # nobody on a crossing as the kid's train arrives
 npx tsx tools/plan-hash.ts            # for refactors: the cities must not change
 ```
 

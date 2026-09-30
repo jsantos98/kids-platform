@@ -12,8 +12,11 @@
 // walkers meet the level crossings' warnings as they do in the game — run
 // without them, the check never saw a crossing gridlock the streets round
 // it; --island=bx,by picks the island(s) (default 1,0 and 2,2; repeat the
-// flag for more).
-// Run: npx tsx tools/check-traffic.ts [baseSeed] [--robbers] [--no-rail] [--island=bx,by]
+// flag for more). With --kid the kid's train drives the island's north-south
+// line among them (full gas, stopping at each station with its doors open
+// 10 s) and it fails if anybody is on a level crossing as the train's nose
+// reaches it (R13).
+// Run: npx tsx tools/check-traffic.ts [baseSeed] [--robbers] [--kid] [--no-rail] [--island=bx,by]
 import * as THREE from 'three';
 import { setCityBase, CITY_PITCH } from '../src/worlds/cityGrid.js';
 import { IslandCars } from '../src/games/city/island/cars.js';
@@ -21,9 +24,11 @@ import { IslandWalkers } from '../src/games/city/island/walkers.js';
 import { Robber } from '../src/games/city/robber.js';
 import { overlapDepth } from '../src/games/city/island/obb.js';
 import { Railway } from '../src/games/city/railway.js';
+import { cityPlanFor } from '../src/worlds/cityPlan.js';
 
 const base = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 7) | 0;
 const withRobbers = process.argv.includes('--robbers');
+const withKid = process.argv.includes('--kid');
 const railway = process.argv.includes('--no-rail') ? null : new Railway(new THREE.Scene());
 const picked = process.argv.filter(a => a.startsWith('--island=')).map(a => a.slice(9).split(',').map(Number) as [number, number]);
 const ISLANDS: Array<readonly [number, number]> = picked.length ? picked : [[1, 0], [2, 2]];
@@ -52,6 +57,14 @@ for (const [bx, by] of ISLANDS) {
   const inside = new Map<number, number>();
   const robberMoved = robbers.map(() => 0), robberPos = robbers.map(r => [r.x, r.z]);
   let robberStill = 0;
+  // the kid's train (--kid): on the north-south line, 150 m in from the rim
+  const rail = railway;
+  const kidCross = withKid && rail ? cityPlanFor(bx, by).crossings.filter(c => c.line === 0).map(c => ({ x: c.x + ox, z: c.z + oz, near: false })) : [];
+  let kidHits = 0, kidPasses = 0, kidDoorsT = -1, kidDone: { x: number; z: number } | null = null, kidMoved = 0, kidStill = 0;
+  if (withKid && rail) {
+    rail.addPlayer(bx, by, 150);
+    rail.obstacleAt = (x, z, r) => cars.cars.some(c => Math.hypot(c.x - x, c.z - z) < r) || walkers.walkers.some(w => Math.hypot(w.x - x, w.z - z) < r);
+  }
   for (let k = 0; k < STEPS; k++) {
     t += DT;
     const chasers = robbers.map(r => r.chaser()!).filter(Boolean);
@@ -86,6 +99,35 @@ for (const [bx, by] of ISLANDS) {
       robberStill = Math.max(robberStill, t - robberMoved[i]);
     });
     walkers.update(DT, t, railway, null, null, false, cars.cars);
+    if (withKid && rail) {
+      // the kid, simply: full gas, brake for the next station, doors 10 s
+      const pose = rail.playerPose()!;
+      let stn = rail.nextStation(0);
+      if (stn && kidDone && Math.hypot(stn.x - kidDone.x, stn.z - kidDone.z) < 1) stn = rail.nextStation(1);
+      let gas = 1, brake = 0;
+      if (kidDoorsT >= 0) {
+        gas = 0; brake = 1;
+        if (t - kidDoorsT > 10) { rail.setKidDoors(false); kidDone = stn ? { x: stn.x, z: stn.z } : null; kidDoorsT = -1; }
+      } else if (stn && stn.at && pose.v < 0.5) {
+        rail.setKidDoors(true); kidDoorsT = t; gas = 0; brake = 1;
+      } else if (stn && stn.gap > -5 && pose.v * pose.v / (2 * 5) > stn.gap + 2) { gas = 0; brake = 1; }
+      rail.setControls(gas, brake);
+      rail.update(DT, t, pose.x, pose.z);
+      // the nose reaching a crossing: nobody on it
+      const p2 = rail.playerPose()!;
+      const nx = p2.x + Math.sin(p2.h) * rail.kidNose(), nz = p2.z + Math.cos(p2.h) * rail.kidNose();
+      for (const c of kidCross) {
+        const near = Math.hypot(nx - c.x, nz - c.z) < 3;
+        if (near && !c.near) {
+          kidPasses++;
+          const who = cars.cars.filter(o => Math.hypot(o.x - c.x, o.z - c.z) < 5).length + walkers.walkers.filter(w => Math.hypot(w.x - c.x, w.z - c.z) < 5).length;
+          if (who) { kidHits++; if (process.env.TRACE) console.log(`    TRACE t=${t.toFixed(1)} ${who} on the crossing at ${c.x.toFixed(0)},${c.z.toFixed(0)} as the train came`); }
+        }
+        c.near = near;
+      }
+      if (p2.v > 0.3 || kidDoorsT >= 0) kidMoved = t;
+      kidStill = Math.max(kidStill, t - kidMoved);
+    }
     cars.cars.forEach((c, i) => {
       if (Math.hypot(c.x - cPos[i][0], c.z - cPos[i][1]) > 0.5) { cPos[i] = [c.x, c.z]; cMove[i] = t; }
       stillCar = Math.max(stillCar, t - cMove[i]);
@@ -104,8 +146,10 @@ for (const [bx, by] of ISLANDS) {
   }
   // (cars meeting on a junction's curves pass close; 1.5 m apart is one car in another)
   const robberBad = withRobbers && (robberLongest > THROUGH || robberStill >= STILL);
-  const bad = stillCar >= STILL || stillWalker >= STILL || overlaps / samples > 0.5 || robberBad;
+  const kidBad = withKid && (kidHits > 0 || kidStill >= STILL);
+  const bad = stillCar >= STILL || stillWalker >= STILL || overlaps / samples > 0.5 || robberBad || kidBad;
   if (bad) fails++;
+  if (withKid) console.log(`  the kid's train: ${kidPasses} crossings passed, somebody on it ${kidHits} times; longest held ${kidStill.toFixed(0)} s`);
   if (withRobbers) console.log(`  getaway cars: grazing a car (deeper than ${GRAZE} m) in ${robberHits} of ${robberFrames} frames, deepest ${robberDeepest.toFixed(2)} m, longest ${robberLongest.toFixed(2)} s (through a car: over ${THROUGH} s); longest standing still ${robberStill.toFixed(0)} s`);
   console.log(`${bad ? 'FAIL' : 'PASS'} island ${bx},${by}: ${cars.cars.length} cars, ${walkers.walkers.length} walkers; longest standing still: a car ${stillCar.toFixed(0)} s, a walker ${stillWalker.toFixed(0)} s; cars inside each other ${(overlaps / samples).toFixed(2)} per sample (${((performance.now() - t0) / 1000).toFixed(1)} s)`);
 }

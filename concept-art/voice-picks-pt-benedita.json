@@ -169,8 +169,9 @@
  "say-first-repair": "D",
  "say-first-depot": "D",
  "say-first-pier": "D",
+ "say-towCentre": "I",
  "say-bin-1": "C",
  "say-bin-2": "D",
- "say-towCentre": "I",
- "say-pullover": "K"
+ "say-pullover": "K",
+ "say-latecomer": "C"
 }

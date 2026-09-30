@@ -5,6 +5,23 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-09-30 (later) — the train's doors get their own scene
+
+The doors game now plays like every other mission: when the train stops at
+a platform, the view fades into the station. The kid turns the wheel right
+and the doors slide open. The people get off and walk away, and the queue
+(a dog or a cat among them sometimes) walks in one by one. Now and then
+someone comes running late and everybody waits for them. When everyone is
+aboard the bell rings; the kid turns the wheel left, the doors close, the
+guard waves and the train eases forward. Then it fades back to the world
+and the train can go on.
+
+| |
+|---|
+| ![The station scene: the doors open, people walking in](history/2026-09-30-train/doors-scene.jpg) |
+
+---
+
 ## 2026-09-30 — the train: clear platforms, safe crossings, and doors to open
 
 **The station roofs no longer cut into the train.** The platform canopy

@@ -370,4 +370,6 @@ export const PT: Record<Key, string> = {
   'train.waitCrossing': 'ESPERA! ESTÁ ALGUÉM NA PASSAGEM!',
   'say.doorsOpen': 'Roda o volante para abrir as portas!',
   'say.doorsClose': 'Já entraram todos! Fecha as portas!',
+  'train.latecomer': 'ESPERA! VEM AÍ MAIS UM! 🏃',
+  'say.latecomer': 'Espera! Vem aí mais um!',
 };

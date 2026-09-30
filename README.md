@@ -53,7 +53,7 @@ and carries on from a spot just behind.
 | 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
 | 🚨 Police boat | Chase the speedboats breaking the rules and the pirate ship; stay in their wake till they give up, then bring them to the police pier |
 | 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |
-| 🚆 Train | Drive the train and stop at the platform, then turn the wheel to open the doors: passengers get off and on. When everyone is aboard, turn the wheel back to close the doors and drive on. Roll past the platform and the people waiting are cross |
+| 🚆 Train | Drive the train and stop at the platform. In the station scene, turn the wheel to open the doors and the passengers get off and on; when everyone is aboard, turn it back to close them and drive on. Roll past the platform and the people waiting are cross |
 | 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
 
 | | |
@@ -72,7 +72,7 @@ only input there, and nothing can be lost: sweep the hose over flames that
 flare up one after another, drive the ladder truck under the cat (or the
 people at the windows) and watch the ladder rise, steer the stretcher round
 cones, puddles and a dog while picking up hearts, hold the helicopter against
-the wind over the person, chase the robber across a town square, swing the pirate ship's cannon in a sea battle, follow the treasure detector's beeps to the chest, keep a broken-down car in line as the winch pulls it onto the tow truck, stop the garbage truck's grabber at each bin, or keep the police boat in a speedboat's wake.
+the wind over the person, chase the robber across a town square, swing the pirate ship's cannon in a sea battle, follow the treasure detector's beeps to the chest, keep a broken-down car in line as the winch pulls it onto the tow truck, stop the garbage truck's grabber at each bin, keep the police boat in a speedboat's wake, or open and close the train's doors at a station.
 
 | | |
 |---|---|
@@ -82,6 +82,7 @@ the wind over the person, chase the robber across a town square, swing the pirat
 | ![The sea battle](docs/screenshots/scene-battle.jpg) | ![Digging up the treasure](docs/screenshots/scene-dig.jpg) |
 | ![The tow: the winch and the ramps](docs/screenshots/scene-tow.jpg) | ![The pull-over](docs/screenshots/scene-pullover.jpg) |
 | ![The bins: the grabber tips one in](docs/screenshots/scene-bins.jpg) | ![The prison: the thief is led in](docs/screenshots/prison.jpg) |
+| ![The station: the train's doors open](docs/screenshots/scene-doors.jpg) | |
 
 ## How to play
 
@@ -154,7 +155,7 @@ The game page is `play/city.html`.
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |
 | `?time=night\|dusk\|noon\|22` | start at a time of day (a name or an hour; every game starts at 8:00) |
-| `?scene=fire\|cat\|rescue\|patient\|caught\|tow\|bins\|pullover\|battle\|dig` | open a mission scene straight away |
+| `?scene=fire\|cat\|rescue\|patient\|caught\|tow\|bins\|pullover\|doors\|battle\|dig` | open a mission scene straight away |
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |
 

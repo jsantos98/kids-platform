@@ -58,7 +58,10 @@ export type SceneCue =
   | 'strap'      // the car strapped onto the bed
   | 'drift'      // the towed car pulled off its line ("keep it in the middle!")
   | 'tip'        // a bin tipped into the garbage truck
-  | 'binSet';    // an emptied bin set back down
+  | 'binSet'     // an emptied bin set back down
+  | 'doorsSlide' // the train's doors slide open or shut (G6)
+  | 'bell'       // everyone aboard: the bell
+  | 'latecomer'; // somebody running late for the train
 
 /** a sound a scene keeps going while it wants it */
 export type SceneLoop = 'pump' | 'ladder' | 'winch' | 'steps' | 'rotor' | 'crackle' | 'waves';

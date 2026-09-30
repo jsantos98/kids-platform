@@ -30,6 +30,7 @@ import { DigActivity } from '../src/games/city/activity/dig.js';
 import { TowActivity } from '../src/games/city/activity/tow.js';
 import { BinsActivity } from '../src/games/city/activity/bins.js';
 import { PullOverActivity } from '../src/games/city/activity/pullover.js';
+import { DoorsActivity } from '../src/games/city/activity/doors.js';
 
 interface Case { name: string; make: (seed: number) => Activity; limit: number; steers: boolean; escapes?: number }
 
@@ -52,6 +53,7 @@ const CASES: Case[] = [
   { name: 'tow: broken-down car', make: s => new TowActivity(s), limit: 20, steers: true },
   { name: 'bins: garbage truck', make: s => new BinsActivity(s), limit: 25, steers: true },
   { name: 'pull-over: speedboat', make: s => new PullOverActivity(s, 'speeder'), limit: 12, steers: true },
+  { name: 'doors: station', make: s => new DoorsActivity(s), limit: 25, steers: true },
   { name: 'pull-over: pirates', make: s => new PullOverActivity(s, 'rival'), limit: 12, steers: true },
 ];
 const SEEDS = [1, 2, 3, 7, 11, 42];

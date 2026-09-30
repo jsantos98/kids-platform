@@ -42,7 +42,6 @@ import { setCityBase, citySeed, cityAt, cityBase, CITY_PITCH, type CityRef } fro
 import { raceTrackFor } from '../../worlds/raceIsland.js';
 import { Race, LAPS, AI_TOP } from './race.js';
 import { Boarding } from './boarding.js';
-import { TrainDoors } from './trainDoors.js';
 import { platformSide } from '../../worlds/cityPlan.js';
 import { IslandPrefetch } from './prefetch.js';
 import { exportBakedTemplates } from '../../engine/assets.js';
@@ -67,6 +66,7 @@ import { CatLadderActivity, type CatVariant } from './activity/catLadder.js';
 import { RescueLadderActivity } from './activity/rescueLadder.js';
 import { RunActivity } from './activity/run.js';
 import { WinchActivity, type WinchVariant } from './activity/winch.js';
+import { DoorsActivity } from './activity/doors.js';
 import { TowActivity } from './activity/tow.js';
 import { BinsActivity } from './activity/bins.js';
 import type { Objective } from './missions.js';
@@ -661,59 +661,9 @@ const stationIcon = V.kind === 'rail' ? makeIconSprite(GOAL_ICON.station, 3.4) :
 const treasureIcon = MODE.pirate ? makeIconSprite(GOAL_ICON.treasure, 4.2) : null;
 if (treasureIcon) { treasureIcon.visible = false; scene.add(treasureIcon); }
 if (stationIcon) { stationIcon.visible = false; scene.add(stationIcon); }
-// the kid's train at a platform: the doors game (G6) — and its doors, which
-// the Train Kit models don't have: two sliding leaves over a dark opening at
-// each door on the platform side, shown while the game is on
-let doors: TrainDoors | null = null;
-let doorsSide = 1;
+// the kid's train at a platform: its doors game plays in a scene of its own
+// (activity/doors.ts, G6); the departure horn and the crossing toot
 let departing = false, tootT = 0;
-const doorLeaves: Array<{ unit: THREE.Object3D; group: THREE.Group; leaves: Array<{ m: THREE.Mesh; z0: number; dir: number }> }> = [];
-const leafMat = new THREE.MeshLambertMaterial({ color: 0xe9edf2 });
-const gapMat = new THREE.MeshBasicMaterial({ color: 0x1f2630 });
-/** build (once the models are in) and show the doors on side `sgn` (+1 the
- * train's right), open by `f` (0 … 1); hidden when `f` < 0 */
-function showDoors(sgn: number, f: number): void {
-  const units = railway.kidUnits();
-  if (!doorLeaves.length && units.length && units.every(u => u)) {
-    for (const u of units as THREE.Object3D[]) {
-      // (the unit's own size, measured as it stands at the origin)
-      const pos = u.position.clone(), rot = u.rotation.clone(), vis = u.visible;
-      u.position.set(0, 0, 0); u.rotation.set(0, 0, 0); u.updateMatrixWorld(true);
-      const bb = new THREE.Box3().setFromObject(u);
-      u.position.copy(pos); u.rotation.copy(rot); u.visible = vis; u.updateMatrixWorld(true);
-      const H = bb.max.y - bb.min.y, len = bb.max.z - bb.min.z;
-      const hw = Math.min(Math.abs(bb.min.x), Math.abs(bb.max.x)) * 0.94;
-      const h = H * 0.42, y = bb.min.y + H * 0.2 + h / 2, w = Math.min(0.75, len * 0.08);
-      const group = new THREE.Group();
-      group.userData.hw = hw;
-      const leaves: Array<{ m: THREE.Mesh; z0: number; dir: number }> = [];
-      for (const z0 of [len * 0.2, -len * 0.2]) {
-        const gap = new THREE.Mesh(new THREE.BoxGeometry(0.04, h, w * 2), gapMat);
-        gap.position.set(0, y, z0);
-        group.add(gap);
-        for (const dir of [-1, 1]) {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, w), leafMat);
-          m.position.set(0.04, y, z0 + dir * w / 2);
-          group.add(m);
-          leaves.push({ m, z0, dir });
-        }
-      }
-      u.add(group);
-      doorLeaves.push({ unit: u, group, leaves });
-    }
-  }
-  for (const d of doorLeaves) {
-    d.group.visible = f >= 0;
-    if (f < 0) continue;
-    const hw = d.group.userData.hw as number;
-    d.group.position.x = sgn * hw;
-    for (const l of d.leaves) {
-      const w = (l.m.geometry as THREE.BoxGeometry).parameters.depth;
-      l.m.position.x = sgn * 0.04;
-      l.m.position.z = l.z0 + l.dir * (w / 2 + w * 0.95 * f);
-    }
-  }
-}
 const transit = new Transit(scene);
 transit.night = nightLights;
 
@@ -1168,6 +1118,9 @@ function sceneCue(c: SceneCue): void {
     case 'drift': narrator.say('towCentre'); break;
     case 'tip': audio.sceneShot('bin-tip'); narrator.say('bin'); break;
     case 'binSet': audio.sceneShot('bin-set', 0.7); break;
+    case 'doorsSlide': audio.sceneShot('train-doors'); break;
+    case 'bell': audio.doorChime(); narrator.say('doorsClose'); break;
+    case 'latecomer': narrator.say('latecomer'); break;
   }
 }
 
@@ -1219,6 +1172,10 @@ function openCall(o: Objective): void {
     mode = 'activity';
     const ss = Number(q.get('sceneSeed') ?? 1);
     director.start(() => (sq === 'dig' ? new DigActivity(ss) : new BattleActivity(ss, sq === 'battle' ? 'pirate' : 'merchant')), () => { mode = 'drive'; });
+  }
+  if (sq === 'doors') {
+    mode = 'activity';
+    director.start(() => new DoorsActivity(Number(q.get('sceneSeed') ?? 1)), () => { mode = 'drive'; });
   }
   if (sq === 'pullover') {
     mode = 'activity';
@@ -1785,7 +1742,7 @@ const tick = (): void => {
   const station = V.kind === 'rail' ? nextStation() : null;
   // (the next station floats its icon over the stop point)
   if (stationIcon) {
-    stationIcon.visible = !!station && mode === 'drive' && !doors;
+    stationIcon.visible = !!station && mode === 'drive';
     if (station) stationIcon.position.set(station.x, 7 + Math.sin(elapsed * 2) * 0.4, station.z);
   }
   // (a pickup on board: its place, the nearest of its kind, is the goal)
@@ -1972,47 +1929,24 @@ const tick = (): void => {
     const gap = station.gap;
     const done = stationDone && Math.hypot(station.x - stationDone.x, station.z - stationDone.z) < 1;
     // stopped with any of its doors at the platform — however far past the
-    // board it came to a halt (G6) — the doors game begins
-    if (!doors && station.at && pose.v < 0.5 && !done) {
-      doors = new TrainDoors();
-      const cp = cityPlanFor(curCity.bx, curCity.by);
-      const ps = cp.stations.reduce((a, b) => (Math.hypot(b.x + curCity.ox - station.x, b.z + curCity.oz - station.z) < Math.hypot(a.x + curCity.ox - station.x, a.z + curCity.oz - station.z) ? b : a));
-      const side = platformSide(ps);
-      doorsSide = Math.sign(side * Math.cos(ps.h - pose.h)) || 1;
+    // board it came to a halt (G6) — the doors are the kid's job, in a scene
+    // of their own (activity/doors.ts): the world's riders board behind it
+    if (station.at && pose.v < 0.5 && !done && mode === 'drive' && !director.busy) {
+      mode = 'activity';
+      railway.setKidDoors(true);
+      const here = { x: station.x, z: station.z };
+      narrator.say('doorsOpen');
+      director.start(() => new DoorsActivity(Math.round(station.x * 7 + station.z * 13) + runStars), () => {
+        mode = 'drive';
+        railway.setKidDoors(false);
+        earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
+        stationDone = here;
+      }, () => { sound.event('station'); narrator.say('station'); });
     }
-    if (doors && doors.phase === 'shut' && pose.v > 1) { doors = null; showDoors(1, -1); railway.setKidDoors(false); }
-    if (doors) {
-      // (the drive input's steer is +1 left: the doors game wants +1 = right)
-      const ev = doors.update(dt, -input.steer, boarding.kidBusy(), input.gas);
-      railway.setKidDoors(doors.phase !== 'shut' && doors.phase !== 'closed');
-      showDoors(doorsSide, doors.phase === 'closed' ? -1 : doors.open);
-      for (const e of ev) {
-        if (e === 'askOpen') narrator.say('doorsOpen');
-        if (e === 'opened') audio.sceneShot('train-doors');
-        if (e === 'allAboard') { audio.doorChime(); narrator.say('doorsClose'); }
-        if (e === 'askClose') narrator.say('doorsClose');
-        if (e === 'closed') {
-          audio.sceneShot('train-doors', 0.8);
-          sound.event('station');
-          narrator.say('station');
-          earnStar(tr('train.stop'), new THREE.Vector3(st.x, 3, st.z));
-          stationDone = { x: station.x, z: station.z };
-        }
-      }
-      showGuide('🚪', 0, 5);
-      const ph = doors?.phase;
-      promptFill.style.width = `${Math.round((ph === 'shut' || ph === 'aboard' ? doors.gauge : 1) * 100)}%`;
-      promptText.textContent = ph === 'shut' ? tr('train.openDoors')
-        : ph === 'aboard' ? tr('train.closeDoors')
-        : ph === 'open' ? tr('train.aboard', { people: '🧍'.repeat(Math.min(6, boarding.boardedKid)) })
-        : tr('train.boarding');
-      if (ph === 'closed') doors = null;
-    } else {
-      showGuide(GOAL_ICON.station, goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - Math.max(0, gap) / 300)))));
-      promptFill.style.width = '0%';
-      const held = railway.kidHeld();
-      promptText.textContent = held.blocked ? tr('train.waitCrossing') : station.at ? tr('train.board') : gap < 70 ? tr('train.slow') : tr('train.station');
-    }
+    showGuide(GOAL_ICON.station, goalD, Math.max(0, Math.min(5, Math.round(5 * (1 - Math.max(0, gap) / 300)))));
+    promptFill.style.width = '0%';
+    const held = railway.kidHeld();
+    promptText.textContent = held.blocked ? tr('train.waitCrossing') : station.at ? tr('train.board') : gap < 70 ? tr('train.slow') : tr('train.station');
     // stopping is the kid's job (G6): coming in too fast to stop gently at
     // the board, the narrator says brake; roll past the whole platform and
     // the people waiting are cross, no star, and the next station is the goal

@@ -179,7 +179,8 @@
     "say-bin-2": "cheer",
     "say-pullover": "lively",
     "say-doorsOpen": "lively",
-    "say-doorsClose": "lively"
+    "say-doorsClose": "lively",
+    "say-latecomer": "lively"
   },
   "pt": {
     "mode-truck": "Camião dos Bombeiros",
@@ -357,7 +358,8 @@
     "say-bin-2": "Mais um caixote! Muito bem!",
     "say-pullover": "Polícia! Pare o barco!",
     "say-doorsOpen": "Roda o volante para abrir as portas!",
-    "say-doorsClose": "Já entraram todos! Fecha as portas!"
+    "say-doorsClose": "Já entraram todos! Fecha as portas!",
+    "say-latecomer": "Espera! Vem aí mais um!"
   },
   "en": {
     "mode-truck": "Fire Truck",
@@ -535,6 +537,7 @@
     "say-bin-2": "Another bin! Well done!",
     "say-pullover": "Police! Stop the boat!",
     "say-doorsOpen": "Turn the wheel to open the doors!",
-    "say-doorsClose": "Everyone is aboard! Close the doors!"
+    "say-doorsClose": "Everyone is aboard! Close the doors!",
+    "say-latecomer": "Wait! Someone else is coming!"
   }
 }

@@ -369,6 +369,8 @@ export const EN = {
   'train.waitCrossing': 'WAIT! SOMEONE IS ON THE CROSSING!',
   'say.doorsOpen': 'Turn the wheel to open the doors!',
   'say.doorsClose': 'Everyone is aboard! Close the doors!',
+  'train.latecomer': 'WAIT! SOMEONE ELSE IS COMING! 🏃',
+  'say.latecomer': 'Wait! Someone else is coming!',
 } as const;
 
 export type Key = keyof typeof EN;

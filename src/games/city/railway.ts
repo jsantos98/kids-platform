@@ -442,6 +442,8 @@ interface Kid {
   hold: number;
   /** it means to go: gas held, or rolling */
   going: boolean;
+  /** it has had its wait for the booms since it last stood still */
+  waited: boolean;
   /** held for somebody on a crossing ahead (R13) */
   blocked: boolean;
 }
@@ -473,7 +475,7 @@ export class Railway {
     this.kid = {
       line, bx, by, s: seg.dir > 0 ? arc : seg.route.total - arc, v: 0,
       spec: { units: PASSENGER.map((url, k) => ({ url, len: CAR_LEN + 1.5, back: k * (CAR_LEN + 1.5 + GAP) })), length: 3 * (CAR_LEN + 1.5 + GAP), passenger: true },
-      view: null, doorsOpen: false, hold: 0, going: false, blocked: false,
+      view: null, doorsOpen: false, hold: 0, going: false, waited: false, blocked: false,
     };
   }
 
@@ -812,8 +814,12 @@ export class Railway {
       .map(c => ({ c, sD: seg.dir > 0 ? c.d : seg.route.total - c.d }))
       .filter(o => o.sD - nose > -2)
       .sort((a, b) => a.sD - b.sD);
-    if (wantGo && k.v < 0.3 && !k.going && k.hold <= 0 && crossAhead.some(o => o.sD - nose < CROSSING_WARN)) k.hold = 2.6;
-    k.going = wantGo || k.v > 0.3;
+    // (once per standstill: pressing the gas again and again — a child pumping
+    // the pedal, or a pedal reading flickering near zero — restarted the wait
+    // every time, and the train never set off)
+    if (k.v > 1) k.waited = false;
+    if (wantGo && k.v < 0.3 && !k.waited && k.hold <= 0 && crossAhead.some(o => o.sD - nose < CROSSING_WARN)) { k.hold = 2; k.waited = true; }
+    k.going = wantGo || k.v > 0.3 || k.hold > 0;
     if (k.hold > 0) { k.hold -= dt; vTarget = 0; }
     // somebody on a crossing ahead within its stopping distance (and some):
     // it waits, short of it (R13)

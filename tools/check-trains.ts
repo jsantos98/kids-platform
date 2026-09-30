@@ -65,13 +65,13 @@ console.log(`platforms: the widest train (${which}) ${widest.toFixed(2)} m each 
 // ---- the doors game can't get a child stuck ----
 {
   const DT = 1 / 60;
-  const play = (steer: (d: TrainDoors, t: number) => number, label: string): number => {
+  const play = (steer: (d: TrainDoors, t: number) => number, label: string, gas = 0): number => {
     const d = new TrainDoors();
     let opened = -1;
     for (let t = 0; t < 90; t += DT) {
       // (people get off and on for 3 s once the doors are open)
       const busy = opened >= 0 && t - opened < 3;
-      const ev = d.update(DT, steer(d, t), busy);
+      const ev = d.update(DT, steer(d, t), busy, gas);
       if (ev.includes('opened')) opened = t;
       if (ev.includes('closed')) return t;
     }
@@ -81,9 +81,11 @@ console.log(`platforms: the widest train (${which}) ${widest.toFixed(2)} m each 
   const perfect = play(d => d.aim(), 'a perfect player');
   const child = play((_d, t) => (Math.sin(t * 0.37) > 0.6 ? 0 : Math.sin(t * 1.1) * 0.95), 'a child swinging the wheel');
   const nobody = play(() => 0, 'nobody at the wheel');
+  const pedal = play(() => 0, 'only the gas held', 1);
+  if (pedal > AUTO_T + 12) fail(`only the gas held took ${pedal.toFixed(1)} s`);
   if (nobody > 2 * AUTO_T + 6) fail(`nobody at the wheel took ${nobody.toFixed(1)} s`);
   if (child > 45) fail(`a child took ${child.toFixed(1)} s`);
-  console.log(`doors: perfect ${perfect.toFixed(1)} s · child ${child.toFixed(1)} s · nobody ${nobody.toFixed(1)} s`);
+  console.log(`doors: perfect ${perfect.toFixed(1)} s · child ${child.toFixed(1)} s · nobody ${nobody.toFixed(1)} s · only the gas ${pedal.toFixed(1)} s`);
 }
 
 // ---- the train can't move with its doors open ----
@@ -99,6 +101,18 @@ console.log(`platforms: the widest train (${which}) ${widest.toFixed(2)} m each 
   rail.setKidDoors(false);
   for (let k = 0; k < 300; k++) rail.update(1 / 60, 5 + k / 60, 0, 0);
   if ((rail.playerPose()?.v ?? 0) < 0.5) fail("the train didn't go once its doors were shut");
+  // pumping the pedal (on 0.3 s, off 0.3 s) near a crossing still sets it off
+  const rail2 = new Railway(new THREE.Scene());
+  rail2.addPlayer(1, 0, 300);
+  const p0 = rail2.playerPose()!;
+  let moved = 0;
+  for (let k = 0; k < 900 && moved < 2; k++) {
+    rail2.setControls(Math.floor(k / 18) % 2 === 0 ? 1 : 0, 0);
+    rail2.update(1 / 60, 20 + k / 60, 0, 0);
+    const p1 = rail2.playerPose()!;
+    moved = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+  }
+  if (moved < 2) fail(`pumping the gas, the train moved only ${moved.toFixed(1)} m in 15 s`);
 }
 
 if (fails) { console.log(`trains: FAIL — ${fails} problem(s) (G6)`); process.exit(1); }

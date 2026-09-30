@@ -1983,7 +1983,7 @@ const tick = (): void => {
     if (doors && doors.phase === 'shut' && pose.v > 1) { doors = null; showDoors(1, -1); railway.setKidDoors(false); }
     if (doors) {
       // (the drive input's steer is +1 left: the doors game wants +1 = right)
-      const ev = doors.update(dt, -input.steer, boarding.kidBusy());
+      const ev = doors.update(dt, -input.steer, boarding.kidBusy(), input.gas);
       railway.setKidDoors(doors.phase !== 'shut' && doors.phase !== 'closed');
       showDoors(doorsSide, doors.phase === 'closed' ? -1 : doors.open);
       for (const e of ev) {

@@ -38,8 +38,9 @@ export class TrainDoors {
   aim(): number { return this.phase === 'shut' ? 1 : this.phase === 'aboard' ? -1 : 0; }
 
   /** step it: `steer` +1 right … −1 left; `busy` people still getting off
-   * or on; the moments the game gives a sound or a word */
-  update(dt: number, steer: number, busy: boolean): DoorEvent[] {
+   * or on; `gas` the pedal (held once everyone is aboard, it closes the
+   * doors too); the moments the game gives a sound or a word */
+  update(dt: number, steer: number, busy: boolean, gas = 0): DoorEvent[] {
     const ev: DoorEvent[] = [];
     this.t += dt;
     const nudge = (e: DoorEvent): void => {
@@ -61,7 +62,8 @@ export class TrainDoors {
         if (this.t > 1 && !busy) { this.go('aboard'); ev.push('allAboard'); }
         break;
       case 'aboard':
-        if (steer < -TURNED) this.gauge = Math.min(1, this.gauge + dt / DOOR_HOLD);
+        // (the wheel left — or the gas held, a child who just wants to go)
+        if (steer < -TURNED || gas > 0.3) this.gauge = Math.min(1, this.gauge + dt / (steer < -TURNED ? DOOR_HOLD : DOOR_HOLD * 2));
         nudge('askClose');
         if (this.gauge >= 1 || this.t >= AUTO_T) this.go('closing');
         break;

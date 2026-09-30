@@ -60,6 +60,29 @@ and if nobody turns the wheel the doors move by themselves after a while.
 
 ---
 
+## 2026-09-30 (morning) — after the kid tried the new modes
+
+A round of fixes after the first rides:
+- **The garbage truck** no longer carries a floating box under its arrow.
+  Its amber beacon is now a small dome on the cab roof, lit only while it
+  has a load.
+- **Its bins game** fits any screen. On a narrow window, two of the four
+  bins used to be out of view.
+- **The police boat's lights** sit on the back of its cabin, as in the
+  pull-over scene. Before, the game mistook a blue fitting on the hull for
+  its lamp.
+- **At night every siren glows:** the lit lamp throws a big red or blue
+  light on the street or the water around it, on the beat of the flashing.
+- **Nobody appears from nowhere at a handover:** the nurse, police officer
+  or mechanic comes out of the door to the vehicle, and walks back in with
+  the patient, thief or pirates.
+
+| | |
+|---|---|
+| ![The police boat's siren at night](history/2026-09-30-polish/police-boat-night.jpg) | ![At the hospital: the patient steps out of the ambulance for the door](history/2026-09-30-polish/handover.jpg) |
+
+---
+
 ## 2026-09-29 (evening) — somewhere to take them: hospitals, a prison, two work trucks and a police boat
 
 **Everyone goes somewhere now.** Every island has hospitals, a prison, repair

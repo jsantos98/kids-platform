@@ -17,6 +17,7 @@ import { Fleet, type BoatFootprint } from '../src/games/city/sea.js';
 import { harbourFor, harbourBlocks, inSeaBox } from '../src/games/city/harbour.js';
 import { lighthouseAt } from '../src/games/city/bridge.js';
 import { isletsFor, onIslet } from '../src/games/city/islets.js';
+import { airportFor, onAirport } from '../src/games/city/airport.js';
 import { overlapDepth } from '../src/games/city/island/obb.js';
 import { createPlayer, physicsStep, VEHICLES } from '../src/games/city/player.js';
 import { citySeed } from '../src/worlds/cityGrid.js';
@@ -49,6 +50,7 @@ function touches(x: number, z: number): string | null {
   const dk = deckAt(x, z);
   if (dk && dk.y < BOAT_CLEAR) return 'a low causeway deck';
   if (onIslet(c.bx, c.by, lx, lz, 0)) return 'a treasure islet';
+  if (onAirport(c.bx, c.by, lx, lz, 0)) return 'the airport island or its causeway';
   return null;
 }
 
@@ -96,6 +98,7 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
       const c = cityAt(x, z);
       if (coastFor(c.bx, c.by).inLand(x - c.ox, z - c.oz, -20)) { fail(`island ${bx},${by}: a treasure islet within 25 m of land at (${x.toFixed(0)}, ${z.toFixed(0)})`); break; }
       if (deckAt(x, z)) { fail(`island ${bx},${by}: a treasure islet under a causeway at (${x.toFixed(0)}, ${z.toFixed(0)})`); break; }
+      if (onAirport(c.bx, c.by, x - c.ox, z - c.oz, 55)) { fail(`island ${bx},${by}: a treasure islet within 60 m of the airport at (${x.toFixed(0)}, ${z.toFixed(0)})`); break; }
     }
   }
   console.log(`  ${isl.length} treasure islets`);
@@ -135,6 +138,10 @@ for (const [bx, by] of [[1, 0], [2, 2]] as const) {
   const I = H.isle;
   run('the picnic island', (I.x1 + I.x2) / 2, (I.z1 + I.z2) / 2, { x: (I.x1 + I.x2) / 2 + 60, z: I.z2 + 30 }, false,
     (x, z) => x > I.x1 + 0.5 && x < I.x2 - 0.5 && z > I.z1 + 0.5 && z < I.z2 - 0.5);
+  // (and the airport's island, from 40 m out to sea off its middle: R41)
+  const A = airportFor(bx, by);
+  run('the airport island', A.isle.cx, A.isle.cz, { x: A.isle.cx - A.inward.x * (A.isle.hw + 40), z: A.isle.cz - A.inward.z * (A.isle.hw + 40) }, false,
+    (x, z) => inSeaBox(A.isle, x, z, -0.5));
 }
 
 // ---- the pirate's quarry puts out near a treasure islet (G15): the map a

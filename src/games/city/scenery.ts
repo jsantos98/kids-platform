@@ -7,6 +7,7 @@ import { C, mat } from '../../engine/stage.js';
 import { Baked } from '../../engine/baked.js';
 import { waveAt, hullObject, boatLoop } from './sea.js';
 import { buildBridge, type Lighthouse } from './bridge.js';
+import { buildAirport } from './airport.js';
 import { harbourFor } from './harbour.js';
 import { isletsFor } from './islets.js';
 import { PK_M } from './sea.js';
@@ -20,7 +21,7 @@ import type { CollisionBox } from '../../worlds/cityChunk.js';
 
 interface Bobber { mesh: THREE.Object3D; x: number; z: number; amp: number; phase: number }
 
-interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[]; lighthouse: Lighthouse; marks: THREE.Object3D[] }
+interface Inst { group: THREE.Group; boxes: CollisionBox[]; bobbers: Bobber[]; lighthouse: Lighthouse; marks: THREE.Object3D[]; runwayLights: THREE.Mesh }
 
 /** a Pirate Kit model at its kit scale (PK_M m a unit), standing on y = 0
  * and centred, turned by ry — null until it is baked */
@@ -42,6 +43,9 @@ export class CityScenery {
   private foamMat = mat(0xffffff, { transparent: true, opacity: 0.4, depthWrite: false });
 
   constructor(private scene: THREE.Scene) {}
+
+  /** is island (bx, by)'s scenery (its airport too) built? */
+  has(bx: number, by: number): boolean { return this.cities.has(`${bx},${by}`); }
 
   ensure(bx: number, by: number, ox: number, oz: number): void {
     const key = `${bx},${by}`;
@@ -77,6 +81,12 @@ export class CityScenery {
     const bridge = buildBridge(bx, by, ox, oz);
     group.add(bridge.group);
     boxes.push(...bridge.boxes.map(b => ({ ...b, x1: b.x1 + ox, x2: b.x2 + ox, z1: b.z1 + oz, z2: b.z2 + oz })));
+
+    // the airport on its own island off a corner (R41; its boxes are
+    // world coordinates already)
+    const airport = buildAirport(bx, by, ox, oz);
+    group.add(airport.group);
+    boxes.push(...airport.boxes);
 
     // wooden pier off the south-east shore + moored dinghies, facing out to
     // sea from wherever the coast is (pier frame: +z outward, x across —
@@ -167,7 +177,7 @@ export class CityScenery {
     }
 
     this.scene.add(group);
-    this.cities.set(key, { group, boxes, bobbers, lighthouse: bridge.lighthouse, marks });
+    this.cities.set(key, { group, boxes, bobbers, lighthouse: bridge.lighthouse, marks, runwayLights: airport.lights });
     while (this.cities.size > 3) {
       const oldest = this.cities.keys().next().value as string;
       const inst = this.cities.get(oldest)!;
@@ -199,6 +209,8 @@ export class CityScenery {
       ((L.beam.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = night * 0.22;
       (L.lamp.material as THREE.MeshBasicMaterial).color.copy(this._lamp.setHex(0xcfe3ea).lerp(new THREE.Color(0xfff0b8), night));
       if (night > 0.02) this.night?.flash({ x: L.x, y: L.y, z: L.z, color: 0xfff0c0, size: 9, pool: 0, strength: night });
+      // the runway's edge lights: grey studs by day, a glowing double row at night
+      (inst.runwayLights.material as THREE.MeshBasicMaterial).color.copy(this._lamp.setHex(0xbfc4c9).lerp(new THREE.Color(0xffe9a0), night));
       for (const b of inst.bobbers) {
         b.mesh.position.y = waveAt(b.x, b.z, elapsed) * b.amp + 0.03;
         b.mesh.rotation.x = Math.sin(elapsed * 0.8 + b.phase) * 0.02 * b.amp;

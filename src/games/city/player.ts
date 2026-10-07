@@ -8,6 +8,7 @@ import { CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
 import { cityPlanFor } from '../../worlds/cityPlan.js';
 import { bridgeLayout } from './bridge.js';
+import { onAirport } from './airport.js';
 import { harbourBlocks } from './harbour.js';
 import { onIslet } from './islets.js';
 import { deckAt, BOAT_CLEAR } from '../../worlds/causeway.js';
@@ -620,7 +621,9 @@ export function onGround(x: number, z: number): boolean {
   if (Math.abs(lz - ex.e * 64) < ON && lx > CENTER) return true;
   const b = bridgeLayout(c.bx, c.by);
   if (Math.abs(lx - b.X) < b.HALF_W && lz > b.Z0 - 2 && lz < b.Z1 + 2) return true;
-  return lx > b.ISLE.x1 && lx < b.ISLE.x2 && lz > b.ISLE.z1 && lz < b.ISLE.z2;
+  if (lx > b.ISLE.x1 && lx < b.ISLE.x2 && lz > b.ISLE.z1 && lz < b.ISLE.z2) return true;
+  // the airport's island and its causeway (R41)
+  return onAirport(c.bx, c.by, lx, lz, -1);
 }
 
 /** would a boat of radius r at world (x, z) touch an island (beach
@@ -632,6 +635,7 @@ export function onLand(x: number, z: number, r: number): boolean {
   // the picnic bridge and island, the pier and its dinghies (G14), and the
   // treasure islets (G15)
   if (harbourBlocks(c.bx, c.by, x - c.ox, z - c.oz, r)) return true;
+  if (onAirport(c.bx, c.by, x - c.ox, z - c.oz, r)) return true;
   if (onIslet(c.bx, c.by, x - c.ox, z - c.oz, r + 1)) return true;
   // a causeway deck too low to sail under is a wall too (the raised span
   // in the middle clears the boats)

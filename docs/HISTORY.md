@@ -5,6 +5,43 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-10-08 — auto speed, airports, an eight-car race and a car just to drive
+
+**Auto speed.** A new setting in the garage's ⚙️ panel, off unless a grown-up
+turns it on. With it on, the game presses the gas and the child only steers.
+The fire truck, ambulance, tow truck, garbage truck and rescue helicopter
+drive at a gentle pace and stop by themselves at each call or delivery, so
+the mission opens. The chases, the courses, the race and the plane keep
+speeding. The train is still driven by hand: stopping at the station is the
+child's job. The pedals always win over it, and it never reverses on its own.
+
+**Every bump is a crash.** Before, touching a wall slowly only scraped and
+the city's cars only pushed, so a car could get wedged with no way out. Now
+any bump — a wall, a pole, a parked or moving car, the water's edge, a
+bridge's side, the race track's wall — flashes the car, the narrator says
+"oops", and it is put back on a clear lane, ready to go.
+
+**Airports.** Every island has a small airport on its own island off one of
+its corners, joined to the shore by a causeway (like Singapore's Changi):
+a runway with lights for the night, a terminal, a control tower, a hangar,
+a windsock and planes at the gates. Fly the plane in line with a runway and
+it lands by itself, stops, turns round on the spot and takes off again.
+
+**The race has eight cars**, and the child starts at the back of a
+staggered grid. The rivals keep out of each other's way, and the faster the
+child drives, the better the place: about 4th at an average pace, first when
+driving well.
+
+**A car just to drive** — the first in the garage: no missions, no arrow,
+anywhere on the islands.
+
+| | |
+|---|---|
+| ![The plane rolling down the runway after landing](history/2026-10-08-airports/landing-roll.jpg) | ![Turned round, taking off again](history/2026-10-08-airports/takeoff.jpg) |
+| ![The airport on its own island beside the coast](history/2026-10-08-airports/airport-island.jpg) | |
+
+---
+
 ## 2026-09-30 (later) — the train's doors get their own scene
 
 The doors game now plays like every other mission: when the train stops at

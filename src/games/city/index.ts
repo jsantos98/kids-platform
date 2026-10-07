@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
+import { Landing, type Runway } from './landing.js';
+import { airportFor } from './airport.js';
 import { bakedNight, templateToMesh } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
@@ -464,6 +466,7 @@ initInput(code => {
   if (code === 'KeyE') { if (V.kind === 'rail') sound.event('horn'); else setSiren(!sirenOn); }
   if (code === 'KeyR' && V.kind !== 'rail') {
     Object.assign(player.state, { x: spawn.x, z: spawn.z, heading: spawn.heading, v: V.kind === 'plane' ? 11 : 0 });
+    if (landing) { landing.reset(); player.state.alt = PLANE_ALT; }
     crumbs.clear();
   }
 });
@@ -1280,6 +1283,20 @@ const AUTO = autoSpeed();
  * delivery or the treasure to stop at, a chase to speed through), used by
  * the next frame's physics */
 let autoGoal: AutoGoal = { pace: 'cruise' };
+/** the plane's landings on the airports' runways (R41) */
+const landing = V.kind === 'plane' ? new Landing() : null;
+/** the runways of the islands round the plane whose scenery is built
+ * (world coordinates) — a runway it can see */
+function runwaysNear(x: number, z: number): Runway[] {
+  const here = cityAt(x, z), out: Runway[] = [];
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const bx = here.bx + dx, by = here.by + dz;
+    if (!scenery.has(bx, by)) continue;
+    const r = airportFor(bx, by).runway;
+    out.push({ key: `${bx},${by}`, cx: r.cx + bx * CITY_PITCH, cz: r.cz + by * CITY_PITCH, yaw: r.yaw, hl: r.hl });
+  }
+  return out;
+}
 /** a spot clear of the island's cars (a resume never lands in one — G1) */
 const trafficFree = (x: number, z: number): boolean => !islands.bump(x, z, V.radius + 2);
 /** where a road vehicle resumes after a bump: back on the circuit in the
@@ -1379,8 +1396,14 @@ const tick = (): void => {
       sound.event('crash'); narrator.say('oops');
       Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn, trafficFree));
     }
-    const ring = course?.aim(st.x, st.z, st.heading);
-    const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
+    // (the plane lined up with a runway lands by itself: the landing has it)
+    const landed = !!landing && mode === 'drive' && landing.update(dt, input, st, runwaysNear(st.x, st.z), AUTO, e => {
+      if (e === 'land') narrator.say('land');
+      else if (e === 'landed') narrator.say('landed');
+      else if (e === 'takeoff') narrator.say('takeoff');
+    });
+    const ring = landed ? null : course?.aim(st.x, st.z, st.heading);
+    const step = landed ? { crashed: false } : physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
     if (step.crashed) {
       sound.event('crash'); narrator.say('oops');
       toast = '';
@@ -1616,9 +1639,16 @@ const tick = (): void => {
   } else if (V.kind === 'plane') {
     // bank into the turn, nose follows the climb, propeller spins
     // banks into the turn (left wheel: left wing down), eased with the turn
-    player.car.rotation.z = -player.steerS * 0.45;
-    const ring = course?.target;
-    player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
+    // (landing, taking off: the landing's own bank and pitch)
+    if (landing && landing.phase !== 'fly') {
+      player.steerS = landing.steer;
+      player.car.rotation.z = -landing.steer * 0.3;
+      player.car.rotation.x = -landing.pitch;
+    } else {
+      player.car.rotation.z = -player.steerS * 0.45;
+      const ring = course?.target;
+      player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
+    }
     (player.car.userData.prop as THREE.Object3D | undefined)!.rotation.z = elapsed * 40;
   } else if (V.kind === 'boat') {
     // pitch up on the plane at speed, rock with the swell

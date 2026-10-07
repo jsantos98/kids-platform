@@ -4,7 +4,7 @@
 // onLand). Seeded per island cell and placed in the cell's own water, so two
 // cells never put one in the same place: at least 175 m out from the shore
 // (beyond every boat lane and the big ships' loops: sea.ts), clear of the
-// causeway corridors, the picnic island and the anchored ship, inside the
+// causeway corridors, the picnic island, the airport (R41) and the anchored ship, inside the
 // cell (the straits carry the causeways), 120 m apart — up to ISLETS of them,
 // two to each corner of the cell, so wherever a battle is won the islet its
 // map marks is near (three at random left it a kilometre's sail away). City-local coordinates.
@@ -14,6 +14,7 @@ import { coastFor } from '../../worlds/coast.js';
 import { citySeed, southExit, eastExit } from '../../worlds/cityGrid.js';
 import { RAIL_OFFSET } from '../../worlds/railRoute.js';
 import { harbourFor, inSeaBox } from './harbour.js';
+import { onAirport } from './airport.js';
 
 export interface Islet {
   /** centre (city-local) and radius of its sand (m) */
@@ -79,6 +80,9 @@ export function isletsFor(bx: number, by: number): Islet[] {
     if (!offCorridors(x, z, rad + 60)) continue;
     if (x > pic.x1 - rad - 60 && x < pic.x2 + rad + 60 && z > pic.z1 - rad - 60 && z < pic.z2 + rad + 60) continue;
     if (inSeaBox(H.ship, x, z, rad + 40)) continue;
+    // (well clear of the airport's island, R41: the boat lanes swing out
+    // round it, and the boats circling an islet keep 13 m off it)
+    if (onAirport(bx, by, x, z, rad + 75)) continue;
     if (out.some(o => Math.hypot(o.x - x, o.z - z) < 120)) continue;
     const ta = r() * Math.PI * 2, tr = rad * (0.25 + r() * 0.35);
     out.push({ x, z, r: rad, tx: x + Math.cos(ta) * tr, tz: z + Math.sin(ta) * tr, v: r(), close: near < NEAR });

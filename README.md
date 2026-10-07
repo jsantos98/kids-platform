@@ -49,12 +49,13 @@ and carries on from a spot just behind.
 | 🚛 Garbage truck | Drive to full bins, stop the side grabber at each one to tip it in; three stops fill the truck — then off to the recycling depot |
 | 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up, then land on a hospital's roof helipad |
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
-| ✈️ Plane | Swoop through sky rings (it can't stall or crash) |
+| ✈️ Plane | Swoop through sky rings (it can't stall or crash); line it up with an airport's runway and it lands by itself, turns round and takes off again |
 | 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
 | 🚨 Police boat | Chase the speedboats breaking the rules and the pirate ship; stay in their wake till they give up, then bring them to the police pier |
 | 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |
 | 🚆 Train | Drive the train and stop at the platform. In the station scene, turn the wheel to open the doors and the passengers get off and on; when everyone is aboard, turn it back to close them and drive on. Roll past the platform and the people waiting are cross |
-| 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against three rival cars on a race island |
+| 🏎️ Kart race | Pick a race car (an F1, a kart, a monster truck…), then three laps against seven rival cars on a race island, starting last on the grid |
+| 🚗 Car | Just drive: no missions, no arrow, wherever you like round the islands |
 
 | | |
 |---|---|
@@ -64,6 +65,7 @@ and carries on from a spot just behind.
 | ![Sunset from the plane](docs/screenshots/sunset.jpg) | ![The pirate ship and a treasure island](docs/screenshots/pirate.jpg) |
 | ![The race at night](docs/screenshots/race-night.jpg) | ![Smoke from two fires over the town at dusk](docs/screenshots/smoke-dusk.jpg) |
 | ![The tow truck with a car on its bed](docs/screenshots/tow-truck.jpg) | ![The rescue helicopter on a hospital's roof helipad](docs/screenshots/heli-helipad.jpg) |
+| ![The plane landing on an airport's runway](docs/history/2026-10-08-airports/landing-roll.jpg) | ![An airport on its own island off the coast](docs/history/2026-10-08-airports/airport-island.jpg) |
 
 Reaching a call opens its **mission scene** — a street built from the same
 kits as the city, with the very house, car or tree the call showed on fire,
@@ -150,7 +152,8 @@ The game page is `play/city.html`.
 
 | Option | Effect |
 |---|---|
-| `?mode=truck\|police\|ambulance\|tow\|garbage\|heliMedical\|heliPolice\|plane\|boat\|policeBoat\|pirate\|train\|race` | pick the play mode directly |
+| `?mode=truck\|police\|ambulance\|tow\|garbage\|heliMedical\|heliPolice\|plane\|boat\|policeBoat\|pirate\|train\|race\|car` | pick the play mode directly |
+| `?auto=1\|0` | auto speed on or off for this visit (the game works the gas; the kid only steers) |
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |

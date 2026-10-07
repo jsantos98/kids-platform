@@ -15,6 +15,7 @@ import { graphFor } from '../../worlds/streetGraph.js';
 import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
 import { bridgeLayout } from './bridge.js';
+import { airportFor, boxPoint } from './airport.js';
 import { coastFor, causewaySpan } from '../../worlds/coast.js';
 import { isletsFor } from './islets.js';
 import { callIcon, type Missions } from './missions.js';
@@ -203,6 +204,24 @@ export class Minimap {
     ctx.fillRect(tx(BRIDGE.ISLE.x1 + 2), ty(BRIDGE.ISLE.z1 + 2), 36 * PX, 36 * PX);
     ctx.fillStyle = '#8f97a3';
     ctx.fillRect(tx(BRIDGE.X - 5.5), ty(BRIDGE.Z0), 11 * PX, 42 * PX);
+
+    // the airport's island, its runway and its causeway (R41)
+    {
+      const A = airportFor(this.bx, this.by);
+      const quad = (b: { cx: number; cz: number; yaw: number; hl: number; hw: number }, col: string): void => {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).forEach(([a, l], k) => {
+          const p = boxPoint(b, a * b.hl, l * b.hw);
+          if (k) ctx.lineTo(tx(p.x), ty(p.z)); else ctx.moveTo(tx(p.x), ty(p.z));
+        });
+        ctx.closePath();
+        ctx.fill();
+      };
+      quad(A.link, '#8f97a3');
+      quad(A.isle, '#c8c2b4');
+      quad({ ...A.runway, hl: A.runway.hl + A.pad }, '#5c636d');
+    }
 
     // the river, ribbon-width
     ctx.strokeStyle = '#5fadc9';

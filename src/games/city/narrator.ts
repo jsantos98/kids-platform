@@ -20,7 +20,8 @@ export const MOMENTS = ['start', 'call', 'arrive', 'praise', 'gate', 'gateTwo', 
   'raceCount', 'lastLap', 'place', 'raceUp', 'raceDown', 'raceLead', 'almost', 'station', 'brake', 'missed', 'night', 'morning',
   'flame', 'catMoved', 'hearts', 'chaseRun', 'hold',
   'shipSpotted', 'battle', 'shipHit', 'sunk', 'surrender', 'treasureMap', 'dig', 'treasure',
-  'toDest', 'delivered', 'first', 'towCentre', 'bin', 'pullover', 'doorsOpen', 'doorsClose', 'latecomer'] as const;
+  'toDest', 'delivered', 'first', 'towCentre', 'bin', 'pullover', 'doorsOpen', 'doorsClose', 'latecomer',
+  'land', 'landed', 'takeoff'] as const;
 export type Moment = typeof MOMENTS[number];
 
 /** how many variants each moment has (say.<moment>.<n>) */

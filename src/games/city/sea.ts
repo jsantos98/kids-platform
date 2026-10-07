@@ -11,7 +11,7 @@
 // (cargo ships, ocean liners) out beyond them, one on each stretch of coast
 // between two causeways, going out along it and back on a loop. Every lane
 // swings out round the picnic bridge and island (the old lane sailed through
-// the bridge). A boat's place is a pure function of the clock (`footprints`),
+// the bridge) and round the airport's island and causeway (R41). A boat's place is a pure function of the clock (`footprints`),
 // so the kid's boat can bump into it (G14). The fleet draws as one instanced
 // mesh per model.
 import * as THREE from 'three';
@@ -26,6 +26,7 @@ import { southExit, eastExit, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { RAIL_OFFSET } from '../../worlds/railRoute.js';
 import { harbourFor, inSeaBox } from './harbour.js';
 import { isletsFor } from './islets.js';
+import { onAirport } from './airport.js';
 
 // gentle deterministic swell — crests stay under the island slabs (top y=0.1).
 export function waveAt(x: number, z: number, t: number): number {
@@ -112,7 +113,11 @@ function laneRing(bx: number, by: number, extra: number): Pt[] {
   const need = P.map(p => {
     const o = out(p);
     let d = 0;
-    while (d < 200 && nearRect(pic, coast.shoreToward(p.x, p.z, o + d), 14)) d += 2;
+    // (and round the airport's island and its causeway, R41: that stands
+    // out past the lane, so the lane goes out past the farthest of it the
+    // way out from this shore point crosses)
+    const blocked = (q: Pt): boolean => nearRect(pic, q, 14) || onAirport(bx, by, q.x, q.z, 14);
+    for (let t = 0; t < 260; t += 2) if (blocked(coast.shoreToward(p.x, p.z, o + t))) d = t + 2;
     // (the outer lanes lie further out, parallel)
     return d;
   });
@@ -178,7 +183,7 @@ export function bigShipLoops(bx: number, by: number): Pt[][] {
       const a = vert ? p.x : p.z;
       if (a > at - 50 && a < at + RAIL_OFFSET + 50) return false;
     }
-    if (nearRect(pic, p, 45)) return false;
+    if (nearRect(pic, p, 45) || onAirport(bx, by, p.x, p.z, 45)) return false;
     if (inSeaBox(H.ship, p.x, p.z, 30)) return false;
     // (the water off an island's east- and south-facing shores is its own,
     // like the straits its railway crosses (R30): only there, so two

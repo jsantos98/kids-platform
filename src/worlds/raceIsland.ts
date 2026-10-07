@@ -26,6 +26,8 @@ export { isRaceIsland };
 export const UNIT = TILE / 10;
 /** half the kit road's width */
 export const TRACK_HALF = 3 * UNIT;
+/** the starting grid: eight karts, staggered (the kid's in the last slot) */
+export const GRID_SLOTS = 8;
 /** grass round the loop, inside the ringing road */
 export const APRON = 16;
 /** the road round the apron runs this far outside the zone */
@@ -229,8 +231,10 @@ function fromData(d: RaceData, loop?: Loop): RaceTrack {
     return { kind: (i * 7 + j * 3 + k) % 4 === 0 ? 'tents' : 'forest', x: o.x, z: o.z, ry: ((i + j) % 4) * (Math.PI / 2) + ry };
   });
   const grid: RaceTrack['grid'] = [];
-  for (let k = 0; k < 4; k++) {
-    const p = sample(startS - 9 - k * 7);
+  // (eight slots, staggered like a real grid — left, right, each 3.5 m
+  // behind the one before: the kid starts in the last, behind everyone)
+  for (let k = 0; k < GRID_SLOTS; k++) {
+    const p = sample(startS - 9 - k * 3.5);
     const side = k % 2 ? -1 : 1;
     // across the track: right of the heading is (cos h, -sin h)
     grid.push({ x: p.x + Math.cos(p.h) * side * 3, z: p.z - Math.sin(p.h) * side * 3, h: p.h });

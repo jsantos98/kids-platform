@@ -1,20 +1,26 @@
-// Race mode: the kid's kart against three AI karts round a race island's
-// circuit (raceIsland.ts). Three laps; the AI karts follow the centreline in
-// their own lanes and are rubber-banded to the kid (slower when ahead,
-// quicker when behind), so every race is close and every finish is
-// celebrated. Progress is the kid's unwrapped arc along the centreline, so
+// Race mode: the kid's kart against seven AI karts round a race island's
+// circuit (raceIsland.ts), the kid starting last on the grid. Three laps; the
+// AI karts follow the centreline in their own lanes, keep out of each
+// other's way and are rubber-banded to the kid (slower when ahead, quicker
+// when behind), so every race is close and every finish is celebrated. Progress is the kid's unwrapped arc along the centreline, so
 // laps count however the kart gets round.
 import * as THREE from 'three';
 import { nightLights } from './nightLights.js';
 import { spawnVehicle } from '../../engine/assets.js';
-import { TRACK_HALF, type RaceTrack } from '../../worlds/raceIsland.js';
+import { TRACK_HALF, GRID_SLOTS, type RaceTrack } from '../../worlds/raceIsland.js';
 import { rivalsFor, type RaceCar } from '../raceCars.js';
 
 export const LAPS = 3;
 const COUNTDOWN = 3.5;
 const CHEER = 7;
-const AI_LANE = [-3.5, 3.5, 0];
-const AI_SKILL = [1.0, 0.95, 0.9];
+/** the rivals on the grid */
+const N_AI = GRID_SLOTS - 1;
+/** each rival's pace, by its grid slot (the front row quickest) */
+const AI_SKILL = Array.from({ length: N_AI }, (_, i) => 1 - (0.26 * i) / (N_AI - 1));
+/** how close behind another rival one looks for a way past (m) */
+const FOLLOW = 7;
+/** two karts alongside each other keep this far apart across the track (m) */
+const ABREAST = 2.8;
 /** the AI karts' top speed: below the kid's kart flat out (15 m/s) */
 export const AI_TOP = 13.6;
 /** the kit tiles' walls stand this far either side of the centreline (m) */
@@ -25,6 +31,9 @@ interface AiKart {
   /** progress along the centreline from the start line (m, unwrapped) */
   s: number;
   lat: number;
+  /** its own lane (m off the centreline): on its grid slot's side, the
+   * outer lane or the inner one by row */
+  lane: number;
   v: number;
   /** finishing place, once over the line for the last time */
   place: number;
@@ -39,7 +48,7 @@ export interface RaceView {
   /** countdown number (3, 2, 1, 0 = GO) */
   count: number;
   lap: number;
-  /** 1..4 */
+  /** 1..8 */
   place: number;
   /** the kid's finishing place (phase 'finished') */
   finalPlace: number;
@@ -57,36 +66,38 @@ export class Race {
   private finals = 0;
   private finalPlace = 0;
 
-  /** `kid`: the car the kid picked in the garage; the rivals are three others
-   * from the line-up (raceCars.ts), one from each family, varied per island */
+  /** `kid`: the car the kid picked in the garage; the rivals are seven others
+   * from the line-up (raceCars.ts), every family among them, varied per island */
   constructor(private scene: THREE.Scene, readonly track: RaceTrack, readonly ox: number, readonly oz: number, kid: RaceCar) {
-    const rivals = rivalsFor(kid, Math.round(ox * 7 + oz * 13));
-    for (let i = 0; i < 3; i++) {
+    const rivals = rivalsFor(kid, Math.round(ox * 7 + oz * 13), N_AI);
+    for (let i = 0; i < rivals.length; i++) {
       const group = new THREE.Group();
-      // a bright box until the kit kart streams in
-      const stub = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 3.6), new THREE.MeshLambertMaterial({ color: [0xe25c5c, 0x3f7bff, 0xf2c14e][i] }));
+      // a bright box (its colour) until the kit kart streams in
+      const stub = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 3.6), new THREE.MeshLambertMaterial({ color: new THREE.Color(rivals[i].color) }));
       stub.position.y = 0.6;
       group.add(stub);
       spawnVehicle(`/${rivals[i].glb}`, { len: rivals[i].len, yaw: rivals[i].yaw }).then(g => { group.remove(stub); group.add(g); }).catch(() => {});
       scene.add(group);
-      this.ai.push({ group, s: 0, lat: 0, v: 0, place: 0, car: rivals[i] });
+      this.ai.push({ group, s: 0, lat: 0, lane: 0, v: 0, place: 0, car: rivals[i] });
     }
   }
 
-  /** everyone back on the grid: the AI karts in slots 0, 2, 3, the kid in
-   * slot 1 (world coords) */
+  /** everyone back on the grid: the AI karts in the slots in front, the kid
+   * in the last (world coords); each rival waits on its own slot and moves
+   * over to its lane once racing */
   reset(): { x: number; z: number; heading: number } {
     const T = this.track;
     const slots = T.grid;
-    [0, 2, 3].forEach((slot, i) => {
-      const k = this.ai[i];
-      const g = slots[slot];
+    this.ai.forEach((k, i) => {
+      const g = slots[i];
       k.s = this.arcOf(g.x, g.z);
-      k.lat = AI_LANE[i];
+      const p = T.sample(k.s + T.startS);
+      k.lat = (g.x - p.x) * Math.cos(p.h) - (g.z - p.z) * Math.sin(p.h);
+      k.lane = Math.sign(k.lat || 1) * (Math.floor(i / 2) % 2 ? 1.1 : 3.7);
       k.v = 0;
       k.place = 0;
     });
-    const me = slots[1];
+    const me = slots[slots.length - 1];
     this.lastRaw = T.nearest(me.x, me.z).s;
     this.ps = this.arcOf(me.x, me.z);
     this.phase = 'countdown';
@@ -150,7 +161,7 @@ export class Race {
         const gap = k.s - this.ps;
         // (a little quicker when behind, never faster than the kid's kart
         // flat out: a kid who drives well always wins)
-        const band = gap > 0 ? 1 - Math.min(0.3, gap / 110) : 1 + Math.min(0.12, -gap / 110);
+        const band = gap > 0 ? 1 - Math.min(0.4, gap / 80) : 1 + Math.min(0.05, -gap / 200);
         target = Math.min(AI_TOP, 12.5 * AI_SKILL[i] * (1 - 0.18 * corner) * band);
         if (k.place) target = Math.min(target, 6); // over the line: a lap of honour
       }
@@ -162,8 +173,29 @@ export class Race {
       const rx = Math.cos(p.h), rz = -Math.sin(p.h);
       const kidLat = (lx - p.x) * rx + (lz - p.z) * rz;
       const kidAlong = (lx - p.x) * Math.sin(p.h) + (lz - p.z) * Math.cos(p.h);
-      let want = AI_LANE[i];
+      let want = k.lane;
+      if (this.phase === 'countdown') want = k.lat;
+      // (easing aside when the kid is alongside)
       if (Math.abs(kidAlong) < 6 && Math.abs(kidLat - want) < 2.6) want = kidLat > want ? kidLat - 3 : kidLat + 3;
+      // (a rival just ahead in its lane: round it, on the side with more room,
+      // or sit behind at its pace — the rivals never drive through each other)
+      for (const o of this.ai) {
+        const gap = o.s - k.s;
+        if (o === k || gap <= 0 || gap > FOLLOW || Math.abs(o.lat - want) > 2.6) continue;
+        const side = o.lat > 0 ? o.lat - 3.2 : o.lat + 3.2;
+        if (Math.abs(side) <= TRACK_HALF - 1.5) want = side;
+        // (right on its tail and not round it yet: no closer)
+        if (gap < 5 && Math.abs(o.lat - k.lat) < 2.2) k.v = Math.min(k.v, o.v * 0.95);
+      }
+      // (one alongside: never move across into it — ease away instead; with
+      // no room left on that side, the one behind drops back)
+      for (const o of this.ai) {
+        if (o === k || Math.abs(o.s - k.s) > 4.5) continue;
+        const away = k.lat === o.lat ? (k.lane >= o.lane ? 1 : -1) : Math.sign(k.lat - o.lat);
+        if (Math.abs(k.lat - o.lat) < ABREAST) want = k.lat + away;
+        else if ((want - o.lat) * away < ABREAST) want = o.lat + away * ABREAST;
+        if (Math.abs(want) > TRACK_HALF - 1.5 && Math.abs(k.lat - o.lat) < ABREAST && k.s <= o.s) k.v = Math.min(k.v, o.v * 0.9);
+      }
       want = Math.max(-TRACK_HALF + 1.5, Math.min(TRACK_HALF - 1.5, want));
       k.lat += Math.max(-2 * dt, Math.min(2 * dt, want - k.lat));
       k.group.position.set(p.x + rx * k.lat + this.ox, 0.19, p.z + rz * k.lat + this.oz);

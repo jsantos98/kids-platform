@@ -51,15 +51,23 @@ export function raceCar(id: string | null | undefined): RaceCar {
   return RACE_CARS.find(c => c.id === id) ?? RACE_CARS.find(c => c.id === DEFAULT_CAR)!;
 }
 
-/** the three rivals for the kid's car: one from each family, never the kid's
- * own car, varied by `seed` (the race island) */
-export function rivalsFor(kid: RaceCar, seed: number): RaceCar[] {
-  const out: RaceCar[] = [];
+/** the rivals for the kid's car (seven: an eight-car grid): every family on
+ * it — one of each first, then the rest of the line-up shuffled — never the
+ * kid's own car, varied by `seed` (the race island) */
+export function rivalsFor(kid: RaceCar, seed: number, n = 7): RaceCar[] {
   let h = (seed * 2654435761) >>> 0;
-  for (const fam of ['formula', 'kart', 'toy'] as CarFamily[]) {
-    const pool = RACE_CARS.filter(c => c.family === fam && c.id !== kid.id);
-    h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0;
-    out.push(pool[h % pool.length]);
+  const next = (): number => (h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0);
+  const pool = RACE_CARS.filter(c => c.id !== kid.id);
+  // (a seeded shuffle)
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = next() % (i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  return out;
+  const out: RaceCar[] = [];
+  for (const fam of ['formula', 'kart', 'toy'] as CarFamily[]) {
+    const c = pool.find(c => c.family === fam && !out.includes(c));
+    if (c) out.push(c);
+  }
+  for (const c of pool) if (out.length < n && !out.includes(c)) out.push(c);
+  return out.slice(0, n);
 }

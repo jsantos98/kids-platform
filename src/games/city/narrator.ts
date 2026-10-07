@@ -91,7 +91,7 @@ export function lineIds(m: Moment, detail?: string | number): string[] {
     case 'gateTwo': return ['say-gate-two'];
     case 'brake': return ['say-brake'];
     case 'gateLast': return ['say-gate-last'];
-    case 'raceUp': return detail === 1 ? vs('say-race-up1', 2) : detail === 2 || detail === 3 ? [`say-race-up${detail}`] : [];
+    case 'raceUp': return detail === 1 ? vs('say-race-up1', 2) : detail === 2 || detail === 3 ? [`say-race-up${detail}`] : ['say-race-up'];
     case 'raceDown': return vs('say-race-down', 2);
     case 'raceLead': return vs('say-race-lead', 2);
     // (the place a pickup goes to: say-toDest-hospital…, G16)

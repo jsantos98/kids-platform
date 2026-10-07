@@ -274,6 +274,7 @@ export const EN = {
   'say.race.up1.2': 'You\'re in the lead! Don\'t stop now!',
   'say.race.up2': 'You passed one! You\'re second!',
   'say.race.up3': 'Great overtake! You\'re third!',
+  'say.race.up': 'You passed another one! Keep going!',
   'say.race.down.1': 'Come on! You can catch them!',
   'say.race.down.2': 'Put your foot down! You\'ll catch them!',
   'say.race.lead.1': 'Still ahead of everyone! You\'re doing great!',

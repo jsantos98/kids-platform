@@ -275,6 +275,7 @@ export const PT: Record<Key, string> = {
   'say.race.up1.2': 'Vais à frente! Não pares agora!',
   'say.race.up2': 'Passaste um! Estás em segundo!',
   'say.race.up3': 'Boa ultrapassagem! Estás em terceiro!',
+  'say.race.up': 'Passaste mais um! Continua!',
   'say.race.down.1': 'Vamos lá! Tu consegues apanhá-los!',
   'say.race.down.2': 'Carrega no acelerador! Vais apanhá-los!',
   'say.race.lead.1': 'Continuas à frente de todos! Estás a ir muito bem!',

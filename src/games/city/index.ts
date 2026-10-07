@@ -179,7 +179,8 @@ function modeSpawn(bx: number, by: number): { x: number; z: number; heading: num
   if (MODE.spawn === 'sea') return seaSpawn(bx, by);
   if (MODE.spawn === 'race') {
     const T = raceTrackFor(bx, by);
-    if (T) return { x: T.grid[1].x, z: T.grid[1].z, heading: T.grid[1].h };
+    // (the kid starts at the back of the grid)
+    if (T) { const g = T.grid[T.grid.length - 1]; return { x: g.x, z: g.z, heading: g.h }; }
   }
   if (MODE.spawn === 'rail') {
     const r = trainStart(bx, by);
@@ -2077,7 +2078,13 @@ const tick = (): void => {
     // (the race: the kid's car sounds like itself, and so does each rival)
     // (the pirate ship creaks: timber, ropes and the waves on its hull, G15)
     engineRec: MODE.id === 'race' ? engineOf(RACE_CAR) : MODE.pirate ? 'ship-creak' : undefined,
-    rivals: race ? race.ai.map(k => ({ x: k.group.position.x, z: k.group.position.z, id: engineOf(k.car), speed: k.v / AI_TOP })) : undefined,
+    // (only the three rivals nearest the kid are heard: seven engines at once
+    // on the grid were a roar — the rest are sent far off, silent)
+    rivals: race ? race.ai.map((k, i, all) => {
+      const d = (o: typeof k): number => Math.hypot(o.group.position.x - st.x, o.group.position.z - st.z);
+      const heard = all.filter(o => d(o) < d(k)).length < 3;
+      return { x: heard ? k.group.position.x : st.x + 1e4, z: heard ? k.group.position.z : st.z, id: engineOf(k.car), speed: k.v / AI_TOP };
+    }) : undefined,
   });
   // (a scene's own loops — the ladder's whir, the winch, running feet — and
   // in the city a burning call crackling as the kid comes near it)

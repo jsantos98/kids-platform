@@ -84,20 +84,21 @@ export class Breadcrumbs {
   }
 
   /** where to resume after a crash at (x, z): the newest clear crumb at
-   * least BACK metres behind, else the nearest open lane, else `fallback` */
-  pickResume(x: number, z: number, heading: number, boxes: CollisionBox[], fallback: Spot): Spot {
+   * least BACK metres behind, else the nearest open lane, else `fallback`;
+   * `free` says a spot is clear of what moves (the island's cars — G1) */
+  pickResume(x: number, z: number, heading: number, boxes: CollisionBox[], fallback: Spot, free: (x: number, z: number) => boolean = () => true): Spot {
     for (let k = this.crumbs.length - 1; k >= 0; k--) {
       const c = this.crumbs[k];
       if (Math.hypot(c.x - x, c.z - z) < BACK) continue;
-      if (clearOf(c, boxes, this.radius + 0.5)) return { ...c };
+      if (clearOf(c, boxes, this.radius + 0.5) && free(c.x, c.z)) return { ...c };
     }
-    return nearestLane(x, z, heading, boxes, this.radius) ?? { ...fallback };
+    return nearestLane(x, z, heading, boxes, this.radius, free) ?? { ...fallback };
   }
 }
 
 /** the closest right-hand lane point on a street of the city the point is
  * in: every edge within reach, at its mid-block point nearest the crash */
-export function nearestLane(x: number, z: number, heading: number, boxes: CollisionBox[], radius: number): Spot | null {
+export function nearestLane(x: number, z: number, heading: number, boxes: CollisionBox[], radius: number, free: (x: number, z: number) => boolean = () => true): Spot | null {
   const c = cityAt(x, z);
   const g = graphFor(c.bx, c.by);
   const lx = x - c.ox, lz = z - c.oz;
@@ -109,7 +110,7 @@ export function nearestLane(x: number, z: number, heading: number, boxes: Collis
     const w = laneOn(e, s, heading, c.ox, c.oz, c.bx, c.by);
     const d = Math.hypot(w.x - x, w.z - z);
     if (d >= bestD || d > 200) continue;
-    if (!drivable(w.x, w.z) || !clearOf(w, boxes, radius + 0.5)) continue;
+    if (!drivable(w.x, w.z) || !clearOf(w, boxes, radius + 0.5) || !free(w.x, w.z)) continue;
     bestD = d;
     best = w;
   }

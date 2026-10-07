@@ -14,7 +14,7 @@ import { Narrator } from './narrator.js';
 import { preloadVoice, setVoiceMuted, wakeVoice, voiceReady } from '../../i18n/voice.js';
 import { initInput, isDown, readDriveInput, pointerX } from '../../engine/input.js';
 import { setupDevCapture } from '../../engine/capture.js';
-import { createPlayer, physicsStep, startCrash, heliSirenLamps, onLand, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
+import { createPlayer, physicsStep, startCrash, touchIsBump, heliSirenLamps, onLand, HELI_ALT, PLANE_ALT, type SirenLamps } from './player.js';
 import { overlapDepth } from './island/obb.js';
 import { modeFromURL } from './modes.js';
 import { Course } from './course.js';
@@ -1272,6 +1272,25 @@ function nextStation(): { x: number; z: number; gap: number; at: boolean } | nul
   return st;
 }
 
+/** a spot clear of the island's cars (a resume never lands in one — G1) */
+const trafficFree = (x: number, z: number): boolean => !islands.bump(x, z, V.radius + 2);
+/** where a road vehicle resumes after a bump: back on the circuit in the
+ * race, else on the newest clear breadcrumb (G1) */
+function groundResume(boxes: CollisionBox[]): { x: number; z: number; heading: number } {
+  const st = player.state;
+  return race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn, trafficFree);
+}
+/** a road vehicle's bump outside the physics (an island car, the race's
+ * wall): the same flash, oops and resume as running into a wall (G1) */
+function groundBump(withCar: boolean): void {
+  const st = player.state;
+  startCrash(player);
+  sound.event('crash'); if (withCar) sound.event('bumpCar');
+  narrator.say('oops');
+  toast = '';
+  Object.assign(player.crash, groundResume(chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear())));
+}
+
 // ---- main loop ----
 const tick = (): void => {
   timeFrame();
@@ -1348,7 +1367,7 @@ const tick = (): void => {
     if (!wasCrashing && trainBoxes.some(b => inBox(b, st.x, st.z, V.radius))) {
       startCrash(player);
       sound.event('crash'); narrator.say('oops');
-      Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+      Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn, trafficFree));
     }
     const ring = course?.aim(st.x, st.z, st.heading);
     const step = physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
@@ -1357,7 +1376,7 @@ const tick = (): void => {
       toast = '';
       // (road vehicles resume on a breadcrumb; the helicopter picked its
       // spot itself, just back along its path)
-      if (V.kind === 'ground') Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+      if (V.kind === 'ground') Object.assign(player.crash, groundResume(boxes));
       // (the boat: on clear water behind it — G14)
       else if (V.kind === 'boat') Object.assign(player.crash, boatResume(boxes));
     } else if (!wasCrashing && V.kind === 'boat' && mode === 'drive') {
@@ -1411,7 +1430,7 @@ const tick = (): void => {
         if (stuck.gas && Math.hypot(st.x - stuck.x, st.z - stuck.z) < 1) {
           startCrash(player);
           sound.event('crash'); narrator.say('oops');
-          Object.assign(player.crash, race && race.offTrack(st.x, st.z) < 40 ? race.resumeSpot() : crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn));
+          Object.assign(player.crash, groundResume(boxes));
         }
         Object.assign(stuck, { t: 0, x: st.x, z: st.z, gas: true });
       }
@@ -1427,9 +1446,11 @@ const tick = (): void => {
     if (race.offTrack(st.x, st.z) > 1.5 && Math.abs(st.v) > 5) st.v *= 1 - Math.min(0.5, dt * 1.2);
     const push = race.bump(st.x, st.z);
     if (push) { st.x += push.dx; st.z += push.dz; st.v *= 1 - Math.min(0.5, dt * 3); }
-    // the kit tiles' walls: slide along them, a little slower
-    const wall = race.wall(st.x, st.z, V.halfW);
-    if (wall) { st.x += wall.dx; st.z += wall.dz; st.v *= 1 - Math.min(0.5, dt * 2); }
+    // the kit tiles' walls: running into one is a bump (G1) — back on the
+    // track behind; in the grace after a resume it only slides along
+    const wall = player.crashT > 0 ? null : race.wall(st.x, st.z, V.halfW);
+    if (wall && mode === 'drive' && touchIsBump(player)) groundBump(false);
+    else if (wall) { st.x += wall.dx; st.z += wall.dz; st.v *= 1 - Math.min(0.5, dt * 2); }
     const ev = race.update(dt, st.x, st.z);
     const at = new THREE.Vector3(st.x, 2, st.z);
     if (ev.go) { raceMsg = tr('race.go'); raceMsgT = 1.5; particles.burstConfetti(at); sound.event('go'); }
@@ -1656,11 +1677,14 @@ const tick = (): void => {
   islands.update(dt, elapsed, player.car.position, V.kind === 'ground'
     ? { x: st.x, z: st.z, heading: st.heading, v: st.v, halfL: V.glbLen / 2, halfW: V.halfW }
     : null, robbers.map(r => r.chaser()).filter((c): c is NonNullable<typeof c> => !!c));
-  // nobody drives through anybody: the island's cars push a road vehicle
-  // out of their footprint (G8)
+  // nobody drives through anybody (G8): running into one of the island's
+  // cars is a bump (G1) — the flash, the oops, and back on a clear lane;
+  // standing, in a mission's scene or in the grace after a resume, the car
+  // only pushes the kid's vehicle out of its footprint
   if (V.kind === 'ground') {
-    const push = islands.bump(st.x, st.z, V.radius + 0.3);
-    if (push) {
+    const push = player.crashT > 0 ? null : islands.bump(st.x, st.z, V.radius + 0.3);
+    if (push && mode === 'drive' && touchIsBump(player)) groundBump(true);
+    else if (push) {
       st.x += push.dx; st.z += push.dz;
       if (Math.abs(st.v) > 2) sound.event('bumpCar');
       st.v *= 1 - Math.min(0.5, dt * 3);

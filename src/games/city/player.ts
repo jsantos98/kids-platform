@@ -181,6 +181,9 @@ export interface Player {
   /** the plane's steering, eased (keys are all-or-nothing): it turns and
    * banks into the turn smoothly */
   steerS: number;
+  /** >0 for a moment after a resume: a road vehicle touching something
+   * then is only pushed apart, not crashed again (no crash loop, G1) */
+  graceT: number;
 }
 
 export interface PhysicsInput {
@@ -190,6 +193,8 @@ export interface PhysicsInput {
 }
 
 const CRASH_FLASH = 1.6;
+/** seconds after a resume when a touch is forgiven (G1) */
+export const GRACE = 1.2;
 
 export function createPlayer(V: VehicleConfig, x: number, z: number, heading: number): Player {
   const car = V.make();
@@ -209,6 +214,7 @@ export function createPlayer(V: VehicleConfig, x: number, z: number, heading: nu
     crashT: 0,
     crash: { x: 0, z: 0, heading: 0 },
     steerS: 0,
+    graceT: GRACE,
   };
   if (V.glb) {
     // swap in the CC0 Kenney model once it streams in; procedural stays if it fails
@@ -323,6 +329,12 @@ export function heliSirenLamps(car: THREE.Object3D, police: boolean): SirenLamps
     out[side > 0 ? 'red' : 'blue'].push(lamp);
   }
   return out;
+}
+
+/** is a road vehicle's touch on something a bump (G1)? Moving, not already
+ * flashing, and past the grace after its last resume */
+export function touchIsBump(p: Player): boolean {
+  return Math.abs(p.state.v) > 0.2 && p.graceT <= 0 && p.crashT <= 0;
 }
 
 /** begin the flash-and-resume sequence (bump or stuck). The caller sets
@@ -511,8 +523,17 @@ export function physicsStep(
       st.heading = p.crash.heading;
       st.v = 0;
       p.car.visible = true;
+      p.graceT = GRACE;
     }
   } else {
+    p.graceT = Math.max(0, p.graceT - dt);
+    // every street collision is a bump (G1): touching a building, a fence, a
+    // pole head-on, the waterline or a bridge's parapet while moving
+    // flashes the vehicle and the caller puts it back on a clear lane,
+    // standing, ready to go — a slow touch only scraped before, and a car
+    // could wedge itself where no gas got it out. (Just after a resume a
+    // touch only slides it, so a resume spot can't start a crash loop.)
+    const moving = touchIsBump(p);
     const nx = st.x + Math.sin(st.heading) * st.v * dt;
     const nz = st.z + Math.cos(st.heading) * st.v * dt;
     let hitX = false, hitZ = false, poleHit = false;
@@ -536,25 +557,27 @@ export function physicsStep(
       if (nx > b.x1 - V.radius && nx < b.x2 + V.radius && st.z > b.z1 - 0.8 && st.z < b.z2 + 0.8) hitX = true;
       if (st.x > b.x1 - 0.8 && st.x < b.x2 + 0.8 && nz > b.z1 - V.radius && nz < b.z2 + V.radius) hitZ = true;
     }
-    // the shore is a soft wall: the sea stops the wheels like a scrape
-    // (never a crash), so a kid who leaves the road on a beach just slides
-    // along the waterline
+    // the waterline and the parapets of a raised river bridge: reaching
+    // one while moving is a bump (above); in the grace after a resume the
+    // vehicle slides along it instead, never over it
     // (already off the land — a resume gone wrong — it may always move)
-    // the parapets of a raised bridge deck are the same soft wall: up on
-    // a river bridge the vehicle slides along its sides, never over them
     if (offDeckSide(st.x, st.z, nx, nz, V.halfW)) {
+      if (moving) { startCrash(p); return { crashed: true }; }
       if (!offDeckSide(st.x, st.z, nx, st.z, V.halfW)) st.x = nx;
       else if (!offDeckSide(st.x, st.z, st.x, nz, V.halfW)) st.z = nz;
       st.v *= 1 - Math.min(0.9, dt * 4);
       return { crashed: false };
     }
     if (!onGround(nx, nz) && onGround(st.x, st.z)) {
+      if (moving) { startCrash(p); return { crashed: true }; }
       if (onGround(nx, st.z)) st.x = nx;
       else if (onGround(st.x, nz)) st.z = nz;
       st.v *= 1 - Math.min(0.9, dt * 4);
       return { crashed: false };
     }
-    if ((hitX || hitZ || (poleHit && Math.abs(st.v) > 1.0)) && Math.abs(st.v) > 1.4) {
+    // (a pole only on a head-on hit going forward: backing away from one
+    // is no bump)
+    if ((hitX || hitZ || (poleHit && st.v > 0)) && moving) {
       // crash! flash in place; the caller picks the resume spot (a
       // breadcrumb on the road behind — see breadcrumb.ts)
       startCrash(p);
@@ -562,7 +585,7 @@ export function physicsStep(
     } else {
       if (!hitX) st.x = nx;
       if (!hitZ) st.z = nz;
-      if (hitX || hitZ) st.v *= 0.4; // gentle scrape
+      if (hitX || hitZ) st.v *= 0.4; // (the grace after a resume: a scrape)
     }
   }
   return { crashed };

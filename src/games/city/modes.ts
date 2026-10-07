@@ -2,7 +2,7 @@
 // `?mode=<id>` picks one; the old `?vehicle=` links still work as aliases.
 import { VEHICLES, type VehicleConfig } from './player.js';
 
-export type ModeId = 'truck' | 'police' | 'ambulance' | 'tow' | 'garbage' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'policeBoat' | 'pirate' | 'train' | 'race';
+export type ModeId = 'truck' | 'police' | 'ambulance' | 'tow' | 'garbage' | 'heliPolice' | 'heliMedical' | 'plane' | 'boat' | 'policeBoat' | 'pirate' | 'train' | 'race' | 'car';
 
 /** emergency calls a mode answers (missions.ts) */
 export type CallKind = 'fire' | 'cat' | 'patient' | 'rescue' | 'breakdown' | 'trash';
@@ -53,6 +53,8 @@ export const MODES: Record<ModeId, ModeDef> = {
   pirate: { ...base, id: 'pirate', icon: '🏴‍☠️', vehicle: VEHICLES.pirate, pirate: true, spawn: 'sea' },
   train: { ...base, id: 'train', icon: '🚆', vehicle: VEHICLES.train, stations: true, spawn: 'rail' },
   race: { ...base, id: 'race', icon: '🏎️', vehicle: VEHICLES.kart, spawn: 'race' },
+  // a free drive: a family car and the islands, no missions at all
+  car: { ...base, id: 'car', icon: '🚗', vehicle: VEHICLES.car },
 };
 
 /** old ?vehicle= values */

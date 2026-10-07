@@ -733,6 +733,8 @@ const particles = new Particles(scene);
 
 // ---- HUD ----
 const missionEl = document.getElementById('mission')!;
+// (the free drive has nothing to score)
+if (MODE.id === 'car') missionEl.style.display = 'none';
 // the game clock (G10): an hour hand going round a 12-hour face, a sun on
 // the face by day and the moon (in tonight's phase) by night; the face
 // darkens with the sky
@@ -1979,6 +1981,10 @@ const tick = (): void => {
     promptText.textContent = nd < reach ? tr(heliMode ? 'call.hover' : 'call.stop')
       : tr(`call.${heliMode ? 'fly' : 'drive'}.${near.type}` as Key);
     if (nd < reach && stopped) openCall(near);
+  } else if (MODE.id === 'car') {
+    // the free drive: no calls, no arrow, just the islands
+    guideEl.style.opacity = '0';
+    promptEl.style.display = 'none';
   } else {
     guideEl.style.opacity = '1';
     promptEl.style.display = 'none';

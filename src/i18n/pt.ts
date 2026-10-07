@@ -76,6 +76,8 @@ export const PT: Record<Key, string> = {
   'mode.train.blurb': 'Leva o comboio a todas as estações!',
   'mode.race.title': 'Corrida de Karts',
   'mode.race.blurb': 'Três voltas — corre até à bandeira!',
+  'mode.car.title': 'Carro',
+  'mode.car.blurb': 'Passeia por onde quiseres nas ilhas!',
 
   // ---- a página do jogo ----
   'city.pageTitle': 'Cidade Sem Fim',
@@ -214,6 +216,7 @@ export const PT: Record<Key, string> = {
   'say.start.pirate': 'Olá, capitão pirata! Apanha os navios e encontra o tesouro!',
   'say.start.train': 'Todos a bordo! Leva o comboio até à estação!',
   'say.start.race': 'Prepara-te para a corrida!',
+  'say.start.car': 'Vamos passear! Vai por onde quiseres!',
   'say.call.fire.1': 'Há um fogo! Depressa!',
   'say.call.fire.2': 'Oh não, uma casa está a arder!',
   'say.call.cat.1': 'Um gatinho ficou preso lá em cima!',

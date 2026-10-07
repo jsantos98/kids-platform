@@ -41,6 +41,11 @@ function entry(e: Omit<GameEntry, 'title' | 'blurb'>): GameEntry {
 
 export const GAMES: GameEntry[] = [
   entry({
+    id: 'car', icon: '🚗', color: '#5aa0e0',
+    controls: { drive: 'road', siren: false },
+    url: mode('car'), model: { glb: 'assets/kenney/hatchback-sports.glb', len: 4.2 },
+  }),
+  entry({
     id: 'truck', icon: '🚒', color: '#e25c5c',
     controls: { drive: 'road', siren: true },
     url: mode('truck'), model: { glb: 'assets/kenney/firetruck.glb', len: 6.6 },

@@ -75,6 +75,8 @@ export const EN = {
   'mode.train.blurb': 'Drive the train to every station!',
   'mode.race.title': 'Kart Race',
   'mode.race.blurb': 'Three laps — race to the flag!',
+  'mode.car.title': 'Car',
+  'mode.car.blurb': 'Drive wherever you like round the islands!',
 
   // ---- the game page ----
   'city.pageTitle': 'Endless City',
@@ -213,6 +215,7 @@ export const EN = {
   'say.start.pirate': 'Ahoy, captain! Catch the ships and find the treasure!',
   'say.start.train': 'All aboard! Drive the train to the station!',
   'say.start.race': 'Get ready for the race!',
+  'say.start.car': 'Let\'s go for a drive! Go wherever you like!',
   'say.call.fire.1': 'There is a fire! Hurry!',
   'say.call.fire.2': 'Oh no, a house is on fire!',
   'say.call.cat.1': 'A kitten is stuck up high!',

@@ -6,6 +6,7 @@
 // (G4), so no key is listed for them.
 import { t, type Key } from '../i18n/index.js';
 import type { Drive, GameEntry } from './registry.js';
+import { autoSpeed } from '../engine/settings.js';
 
 const GAS_BRAKE: Record<Drive, [Key, Key]> = {
   road: ['keys.gas', 'keys.brakeReverse'],
@@ -30,5 +31,7 @@ export function keysHtml(e: GameEntry): string {
     ...(drive === 'train' ? [] : [k('R', 'keys.reset')]),
     k('Esc', 'keys.garage'),
   ];
+  // (auto speed on: the game works the gas — the train is still the kid's, G18)
+  if (autoSpeed() && drive !== 'train') parts.unshift(`<span class="k"><b>🦶</b> ${t('keys.auto')}</span>`);
   return `<span class="lead">${t('keys.lead')}</span> ${parts.join(' · ')}`;
 }

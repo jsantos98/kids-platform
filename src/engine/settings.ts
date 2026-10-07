@@ -91,6 +91,20 @@ export function setQualityPref(p: QualityPref): void {
   try { localStorage.setItem('game.quality', p); } catch { /* no storage */ }
 }
 
+/** auto speed (G18): the game works the gas, the kid only steers — off
+ * unless the grown-ups turn it on; `?auto=0|1` overrides it for one visit */
+export function autoSpeed(): boolean {
+  try {
+    const q = new URLSearchParams(location.search).get('auto');
+    if (q === '0' || q === '1') return q === '1';
+  } catch { /* no location */ }
+  try { return localStorage.getItem('game.autoSpeed') === '1'; } catch { return false; }
+}
+
+export function setAutoSpeed(on: boolean): void {
+  try { localStorage.setItem('game.autoSpeed', on ? '1' : '0'); } catch { /* no storage */ }
+}
+
 /** where "auto" settled last time (medium the first time) */
 export function autoQuality(): Quality {
   try {

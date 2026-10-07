@@ -34,6 +34,11 @@ export const EN = {
   'settings.quality.low': 'low',
   'settings.quality.medium': 'medium',
   'settings.quality.high': 'high',
+  'settings.auto': 'Auto speed',
+  'keys.auto': 'auto speed: just steer',
+  'settings.auto.off': 'Off',
+  'settings.auto.on': 'On',
+  'settings.autoNote': 'On: the game works the gas and stops at each mission by itself — the child only steers. The chases, races and courses keep speeding; the train is still driven by hand.',
   'settings.qualityNote': 'Automatic lowers the graphics by itself if the game runs slowly. Low is best for an older computer.',
 
   // the race cars (raceCars.ts), picked after the race in the garage

@@ -22,7 +22,7 @@ import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/in
 import { speak, preloadVoice, speaking } from './i18n/voice.js';
 import { GameAudio } from './engine/audio.js';
 import type { SfxId } from './engine/sfxList.js';
-import { volume, setVolume, qualityPref, setQualityPref, type VolumeKey, type QualityPref } from './engine/settings.js';
+import { volume, setVolume, qualityPref, setQualityPref, autoSpeed, setAutoSpeed, type VolumeKey, type QualityPref } from './engine/settings.js';
 
 applyI18n('garage.pageTitle');
 preloadVoice();
@@ -412,12 +412,16 @@ function placeCards(time: number): void {
 const nameT = document.querySelector('#name .t') as HTMLElement;
 const nameB = document.querySelector('#name .b') as HTMLElement;
 const keysEl = document.getElementById('keys')!;
+/** the keys the chosen vehicle answers to in the game (any race car: the
+ * race's), and auto speed's note when it's on */
+function showKeys(): void {
+  keysEl.innerHTML = keysHtml(stage === 'modes' ? GAMES[sel] : RACE);
+}
 function showName(): void {
   const e = list[sel];
   nameT.textContent = stage === 'modes' ? `${e.icon} ${e.title}` : e.id === 'back' ? `↩ ${e.title}` : e.title;
   nameB.textContent = e.blurb;
-  // (the keys the chosen vehicle answers to in the game; any race car: the race's)
-  keysEl.innerHTML = keysHtml(stage === 'modes' ? GAMES[sel] : RACE);
+  showKeys();
   // (restart the pop)
   nameT.style.animation = 'none';
   void nameT.offsetWidth;
@@ -587,6 +591,18 @@ const showQuality = (): void => {
 };
 for (const b of qualityBtns) b.addEventListener('click', () => { setQualityPref(b.dataset.quality as QualityPref); showQuality(); });
 showQuality();
+// auto speed (G18): the game works the gas, the kid only steers
+const autoBtns = [...settingsEl.querySelectorAll<HTMLButtonElement>('button[data-auto]')];
+const showAuto = (): void => {
+  const on = autoSpeed() ? '1' : '0';
+  for (const b of autoBtns) {
+    b.classList.toggle('on', b.dataset.auto === on);
+    b.setAttribute('aria-checked', String(b.dataset.auto === on));
+  }
+  showKeys();
+};
+for (const b of autoBtns) b.addEventListener('click', () => { setAutoSpeed(b.dataset.auto === '1'); showAuto(); });
+showAuto();
 settingsEl.addEventListener('click', e => { if (e.target === settingsEl) openSettings(false); });
 document.getElementById('settingsClose')!.addEventListener('click', () => openSettings(false));
 /** what a slider sounds like: a spoken name, the music (it plays on), a

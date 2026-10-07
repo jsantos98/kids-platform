@@ -2,7 +2,8 @@
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
-import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, type Quality } from '../../engine/settings.js';
+import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
+import { autoInput, type AutoGoal } from './autoSpeed.js';
 import { bakedNight, templateToMesh } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
@@ -1272,6 +1273,12 @@ function nextStation(): { x: number; z: number; gap: number; at: boolean } | nul
   return st;
 }
 
+/** auto speed (G18), read once: the game works the gas, the kid steers */
+const AUTO = autoSpeed();
+/** what auto speed does now — set by the guidance each frame (a call, a
+ * delivery or the treasure to stop at, a chase to speed through), used by
+ * the next frame's physics */
+let autoGoal: AutoGoal = { pace: 'cruise' };
 /** a spot clear of the island's cars (a resume never lands in one — G1) */
 const trafficFree = (x: number, z: number): boolean => !islands.bump(x, z, V.radius + 2);
 /** where a road vehicle resumes after a bump: back on the circuit in the
@@ -1359,6 +1366,8 @@ const tick = (): void => {
     // the race's countdown holds the kart on the grid
     // (no brake: at a standstill the brake pedal is reverse)
     if (race?.frozen) { input.gas = 0; input.brake = 0; input.steer = 0; st.v = 0; }
+    // auto speed (G18): its pedals, the kid's own winning
+    else if (AUTO && mode === 'drive' && player.crashT <= 0) Object.assign(input, autoInput(input, st, V.maxF, race ? { pace: 'go' } : autoGoal));
     const trainBoxes = V.kind === 'ground' ? railway.unitBoxes(st.x, st.z) : [];
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear(), trainBoxes);
     const wasCrashing = player.crashT > 0;
@@ -1846,8 +1855,11 @@ const tick = (): void => {
     promptEl.style.display = 'block';
   };
 
+  // (auto speed: cruise unless a branch below says otherwise)
+  autoGoal = { pace: 'cruise' };
   if (director.busy) {
     // ---- a mission scene is playing (or fading in/out) ----
+    autoGoal = { pace: 'off' };
     guideEl.style.opacity = '0';
     promptEl.style.display = view.scene ? 'block' : 'none';
     promptText.textContent = view.prompt;
@@ -1873,6 +1885,7 @@ const tick = (): void => {
     promptFill.style.width = '0%';
     const heliMode = V.kind === 'heli', boat = V.kind === 'boat';
     const reach = heliMode ? (dp.pad ? 7 : 9) : boat ? 25 : 12;
+    autoGoal = { pace: 'stop', x: dp.x, z: dp.z, reach };
     const stopped = heliMode ? Math.abs(st.v) < 4 : boat ? Math.abs(st.v) < 2 : Math.abs(st.v) < 1 && player.crashT <= 0;
     // (stopping by a call that waits: the cargo comes first)
     if (near && nd < (heliMode ? 9 : 15) && stopped && dd > reach) {
@@ -1885,6 +1898,7 @@ const tick = (): void => {
   } else if (robber) {
     // ---- the chase: the nearest getaway car ----
     const rd = Math.hypot(robber.x - st.x, robber.z - st.z);
+    autoGoal = { pace: 'go' };
     showGuide(GOAL_ICON.robber, rd, Math.round((5 * robber.caught) / CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * robber.caught) / CATCH_T)}%`;
     const close = V.kind === 'heli' ? rd < 16 : rd < CATCH_R;
@@ -1895,12 +1909,14 @@ const tick = (): void => {
   } else if (trove) {
     // ---- the pirates: sail to the treasure islet and stop beside it ----
     const td = Math.hypot(trove.x - st.x, trove.z - st.z) - (treasure?.islet.r ?? 0);
+    autoGoal = { pace: 'stop', x: trove.x, z: trove.z, reach: (treasure?.islet.r ?? 0) + 26 };
     showGuide(GOAL_ICON.treasure, Math.max(0, td), Math.max(0, Math.min(5, Math.round(5 * (1 - td / 400)))));
     promptFill.style.width = '0%';
     promptText.textContent = tr(td < 40 ? 'pirate.stopHere' : 'pirate.toTreasure');
   } else if (ship) {
     // ---- the pirates: catch the nearest ship ----
     const sd = Math.hypot(ship.x - st.x, ship.z - st.z);
+    autoGoal = { pace: 'go' };
     showGuide(GOAL_ICON[ship.kind], sd, Math.round((5 * ship.caught) / SHIP_CATCH_T));
     promptFill.style.width = `${Math.min(100, (100 * ship.caught) / SHIP_CATCH_T)}%`;
     promptText.textContent = tr(MODE.quarry ? (sd < SHIP_CATCH_R * 1.6 ? 'quarry.close' : 'quarry.hunt') : sd < SHIP_CATCH_R * 1.6 ? 'pirate.close' : 'pirate.hunt');
@@ -1939,6 +1955,7 @@ const tick = (): void => {
     promptText.textContent = say;
   } else if (course && gate) {
     // ---- checkpoint course: every glowing gate, in any order ----
+    autoGoal = { pace: 'go' };
     showGuide(GOAL_ICON[course.kind], goalD,
       Math.round((5 * course.passedCount) / course.gates.length));
     promptText.textContent = tr(course.kind === 'gates' ? 'course.gates'
@@ -2001,6 +2018,7 @@ const tick = (): void => {
     // scene opens
     const heliMode = V.kind === 'heli';
     const reach = heliMode ? 9 : near.type === 'cat' ? 12 : 15;
+    autoGoal = { pace: 'stop', x: near.pos.x, z: near.pos.z, reach };
     const stopped = heliMode ? Math.abs(st.v) < 4 : Math.abs(st.v) < 1 && player.crashT <= 0;
     promptText.textContent = nd < reach ? tr(heliMode ? 'call.hover' : 'call.stop')
       : tr(`call.${heliMode ? 'fly' : 'drive'}.${near.type}` as Key);

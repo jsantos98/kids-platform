@@ -35,6 +35,11 @@ export const PT: Record<Key, string> = {
   'settings.quality.low': 'baixos',
   'settings.quality.medium': 'médios',
   'settings.quality.high': 'altos',
+  'settings.auto': 'Velocidade automática',
+  'keys.auto': 'velocidade automática: só tens de virar',
+  'settings.auto.off': 'Desligada',
+  'settings.auto.on': 'Ligada',
+  'settings.autoNote': 'Ligada: o jogo acelera e pára sozinho em cada missão — a criança só tem de virar. Nas perseguições, corridas e percursos vai sempre a acelerar; o comboio continua a ser conduzido à mão.',
   'settings.qualityNote': 'O automático baixa os gráficos sozinho se o jogo estiver lento. Baixos é o melhor para um computador mais antigo.',
 
   // os carros de corrida (raceCars.ts), escolhidos depois da corrida na garagem

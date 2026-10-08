@@ -5,7 +5,7 @@
 // down outside the night (or up in it), the shadow light dips under LIGHT_MIN_ELEV, or
 // the moon skips any of its eight phases.
 //   npx tsx tools/check-daylight.ts
-import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES, LIGHT_MIN_ELEV, type DayState } from '../src/engine/daylight.js';
+import { dayState, startPhase, rollStart, hourOf, DAY_LEN, MOON_PHASES, LIGHT_MIN_ELEV, type DayState } from '../src/engine/daylight.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; if (fails < 30) console.log('  FAIL ' + m); };
@@ -76,6 +76,21 @@ if (seen.size !== MOON_PHASES) fail(`only ${seen.size} of ${MOON_PHASES} moon ph
 // 6. every game starts in the morning; the named times land where they say
 const first = dayState(0);
 if (first.night > 0.01 || first.sunDir[1] <= 0) fail('a new game does not start in daylight');
+// a new game's random start: a fraction of the day the game reads back as
+// that time, and every hour of the 24 comes up
+{
+  const hours = new Set<number>();
+  for (let k = 0; k < 2400; k++) {
+    const r = k / 2400, s = rollStart(() => r), p = startPhase(s);
+    if (Math.abs(p - Math.floor(r * 1000) / 1000) > 1e-9) fail(`a rolled start ${s} reads back as ${p}`);
+    hours.add(Math.floor(hourOf(p)));
+  }
+  if (hours.size !== 24) fail(`a new game's random start reaches only ${hours.size} of the 24 hours`);
+  const draws = new Set<string>(); for (let k = 0; k < 50; k++) draws.add(rollStart());
+  if (draws.size < 30) fail(`fifty random starts gave only ${draws.size} different times`);
+  console.log(`random start: all 24 hours reachable, ${draws.size} different times in 50 draws`);
+}
+
 // the clock: 8:00 at the start, the hours land where they say
 if (Math.abs(hourOf(dayState(0).phase) - 8) > 1e-6) fail(`a new game starts at ${hourOf(dayState(0).phase).toFixed(2)}h, not 8:00`);
 if (Math.abs(hourOf(dayState(30).phase) - 9) > 1e-6) fail('a game hour is not 30 s');

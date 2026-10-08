@@ -4,7 +4,7 @@
 // 7–21h, dusk 21–23h, night 23–5h; the sun rises at 6h and sets at 22h.
 // Nights are darker rather than dark (the fill light keeps ~45 % of the
 // day's and the moon lights the streets: the darkest moment keeps ≥15 % of
-// noon's light, still easy to read). Every game starts at 8:00;
+// noon's light, still easy to read). A new game starts at a random time of day (written into the URL, `?time=` replays it; a replay by `?seed=` alone starts at 8:00);
 // `?time=dawn|morning|day|noon|dusk|night|midnight`, an hour (`?time=22`)
 // or a fraction of the day jumps there. `phase` is the fraction of the day
 // since midnight. Everything that lights up at night reads `night` (0 by
@@ -85,7 +85,8 @@ const KEYS: Array<[number, Palette]> = [
   [1, NIGHT],
 ];
 
-/** the time a new game starts at: 8:00 */
+/** the time a game starts at when it isn't told otherwise (a replay by
+ * `?seed=` alone): 8:00 — a new game rolls its own (`rollStart`) */
 export const MORNING = 8 * H;
 /** the middle of the day (the sun at its highest) */
 export const NOON = (SUN_RISE + SUN_SET) / 2;
@@ -102,6 +103,13 @@ export function startPhase(query: string | null): number {
   if (!Number.isFinite(f)) return MORNING;
   const p = f > 1 ? f / 24 : f;
   return ((p % 1) + 1) % 1;
+}
+
+/** a random time of day for a new game, as the `?time=` fraction of the day
+ * it is written into the URL as (every hour of the 24 equally likely: a game
+ * may start at dawn, at noon, at dusk or at night) */
+export function rollStart(rand: () => number = Math.random): string {
+  return (Math.floor(rand() * 1000) / 1000).toString();
 }
 
 /** the hour on the clock for a time of day (0 … 24) */

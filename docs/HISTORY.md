@@ -43,6 +43,11 @@ driving well.
 **A car just to drive** — the first in the garage: no missions, no arrow,
 anywhere on the islands.
 
+**Any time of day.** A new game now starts at a random time of day (morning,
+noon, dusk, night…) instead of always at 8:00. The time is written into the
+address like the world's seed, so refreshing or sharing the page replays the
+same moment.
+
 **Steering is easy.** The fire truck (and every other vehicle) needed the
 turn planned well ahead: at full speed it turned in a circle 13 m wide, and
 it barely turned at all from a crawl. Now every road vehicle turns in a tight

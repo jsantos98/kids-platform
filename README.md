@@ -160,7 +160,7 @@ The game page is `play/city.html`.
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |
-| `?time=night\|dusk\|noon\|22` | start at a time of day (a name or an hour; every game starts at 8:00) |
+| `?time=night\|dusk\|noon\|22` | start at a time of day (a name or an hour); a new game starts at a random one, written into the URL like the seed — a replay by `?seed=` alone starts at 8:00 |
 | `?scene=fire\|cat\|rescue\|patient\|caught\|tow\|bins\|pullover\|doors\|battle\|dig` | open a mission scene straight away |
 | `?noworker=1`, `?noprefetch=1` | build islands on the main thread / on demand (for comparison) |
 | `?debugsea=1` | expose `window.__dbg` for debugging and automated checks |

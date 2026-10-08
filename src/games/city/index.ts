@@ -8,7 +8,7 @@ import { Landing, type Runway } from './landing.js';
 import { StreetAssist } from './streetAssist.js';
 import { airportFor, airportMark } from './airport.js';
 import { bakedNight, templateToMesh } from '../../engine/baked.js';
-import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
+import { dayState, startPhase, rollStart, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
 import { rng, chunkSeed } from '../../engine/rng.js';
 import { GameAudio, type EngineKind, type SirenStyle } from '../../engine/audio.js';
@@ -97,15 +97,21 @@ const P = {
     : 1 + ((Math.random() * 999999999) | 0),
 };
 const MODE = modeFromURL(q);
+// a new game also starts at a random time of day, written into the URL like
+// the seed (a replay by ?seed= alone starts at 8:00 as it always did; ?time=
+// picks one)
+const startTime = q.get('time') ?? (seedParam === null ? rollStart() : null);
 if (seedParam === null) {
   const u = new URL(location.href);
   u.searchParams.set('seed', String(P.seed));
+  if (q.get('time') === null && startTime !== null) u.searchParams.set('time', startTime);
   history.replaceState(null, '', u.toString());
 }
 setCityBase(P.seed);
-// the time of day (G10): every game starts in the morning (?time= jumps);
-// the moon's phase on the first night is the world's own
-const START_PHASE = startPhase(q.get('time'));
+// the time of day (G10): a new game starts at a random time (?time= picks
+// one; a replay by ?seed= alone starts at 8:00); the moon's phase on the
+// first night is the world's own
+const START_PHASE = startPhase(startTime);
 const MOON_BASE = ((P.seed % MOON_PHASES) + MOON_PHASES) % MOON_PHASES;
 /** (a debug shift of the day clock: __dbg.setPhase) */
 let dayShift = 0;

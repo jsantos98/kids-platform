@@ -26,8 +26,9 @@ its corners, joined to the shore by a causeway (like Singapore's Changi):
 a runway with lights for the night, a terminal, a control tower, a hangar,
 a windsock and planes at the gates; the airport is on the map. Landing is
 flown by the child: point the plane down a runway — or just fly over it —
-and it starts to come down a gentle glide, and the 🛬 on the map leads the
-way in. The child steers it in the whole way and can call it off any time by
+and it starts to come down a gentle glide. The map marks the airport of
+the island below with a 🛬 and draws the runway's line dotted out from both
+ends, to line up with. The child steers it in the whole way and can call it off any time by
 steering away or pressing the gas; the plane climbs back up. Close to the
 ground it eases onto the runway's line, so a plane a little off still lands.
 Once on the runway it stops (by itself with auto speed), turns round on the
@@ -44,7 +45,7 @@ anywhere on the islands.
 
 | | |
 |---|---|
-| ![The plane coming down onto the runway; the airport is marked on the map](history/2026-10-08-airports/descent.jpg) | ![Rolling out on the runway, past the control tower](history/2026-10-08-airports/landing-roll.jpg) |
+| ![The plane coming down onto the runway: the map marks the airport and dots its approach line](history/2026-10-08-airports/descent.jpg) | ![Rolling out on the runway, past the control tower](history/2026-10-08-airports/landing-roll.jpg) |
 | ![Turned round at the end of the runway, taking off again](history/2026-10-08-airports/takeoff.jpg) | ![The airport's causeway leading out to its island](history/2026-10-08-airports/airport-island.jpg) |
 | ![The race grid: eight cars, the child last (8th)](history/2026-10-08-airports/race-grid.jpg) | ![The free-drive car in the city: no missions, no arrow](history/2026-10-08-airports/car-drive.jpg) |
 | ![The garage's settings: auto speed, with its note](history/2026-10-08-airports/auto-speed-settings.jpg) | |

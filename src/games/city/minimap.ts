@@ -16,6 +16,7 @@ import { WORLD_CHUNKS, ISLAND, CENTER } from '../../worlds/world.js';
 import { CITY_PITCH } from '../../worlds/cityGrid.js';
 import { bridgeLayout } from './bridge.js';
 import { airportFor, boxPoint } from './airport.js';
+import { APPROACH_LEN } from './landing.js';
 import { coastFor, causewaySpan } from '../../worlds/coast.js';
 import { isletsFor } from './islets.js';
 import { callIcon, type Missions } from './missions.js';
@@ -221,6 +222,18 @@ export class Minimap {
       quad(A.link, '#8f97a3');
       quad(A.isle, '#c8c2b4');
       quad({ ...A.runway, hl: A.runway.hl + A.pad }, '#5c636d');
+      // the runway's centre line, dotted out from both ends: the way in
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 2.5 * PX;
+      ctx.setLineDash([9 * PX, 9 * PX]);
+      ctx.beginPath();
+      for (const end of [-1, 1]) {
+        const a = boxPoint(A.runway, end * (A.runway.hl + A.pad), 0), b = boxPoint(A.runway, end * (A.runway.hl + APPROACH_LEN), 0);
+        ctx.moveTo(tx(a.x), ty(a.z));
+        ctx.lineTo(tx(b.x), ty(b.z));
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // the river, ribbon-width

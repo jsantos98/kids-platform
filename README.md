@@ -49,7 +49,7 @@ and carries on from a spot just behind.
 | 🚛 Garbage truck | Drive to full bins, stop the side grabber at each one to tip it in; three stops fill the truck — then off to the recycling depot |
 | 🚁 Rescue helicopter | Fly to the call, hover over it and winch the person up, then land on a hospital's roof helipad |
 | 🚁 Police helicopter | Keep the getaway car in the searchlight |
-| ✈️ Plane | Swoop through sky rings (it can't stall or crash); point it down an airport's runway (the 🛬 on the map shows the way in) and it comes down to land while the kid steers it in — steer away or press the gas to call it off; on the ground it stops, turns round and takes off again |
+| ✈️ Plane | Swoop through sky rings (it can't stall or crash); point it down an airport's runway (the 🛬 on the map marks the airport, a dotted line the way in) and it comes down to land while the kid steers it in — steer away or press the gas to call it off; on the ground it stops, turns round and takes off again |
 | 🚤 Boat | Sail round the island through the buoys, among some thirty boats and ships |
 | 🚨 Police boat | Chase the speedboats breaking the rules and the pirate ship; stay in their wake till they give up, then bring them to the police pier |
 | 🏴‍☠️ Pirate ship | Catch the rival pirate ship and the merchants, win the sea battle with the cannon, then follow the treasure map to a little island and dig up the chest |

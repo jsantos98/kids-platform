@@ -5,7 +5,7 @@ import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
 import { Landing, type Runway } from './landing.js';
-import { airportFor } from './airport.js';
+import { airportFor, airportMark } from './airport.js';
 import { bakedNight, templateToMesh } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
 import { prepBakedModels, bakedModel } from '../../engine/assets.js';
@@ -796,11 +796,11 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
       ...(landing && (landing.phase === 'fly' || landing.phase === 'descend') ? nearestRunway() : []),
     ];
   });
-/** the plane's map mark (R41): the way in to the nearest runway — out to
- * the gate on its centre line, then its end (landing.ts mark) */
+/** the plane's map mark (R41): the airport of the island it is over (or of
+ * the runway it is coming down to) */
 function nearestRunway(): Array<{ x: number; z: number; icon: string }> {
-  const m = landing?.mark(player.state, runwaysNear(player.state.x, player.state.z));
-  return m ? [{ ...m, icon: '🛬' }] : [];
+  const [bx, by] = (landing?.active ?? (() => { const h = cityAt(player.state.x, player.state.z); return `${h.bx},${h.by}`; })()).split(',').map(Number);
+  return [{ ...airportMark(bx, by), icon: '🛬' }];
 }
 
 // ---- the city grid: drive across a strait and the next city wakes up.

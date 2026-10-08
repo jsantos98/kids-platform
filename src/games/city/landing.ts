@@ -15,7 +15,8 @@
 // on (G18), else rolling to a gentle stop, the brake pedal stopping it sooner
 // (and never past the runway's end) — turns round on the spot, races back
 // down the runway, lifts off and climbs back to its cruise, where the kid has
-// it again. The map's mark leads the kid in (`mark`).
+// it again. The map marks the airport (🛬) and draws the runway's centre line
+// out from both ends, to line up with.
 import type { PhysicsInput, PlayerState } from './player.js';
 import { RUNWAY_Y, RUNWAY_HW } from './airport.js';
 
@@ -26,8 +27,10 @@ export type LandPhase = 'fly' | 'descend' | 'roll' | 'turn' | 'takeoff';
 export type LandEvent = 'land' | 'cancel' | 'landed' | 'takeoff' | 'airborne';
 
 /** where a descent may begin: up to this far short of the threshold (m), or
- * anywhere over the runway */
-const FROM = 700;
+ * anywhere over the runway — the map draws the runway's centre line out this
+ * far from both ends, for the kid to line up with */
+export const APPROACH_LEN = 700;
+const FROM = APPROACH_LEN;
 /** how far off its heading (rad), and off the centre line: a funnel, W0 m
  * either side at the threshold (and over the runway) and widening by SPLAY
  * a metre out */
@@ -35,9 +38,6 @@ const ALIGN = 50 * Math.PI / 180, W0 = 12, SPLAY = 0.4;
 /** the steepest glide it will ask for (m a metre): from over the runway
  * it comes down at ~4 m/s at the approach speed */
 const MAX_SLOPE = 0.35;
-/** the map's mark: the gate this far out on the centre line, where the
- * approach is flown from */
-const GATE = 350;
 /** the glide: down to the runway at the touchdown point, this far past the
  * threshold (m), on this slope (m a metre) — and the approach speed (m/s) */
 const TOUCH = 30, SLOPE = 0.07, V_APP = 12;
@@ -112,37 +112,8 @@ export class Landing {
     return tp > rw.hl - TD_ROOM ? null : tp;
   }
 
-  /** a point on the centre line ahead of the plane (world): fly at it and
-   * the plane comes onto the line before the touchdown, then on down it */
-  private carrot(rw: Runway, st: PlayerState): { x: number; z: number } {
-    const { a } = this.frame(rw, st.x, st.z);
-    const toTouch = (this.phase === 'descend' ? this.tp : -rw.hl + TOUCH) - a;
-    const am = Math.min(rw.hl, a + (toTouch > 0 ? Math.max(80, 0.45 * toTouch + 60) : 80));
-    return { x: rw.cx + Math.sin(rw.yaw) * am, z: rw.cz + Math.cos(rw.yaw) * am };
-  }
-
-  /** where the map marks the way in (world): coming down, or in the funnel
-   * in front of one of the nearest runway's ends, a point on its centre line
-   * ahead — fly at it and the plane lines up and lands; else the nearer of
-   * its two gates, out on its centre line */
-  mark(st: PlayerState, runways: Runway[]): { x: number; z: number } | null {
-    let r: Runway | null = null, bd = Infinity;
-    for (const q of runways) {
-      const d = Math.hypot(q.cx - st.x, q.cz - st.z);
-      if (d < bd) { bd = d; r = q; }
-    }
-    if (!r) return null;
-    if (this.rw && this.rw.key === r.key && this.phase === 'descend') return this.carrot(this.rw, st);
-    let gate: { x: number; z: number } | null = null, gd = Infinity;
-    for (const yaw of [r.yaw, r.yaw + Math.PI]) {
-      const fx = Math.sin(yaw), fz = Math.cos(yaw);
-      if (this.inFunnel({ ...r, yaw }, st.x, st.z)) return this.carrot({ ...r, yaw }, st);
-      const g = { x: r.cx - fx * (r.hl + GATE), z: r.cz - fz * (r.hl + GATE) };
-      const d = Math.hypot(g.x - st.x, g.z - st.z);
-      if (d < gd) { gd = d; gate = g; }
-    }
-    return gate;
-  }
+  /** the key of the runway being landed on (null when flying) */
+  get active(): string | null { return this.phase === 'descend' && this.rw ? this.rw.key : null; }
 
   /** In the air (before the physics): starts and flies a descent — returns
    * the altitude to hold (the glide's), or null for the cruise (`cruise`

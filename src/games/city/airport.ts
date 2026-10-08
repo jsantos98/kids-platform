@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { Baked } from '../../engine/baked.js';
 import { ISLAND, CENTER } from '../../worlds/world.js';
 import { coastFor } from '../../worlds/coast.js';
-import { southExit, eastExit, citySeed } from '../../worlds/cityGrid.js';
+import { southExit, eastExit, citySeed, CITY_PITCH } from '../../worlds/cityGrid.js';
 import { RAIL_OFFSET } from '../../worlds/railRoute.js';
 import { riverFor } from '../../worlds/riverRoute.js';
 import type { CollisionBox } from '../../worlds/cityChunk.js';
@@ -143,6 +143,12 @@ export function airportFor(bx: number, by: number): Airport {
   cache.set(key, best);
   if (cache.size > 32) cache.delete(cache.keys().next().value as string);
   return best;
+}
+
+/** where the map marks island (bx, by)'s airport: its runway's middle (world) */
+export function airportMark(bx: number, by: number): { x: number; z: number } {
+  const r = airportFor(bx, by).runway;
+  return { x: r.cx + bx * CITY_PITCH, z: r.cz + by * CITY_PITCH };
 }
 
 /** is (x, z) — city-local — on the airport's island or its causeway

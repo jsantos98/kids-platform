@@ -1,7 +1,8 @@
-// The plane's landings (R41): free play — whenever the kid lines the plane
-// up with a runway (one of the airports, airport.ts: 120–450 m short of
-// either end, within 40 m of its centre line, heading within 30° along it),
-// it lands by itself: it steers onto the centre line, glides down to touch
+// The plane's landings (R41): free play — whenever the kid points the plane
+// roughly down a runway (one of the airports, airport.ts: 200–700 m short of
+// either end, in a funnel widening from 40 m off its centre line, heading
+// within 50° along it), it lands by itself: it curves onto the centre line
+// (the map's mark leads the kid there: `mark`), glides down to touch
 // down just past the threshold, and rolls out — braking itself to a stop
 // with auto speed on (G18), else rolling to a gentle stop, the brake pedal
 // stopping it sooner (and never past the runway's end). Standing,
@@ -9,7 +10,7 @@
 // climbs back to its cruise, where the kid has it again. It won't land on the
 // same runway again until it has flown 500 m away from it.
 import type { PhysicsInput, PlayerState } from './player.js';
-import { RUNWAY_Y } from './airport.js';
+import { RUNWAY_Y, RUNWAY_HW } from './airport.js';
 
 /** a runway in world coordinates: its middle, heading and half length */
 export interface Runway { key: string; cx: number; cz: number; yaw: number; hl: number }
@@ -18,9 +19,13 @@ export type LandPhase = 'fly' | 'approach' | 'roll' | 'turn' | 'takeoff';
 export type LandEvent = 'land' | 'landed' | 'takeoff' | 'airborne';
 
 /** where an approach may begin: this far short of the threshold (m) */
-const FROM = 450, TO = 120;
-/** how far off the centre line, and how far off its heading (rad) */
-const OFF = 40, ALIGN = 30 * Math.PI / 180;
+const FROM = 700, TO = 200;
+/** how far off its heading (rad), and off the centre line: a funnel, OFF m
+ * wide at the threshold and widening by SPLAY a metre out */
+const ALIGN = 50 * Math.PI / 180, OFF = 40, SPLAY = 0.35;
+/** the map's mark: the gate this far out on the centre line, where the
+ * approach is flown from */
+const GATE = 350;
 /** touchdown, this far past the threshold (m); the approach speed (m/s) */
 const TOUCH = 30, V_APP = 12;
 /** the roll: gentle rolling, auto speed's braking, the brake pedal's and
@@ -61,11 +66,37 @@ export class Landing {
     return { a: dx * fx + dz * fz, l: dx * fz - dz * fx };
   }
 
+  /** is (x, z) in the funnel in front of this runway's end, landing along `yaw`? */
+  private inFunnel(rw: Runway, x: number, z: number): boolean {
+    const { a, l } = this.frame(rw, x, z);
+    const short = -rw.hl - a;
+    return short >= TO && short <= FROM && Math.abs(l) <= OFF + SPLAY * short;
+  }
+
   /** is the plane lined up with this runway, landing along `yaw`? */
   lined(rw: Runway, st: PlayerState): boolean {
-    const { a, l } = this.frame(rw, st.x, st.z);
-    const short = -rw.hl - a;
-    return short >= TO && short <= FROM && Math.abs(l) <= OFF && Math.abs(wrap(st.heading - rw.yaw)) <= ALIGN;
+    return this.inFunnel(rw, st.x, st.z) && Math.abs(wrap(st.heading - rw.yaw)) <= ALIGN;
+  }
+
+  /** where the map marks the way in (world): in the funnel in front of one
+   * of the nearest runway's ends, that end — fly at it and the plane is
+   * lined up; else the nearer of its two gates, out on its centre line */
+  mark(st: PlayerState, runways: Runway[]): { x: number; z: number } | null {
+    let r: Runway | null = null, bd = Infinity;
+    for (const q of runways) {
+      const d = Math.hypot(q.cx - st.x, q.cz - st.z);
+      if (d < bd && this.spent?.key !== q.key) { bd = d; r = q; }
+    }
+    if (!r) return null;
+    let gate: { x: number; z: number } | null = null, gd = Infinity;
+    for (const yaw of [r.yaw, r.yaw + Math.PI]) {
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      if (this.inFunnel({ ...r, yaw }, st.x, st.z)) return { x: r.cx - fx * r.hl, z: r.cz - fz * r.hl };
+      const g = { x: r.cx - fx * (r.hl + GATE), z: r.cz - fz * (r.hl + GATE) };
+      const d = Math.hypot(g.x - st.x, g.z - st.z);
+      if (d < gd) { gd = d; gate = g; }
+    }
+    return gate;
   }
 
   /** the plane's frame: it flies (false: the physics has it) or the landing
@@ -104,7 +135,9 @@ export class Landing {
       st.z += Math.cos(st.heading) * st.v * dt;
     };
     if (this.phase === 'approach') {
-      steerTo(rw.yaw + Math.atan2(-l, Math.max(30, touch - a)), 0.6);
+      // (aiming at a point on the centre line ahead: it curves onto it well
+      // before the touchdown)
+      steerTo(rw.yaw + Math.atan2(-l, Math.max(40, Math.min(touch - a, 0.45 * (touch - a) + 60))), 0.8);
       st.v += Math.max(-3 * dt, Math.min(3 * dt, V_APP - st.v));
       // a straight glide from where it began to the touchdown point
       const f = Math.max(0, Math.min(1, (touch - a) / Math.max(1, touch - this.startA)));
@@ -114,6 +147,13 @@ export class Landing {
       this.pitch = Math.max(-0.2, Math.min(0.15, ((st.alt - prev) / Math.max(dt, 1e-3)) / Math.max(4, st.v)));
       move();
       if (a >= touch || st.alt <= RUNWAY_Y + 0.05) {
+        // (not lined up after all — it can't happen from the funnel, but
+        // should it: no landing off the runway, it climbs away to try again)
+        if (Math.abs(l) > RUNWAY_HW - 2 || Math.abs(wrap(st.heading - rw.yaw)) > 0.3) {
+          this.spent = rw;
+          this.reset();
+          return false;
+        }
         st.alt = RUNWAY_Y;
         this.phase = 'roll';
       }

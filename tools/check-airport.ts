@@ -5,12 +5,17 @@
 //    corridors, the picnic island and the harbour; its runway is at least
 //    160 m; its causeway lands on dry land, off the river's mouth; and it is
 //    never in the SE corner (the harbour's).
-//  · On three of them, the plane lined up from the edges of the approach
-//    (short / far, either side of the centre line, either way along the
-//    runway, high and low, 20° off), with auto speed on, off, and off with
-//    the brake held: it touches down on the runway past its threshold,
-//    never leaves the runway or its pads on the ground, stops before the
-//    end, turns round, takes off and climbs away within two minutes.
+//  · On three of them, the plane from the edges of the approach funnel
+//    (near / far, either side at 90 % of its width, either way along the
+//    runway, high and low, 43° off either way), with auto speed on, off, and
+//    off with the brake held: it touches down on the runway past its
+//    threshold, never leaves the runway or its pads on the ground, stops
+//    before the end, turns round, takes off and climbs away within two
+//    minutes.
+//  · A kid who just flies at the map's mark (Landing.mark) from all round
+//    the airport, 600 m out, lands within three minutes: the mark leads to
+//    the gate on the centre line, then down the runway (a mark at the
+//    runway's middle brought the plane in square to it, and it never landed).
 //   npx tsx tools/check-airport.ts [baseSeed]
 import { setCityBase, CITY_PITCH, southExit, eastExit } from '../src/worlds/cityGrid.js';
 import { coastFor } from '../src/worlds/coast.js';
@@ -68,14 +73,14 @@ let landings = 0, worstStop = -Infinity;
 for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
   const A = airportFor(bx, by);
   const R: Runway = { key: `${bx},${by}`, cx: A.runway.cx + bx * CITY_PITCH, cz: A.runway.cz + by * CITY_PITCH, yaw: A.runway.yaw, hl: A.runway.hl };
-  for (const dir of [0, Math.PI]) for (const short of [140, 430]) for (const off of [-30, 30]) for (const turn of [-0.35, 0.35]) for (const alt of [24, 44])
+  for (const dir of [0, Math.PI]) for (const short of [210, 690]) for (const side of [-0.9, 0.9]) for (const turn of [-0.75, 0.75]) for (const alt of [24, 44])
     for (const how of ['auto', 'roll', 'brake'] as const) {
       const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw);
-      const a0 = -R.hl - short;
+      const a0 = -R.hl - short, off = side * (40 + 0.35 * short);
       const st: PlayerState = { x: R.cx + fx * a0 + fz * off, z: R.cz + fz * a0 - fx * off, heading: yaw + turn, v: 14, alt };
       const L = new Landing();
       const evs: LandEvent[] = [];
-      const label = `${bx},${by} ${dir ? 'back' : 'along'} ${short} m short, ${off} m off, ${turn > 0 ? '+' : '-'}20°, ${alt} m, ${how}`;
+      const label = `${bx},${by} ${dir ? 'back' : 'along'} ${short} m short, ${off.toFixed(0)} m off, ${turn > 0 ? '+' : '-'}43°, ${alt} m, ${how}`;
       let ok = true, stopA = 0;
       const frame = (x: number, z: number): { a: number; l: number } => {
         const dx = x - R.cx, dz = z - R.cz;
@@ -104,6 +109,39 @@ for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
       landings++;
     }
 }
+// ---- following the map's mark ----
+let followed = 0;
+for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
+  const A = airportFor(bx, by);
+  const R: Runway = { key: `${bx},${by}`, cx: A.runway.cx + bx * CITY_PITCH, cz: A.runway.cz + by * CITY_PITCH, yaw: A.runway.yaw, hl: A.runway.hl };
+  for (let k = 0; k < 8; k++) {
+    const ang = (k / 8) * Math.PI * 2;
+    const st: PlayerState = { x: R.cx + Math.cos(ang) * 600, z: R.cz + Math.sin(ang) * 600, heading: ang + Math.PI, v: 16, alt: 30 };
+    const L = new Landing();
+    let landed = false;
+    for (let f = 0; f < 180 * 60 && !landed; f++) {
+      const dt = 1 / 60;
+      // the kid: steers at the mark (the plane turns at up to 0.9 rad/s)
+      const m = L.mark(st, [R]);
+      let steer = 0;
+      if (m) {
+        const d = Math.atan2(Math.sin(Math.atan2(m.x - st.x, m.z - st.z) - st.heading), Math.cos(Math.atan2(m.x - st.x, m.z - st.z) - st.heading));
+        steer = Math.max(-1, Math.min(1, d * 4));
+      }
+      const had = L.update(dt, { gas: 0, brake: 0, steer }, st, [R], true, e => { if (e === 'landed') landed = true; });
+      if (!had) {
+        st.heading += steer * 0.9 * dt;
+        st.x += Math.sin(st.heading) * st.v * dt;
+        st.z += Math.cos(st.heading) * st.v * dt;
+        st.alt += Math.max(-6 * dt, Math.min(6 * dt, 30 - st.alt));
+      }
+    }
+    if (!landed) fail(`${bx},${by}: flying at the mark from ${(ang * 180 / Math.PI).toFixed(0)}° round, 600 m out, never landed`);
+    else followed++;
+  }
+}
+console.log(`following the mark: ${followed} of 24 landed`);
+
 console.log(`landings: ${landings} flown — every one down on the runway, stopped (the furthest ${(-worstStop).toFixed(0)} m short of its end), turned and back in the air`);
 
 console.log(fails ? `FAIL — ${fails} problem(s) with the airports (R41)` : 'PASS — every island has its airport, and the plane lands, stops, turns and takes off (R41)');

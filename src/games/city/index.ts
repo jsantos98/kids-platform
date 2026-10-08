@@ -721,6 +721,7 @@ if (q.get('debugsea') === '1') {
     stationState: () => ({ done: stationDone, aim: stationAim, next: V.kind === 'rail' ? nextStation() : null }),
     /** race mode: the race on this island */
     race: () => race,
+    landing: () => landing,
     /** where the guide arrow aims for a goal at world (tx, tz) */
     waypoint: (tx: number, tz: number) => guideWaypoint(tx, tz, Math.hypot(tx - player.state.x, tz - player.state.z)),
     probe: (x: number, y: number, z: number) => {
@@ -790,22 +791,16 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
       ...(pirates?.ships ?? []).filter(s => s.active).map(s => ({ x: s.x, z: s.z, icon: GOAL_ICON[s.kind] })),
       ...(treasure ? [{ x: curCity.ox + treasure.islet.x, z: curCity.oz + treasure.islet.z, icon: GOAL_ICON.treasure }] : []),
       ...(cargo && dest ? [{ x: dest.door.x + dest.ox, z: dest.door.z + dest.oz, icon: LANDMARK_ICON[dest.kind] }] : []),
-      // (flying the plane: the nearest airport's runway, R41 — on the rim,
-      // pointing the way, when it's off the map)
+      // (flying the plane: the way in to the nearest airport's runway, R41 —
+      // on the rim, pointing the way, when it's off the map)
       ...(landing?.phase === 'fly' ? nearestRunway() : []),
     ];
   });
-/** the plane's map mark: the middle of the nearest runway (world) */
+/** the plane's map mark (R41): the way in to the nearest runway — out to
+ * the gate on its centre line, then its end (landing.ts mark) */
 function nearestRunway(): Array<{ x: number; z: number; icon: string }> {
-  const st = player.state, here = cityAt(st.x, st.z);
-  let best: { x: number; z: number; icon: string } | null = null, bd = Infinity;
-  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
-    const bx = here.bx + dx, by = here.by + dz;
-    const r = airportFor(bx, by).runway;
-    const x = r.cx + bx * CITY_PITCH, z = r.cz + by * CITY_PITCH, d = Math.hypot(x - st.x, z - st.z);
-    if (d < bd) { bd = d; best = { x, z, icon: '🛬' }; }
-  }
-  return best ? [best] : [];
+  const m = landing?.mark(player.state, runwaysNear(player.state.x, player.state.z));
+  return m ? [{ ...m, icon: '🛬' }] : [];
 }
 
 // ---- the city grid: drive across a strait and the next city wakes up.

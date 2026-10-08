@@ -156,6 +156,8 @@ export class Missions {
     return best;
   }
 
+  /** just arrived on an island: its first call is a near one, ahead of the kid */
+  private arrival = false;
   private bx = 0;
   private by = 0;
   /** where the game started: no call ever stands within MIN_CALL_DIST of
@@ -163,6 +165,15 @@ export class Missions {
   private home: { x: number; z: number } | null = null;
 
   setCity(bx: number, by: number, ox: number, oz: number): void {
+    // a call belongs to the island it stands on: crossing to another leaves
+    // them behind (they used to stay — three calls 3 km away, which counted
+    // toward the three alive and so no new ones spawned on the new island)
+    // and the first call there appears near, ahead of the arrival (G2)
+    if (bx !== this.bx || by !== this.by) {
+      for (const o of [...this.objectives]) this.remove(o);
+      this.cooldown = 0;
+      this.arrival = true;
+    }
     this.bx = bx;
     this.by = by;
     this.graph = graphFor(bx, by);
@@ -179,8 +190,10 @@ export class Missions {
     else type = this.calls[this.index % this.calls.length];
     const diff = Math.min(this.sFires + this.sCats, 10);
     this.home ??= { x: player.x, z: player.z };
-    const dist = this.index === 0 ? MIN_CALL_DIST + 15 + r() * 20 : Math.min(MIN_CALL_DIST + 10 + diff * 10, 240) + r() * 60;
-    const a = this.index === 0 ? player.heading + 0.5 : r() * Math.PI * 2;
+    const first = this.index === 0 || this.arrival;
+    this.arrival = false;
+    const dist = first ? MIN_CALL_DIST + 15 + r() * 20 : Math.min(MIN_CALL_DIST + 10 + diff * 10, 240) + r() * 60;
+    const a = first ? player.heading + 0.5 : r() * Math.PI * 2;
     // pick the corner of a REAL intersection (golden-angle resampling),
     // in the current city's local coordinates
     const lx = player.x - this.ox, lz = player.z - this.oz;

@@ -43,6 +43,12 @@ driving well.
 **A car just to drive** — the first in the garage: no missions, no arrow,
 anywhere on the islands.
 
+**Calls on every island.** Flying (or driving) to another island used to
+leave the old island's calls behind — they still counted as the three
+active ones, so no new calls appeared and the arrow pointed 3 km back home.
+Now each island has its own calls: crossing to a new island clears the old
+ones, and the first new call appears close ahead.
+
 **Any time of day.** A new game now starts at a random time of day (morning,
 noon, dusk, night…) instead of always at 8:00. The time is written into the
 address like the world's seed, so refreshing or sharing the page replays the

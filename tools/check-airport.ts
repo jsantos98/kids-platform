@@ -5,17 +5,17 @@
 //    corridors, the picnic island and the harbour; its runway is at least
 //    160 m; its causeway lands on dry land, off the river's mouth; and it is
 //    never in the SE corner (the harbour's).
-//  · On three of them, the plane from the edges of the approach funnel
-//    (near / far, either side at 90 % of its width, either way along the
-//    runway, high and low, 43° off either way), with auto speed on, off, and
-//    off with the brake held: it touches down on the runway past its
-//    threshold, never leaves the runway or its pads on the ground, stops
-//    before the end, turns round, takes off and climbs away within two
-//    minutes.
-//  · A kid who just flies at the map's mark (Landing.mark) from all round
-//    the airport, 600 m out, lands within three minutes: the mark leads to
-//    the gate on the centre line, then down the runway (a mark at the
-//    runway's middle brought the plane in square to it, and it never landed).
+//  · On three of them, the real plane (player.ts physics) flown by a kid who
+//    steers at the map's mark (Landing.mark): from the edges of the approach
+//    funnel (near / far, either side at 90 % of its width, either way along
+//    the runway, 43° off either way; auto speed on, off, and off with the
+//    brake held) and from all round 600 m out — each must come down, touch
+//    down on the runway, never leave it or its pads on the ground, stop
+//    before its end, turn round and take off again. (A mark at the runway's
+//    middle brought the plane in square to it, and it never landed.)
+//  · Descents called off — lined up 500 m out, coming down, then steering
+//    away square to the runway or a tap of the gas: no landing, and it
+//    climbs back to its cruise (the kid flies it in; it is never pulled in).
 //   npx tsx tools/check-airport.ts [baseSeed]
 import './headless-dom.js';
 import { setCityBase, CITY_PITCH, southExit, eastExit } from '../src/worlds/cityGrid.js';

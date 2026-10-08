@@ -43,6 +43,16 @@ driving well.
 **A car just to drive** — the first in the garage: no missions, no arrow,
 anywhere on the islands.
 
+**Steering is easy.** The fire truck (and every other vehicle) needed the
+turn planned well ahead: at full speed it turned in a circle 13 m wide, and
+it barely turned at all from a crawl. Now every road vehicle turns in a tight
+circle (the truck 5–6 m) at any speed, and even standing still swings round
+a little; boats, the helicopter and the plane turn much more sharply too, and
+the steering eases in smoothly. On top of that, a road vehicle whose wheel is
+let go eases itself onto the street it is nearly along: let go half way round
+a corner and it finishes the turn by itself, and a vehicle drifting
+sideways straightens up. Steering by the child always takes over at once.
+
 **No more flicker.** Surfaces lying in the same plane (z-fighting) flickered
 in many places. The depth buffer is now a reversed float one, which keeps
 its precision to the horizon (thin layers like road over gutter, grass over

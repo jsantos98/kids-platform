@@ -107,7 +107,7 @@ export const VEHICLES: Record<string, VehicleConfig> = {
     accel: 6, brake: 7, maxF: 24, maxR: 0, radius: 3,
     // (a little lower than the others, 18°: the rings it climbs to stay in view)
     camBack: 22, camUp: 13, camAhead: 14, highBack: 28, highUp: 39, highAhead: 10,
-    wheelbase: 4, steerMax: 0.9, cabF: 2.4, cabY: 1.6,
+    wheelbase: 4, steerMax: 1.35, cabF: 2.4, cabY: 1.6,
     front: 3, halfW: 3.6, frontR: 2, scale: 1.4,
   },
   boat: {
@@ -346,6 +346,24 @@ export function startCrash(p: Player): void {
   p.crash.x = p.state.x; p.crash.z = p.state.z; p.crash.heading = p.state.heading;
 }
 
+/** Easy steering, for the youngest (G19): the yaw rate (rad/s) of full
+ * steering for a road vehicle or a boat moving at v — a turn of a few metres'
+ * radius (1.6 × the wheelbase on the road, 2.1 × on the water, 1.5 × for
+ * the pirate ship: a fire truck 5.8 m, a speedboat 7 m, the ship 12 m) at any
+ * speed, kept up to a cap so it doesn't spin
+ * (1.7 rad/s on the road: a 9.5 m/s truck still turns on 5.6 m; a boat 1.1,
+ * the pirate ship 0.85), and with a floor on the speed it counts, so even at
+ * a crawl or standing it swings round (0.3 rad/s) instead of needing the turn
+ * planned ahead — the yaw rate used to be proportional to the speed over the
+ * whole wheelbase, 13 m of turn at full speed and no turn at all from rest. */
+export function turnRate(V: VehicleConfig, v: number): number {
+  const boat = V.kind === 'boat';
+  const ship = boat && V.wheelbase > 6;
+  const r = V.wheelbase * (ship ? 1.5 : boat ? 2.1 : 1.6);
+  const cap = ship ? 0.85 : boat ? 1.1 : 1.7;
+  return Math.min(cap, Math.max(Math.abs(v), boat ? 2.5 : 1.8) / r);
+}
+
 export interface PhysicsStep {
   /** true when a crash was just registered (caller shows OOPS + thud) */
   crashed: boolean;
@@ -357,6 +375,9 @@ export function physicsStep(
   altTarget = PLANE_ALT,
 ): PhysicsStep {
   const { state: st, V } = p;
+  // the steering eased in (a key is all-or-nothing, a wheel is turned
+  // sharply): the vehicle turns smoothly into and out of a turn
+  p.steerS += (input.steer - p.steerS) * Math.min(1, dt * (V.kind === 'plane' ? 4 : 12));
 
   if (V.kind === 'heli') {
     // simplified helicopter: hover-drive at HELI_ALT, and forgiving — it
@@ -379,7 +400,8 @@ export function physicsStep(
     if (input.gas) st.v = Math.min(V.maxF, st.v + V.accel * dt);
     if (input.brake) st.v = Math.max(-V.maxF * 0.5, st.v - V.brake * dt);
     st.v -= st.v * 0.5 * dt;
-    st.heading += input.steer * 1.0 * dt * (0.35 + Math.abs(st.v) / V.maxF);
+    // (it swings round even hovering: 0.9 rad/s, up to 1.5 flying fast)
+    st.heading += p.steerS * 1.5 * dt * (0.6 + 0.4 * Math.min(1, Math.abs(st.v) / V.maxF));
     // the roofs ahead: climb to clear the tallest by HELI_CLEAR
     const dir = st.v < 0 ? -1 : 1;
     const fx = Math.sin(st.heading) * dir, fz = Math.cos(st.heading) * dir;
@@ -431,7 +453,6 @@ export function physicsStep(
     else if (input.brake) st.v = Math.max(PLANE_MIN_V, st.v - V.brake * dt);
     else st.v += (Math.max(PLANE_MIN_V, Math.min(st.v, 18)) - st.v) * Math.min(1, dt * 0.3);
     st.v = Math.max(PLANE_MIN_V, st.v);
-    p.steerS += (input.steer - p.steerS) * Math.min(1, dt * 2.5);
     st.heading += p.steerS * V.steerMax * dt;
     st.alt += Math.max(-6 * dt, Math.min(6 * dt, altTarget - st.alt));
     st.x += Math.sin(st.heading) * st.v * dt;
@@ -462,7 +483,7 @@ export function physicsStep(
     if (input.brake) st.v = Math.max(-V.maxR, st.v - V.brake * dt);
     if (!input.gas && !input.brake) st.v -= st.v * 0.6 * dt;
     const h0 = st.heading;
-    const h1 = h0 + input.steer * V.steerMax * dt * Math.min(1, 0.3 + Math.abs(st.v) / 6) * Math.sign(st.v || 1);
+    const h1 = h0 + p.steerS * turnRate(V, st.v) * dt * Math.sign(st.v || 1);
     const nx = st.x + Math.sin(h1) * st.v * dt;
     const nz = st.z + Math.cos(h1) * st.v * dt;
     // (only what stands up out of the water counts: a box a boat can hit,
@@ -511,8 +532,7 @@ export function physicsStep(
   st.v -= st.v * 0.35 * dt;
   st.v = Math.max(-V.maxR, Math.min(V.maxF, st.v));
 
-  const steerMax = V.steerMax / (1 + Math.abs(st.v) * 0.07);
-  st.heading += input.steer * steerMax * (st.v / V.wheelbase) * dt;
+  st.heading += p.steerS * turnRate(V, st.v) * Math.sign(st.v || 1) * dt;
 
   let crashed = false;
   if (p.crashT > 0) {

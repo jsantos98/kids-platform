@@ -5,6 +5,7 @@ import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
 import { Landing, type Runway } from './landing.js';
+import { StreetAssist } from './streetAssist.js';
 import { airportFor, airportMark } from './airport.js';
 import { bakedNight, templateToMesh } from '../../engine/baked.js';
 import { dayState, startPhase, hourOf, DAY_LEN, MOON_PHASES } from '../../engine/daylight.js';
@@ -1293,6 +1294,9 @@ const AUTO = autoSpeed();
  * delivery or the treasure to stop at, a chase to speed through), used by
  * the next frame's physics */
 let autoGoal: AutoGoal = { pace: 'cruise' };
+/** a road vehicle's steering assist (G19): with the wheel let go it eases
+ * onto the street it is nearly along (not in the race: the circuit has none) */
+const streetAssist = V.kind === 'ground' ? new StreetAssist() : null;
 /** the plane's landings on the airports' runways (R41) */
 const landing = V.kind === 'plane' ? new Landing() : null;
 /** the runways of the islands round the plane whose scenery is built
@@ -1399,6 +1403,7 @@ const tick = (): void => {
     // the plane comes down to a runway auto speed leaves the gas to the kid)
     const kidGas = input.gas > 0.05;
     if (!race?.frozen && AUTO && mode === 'drive' && player.crashT <= 0 && !(landing && landing.phase !== 'fly')) Object.assign(input, autoInput(input, st, V.maxF, race ? { pace: 'go' } : autoGoal));
+    if (streetAssist && !race && mode === 'drive' && player.crashT <= 0) streetAssist.update(dt, st, input.steer);
     const trainBoxes = V.kind === 'ground' ? railway.unitBoxes(st.x, st.z) : [];
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear(), trainBoxes);
     const wasCrashing = player.crashT > 0;

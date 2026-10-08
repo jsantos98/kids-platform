@@ -100,9 +100,11 @@ export function buildBridge(bx: number, by: number, ox: number, oz: number): Bui
   const r = rng(chunkSeed(77, 1, 4));
 
   // deck + lane dashes
-  B.box(HALF_W * 2, 0.7, Z1 - Z0, ASPHALT, X, -0.25, (Z0 + Z1) / 2);
+  // (the deck's top 0.11: 1 cm over the shore's grass slab (0.10) it overlaps
+  // for 3 m — coplanar, they flickered: R42)
+  B.box(HALF_W * 2, 0.7, Z1 - Z0, ASPHALT, X, -0.24, (Z0 + Z1) / 2);
   for (let z = Z0 + 3; z < Z1 - 2; z += 4) {
-    B.box(0.25, 0.02, 1.8, DASH, X, 0.11, z);
+    B.box(0.25, 0.02, 1.8, DASH, X, 0.12, z);
   }
   // parapets with cap rails
   for (const side of [-1, 1]) {

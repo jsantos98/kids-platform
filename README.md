@@ -156,6 +156,7 @@ The game page is `play/city.html`.
 |---|---|
 | `?mode=truck\|police\|ambulance\|tow\|garbage\|heliMedical\|heliPolice\|plane\|boat\|policeBoat\|pirate\|train\|race\|car` | pick the play mode directly |
 | `?auto=1\|0` | auto speed on or off for this visit (the game works the gas; the kid only steers) |
+| `?depth=standard` | the usual depth buffer instead of the reversed float one (to compare z-fighting) |
 | `?seed=N` | replay a world exactly (every new game rolls a fresh seed and writes it into the URL) |
 | `?lang=pt\|en` | Portuguese or English for this visit |
 | `?cam=high` | start with the high camera |

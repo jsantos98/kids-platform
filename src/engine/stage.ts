@@ -240,7 +240,12 @@ export function applyQuality(renderer: THREE.WebGLRenderer, sun: THREE.Direction
 export function createStage(opts: StageOptions = {}): Stage {
   // (the resolution and edge smoothing by the graphics quality, G13)
   const tier = TIERS[startQuality()];
-  const renderer = new THREE.WebGLRenderer({ antialias: tier.antialias, powerPreference: 'high-performance' });
+  // (a reversed floating-point depth buffer keeps the depth precision even
+  // from the near plane to the far: with the usual one, the thin layers of
+  // ground — road over slab, markings over road, 1–5 cm apart — flickered
+  // against each other from ~100 m out. `?depth=standard` turns it off)
+  const reversedDepthBuffer = new URLSearchParams(location.search).get('depth') !== 'standard';
+  const renderer = new THREE.WebGLRenderer({ antialias: tier.antialias, powerPreference: 'high-performance', reversedDepthBuffer });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean

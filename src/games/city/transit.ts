@@ -153,7 +153,9 @@ export class Transit {
     const keep = (x: number, z: number): boolean => coast.inLand(x, z, 1) && Math.hypot(x - D.x, z - D.z) > 2.7 && !onTrestle(x, z);
     const RB = new Baked();
     for (const L of net.lines) { layRails(RB, L, railTile(), keep); yield; }
-    RB.box(5.6, 0.1, 5.6, 0xb9a88c, D.x, RAIL_Y + 0.05, D.z);
+    // (the diamond's bed: top 0.218, 8 mm over the kit road kerbs' 0.21 it can
+    // overlap — coplanar, they flickered: R42)
+    RB.box(5.6, 0.108, 5.6, 0xb9a88c, D.x, RAIL_Y + 0.054, D.z);
     for (const s of [-0.72, 0.72]) {
       RB.box(0.12, 0.14, 5.6, 0x8d939e, D.x + s, RAIL_Y + 0.17, D.z);
       RB.box(5.6, 0.14, 0.12, 0x8d939e, D.x, RAIL_Y + 0.17, D.z + s);

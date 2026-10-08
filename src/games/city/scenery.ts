@@ -8,6 +8,7 @@ import { Baked } from '../../engine/baked.js';
 import { waveAt, hullObject, boatLoop } from './sea.js';
 import { buildBridge, type Lighthouse } from './bridge.js';
 import { buildAirport } from './airport.js';
+import { bakeFoam } from './foam.js';
 import { harbourFor } from './harbour.js';
 import { isletsFor } from './islets.js';
 import { PK_M } from './sea.js';
@@ -64,12 +65,7 @@ export class CityScenery {
     // surf foam tracing the shore, just out from the beach
     {
       const F = new Baked();
-      const ring = coast.pts.map(p => coast.shoreToward(p.x, p.z, 1.8));
-      for (let i = 0; i < ring.length; i++) {
-        const a = ring[i], b = ring[(i + 1) % ring.length];
-        const len = Math.hypot(b.x - a.x, b.z - a.z) + 0.6;
-        F.box(3, 0.1, len, 0xffffff, ox + (a.x + b.x) / 2, 0.05, oz + (a.z + b.z) / 2, 0, Math.atan2(b.x - a.x, b.z - a.z), 0);
-      }
+      bakeFoam(F, bx, by, ox, oz);
       const foam = F.build({ cast: false, receive: false });
       foam.material = this.foamMat;
       group.add(foam);

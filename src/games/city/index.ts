@@ -1708,6 +1708,11 @@ const tick = (): void => {
     camera.lookAt(st.x + fwd.x * V.camAhead, flyY + 1.3, st.z + fwd.z * V.camAhead);
   }
   camera.position.y = Math.max(camera.position.y, 1.2);
+  // (a browser without the reversed depth buffer — stage.ts — keeps the depth
+  // precision by pushing the near plane out to 0.5 m, 5× as precise, except
+  // from the cab where the eye is inside the vehicle)
+  const wantNear = camMode === 'cab' || renderer.capabilities.reversedDepthBuffer ? 0.1 : 0.5;
+  if (camera.near !== wantNear) { camera.near = wantNear; camera.updateProjectionMatrix(); }
 
   // the time of day (G10): the sun (or the moon) + shadow camera follow the
   // car, and the sky travels with it

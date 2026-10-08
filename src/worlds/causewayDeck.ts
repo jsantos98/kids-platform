@@ -31,14 +31,17 @@ export function bakeCausewayDeck(B: Baked, span: Span): void {
   for (let t = start; t < end; t += STEP) {
     const t1 = Math.min(end, t + STEP);
     if (road) {
-      put(11, 0.7, t, t1, ASPHALT, 0, -0.25);
+      // (the deck's top 0.11 at the shore: 1 cm over the island's grass slab
+      // (0.10) it overlaps for 2 m there — exactly coplanar, they flickered:
+      // R42; likewise the railway deck's timber below)
+      put(11, 0.7, t, t1, ASPHALT, 0, -0.24);
       for (const side of [-1, 1]) {
         put(0.4, 0.55, t, t1, CURB, side * 5.3, 0.375);
         put(0.55, 0.12, t, t1, CAP, side * 5.3, 0.71);
       }
-      put(0.25, 0.02, t + 1.1, t + 2.9, DASH, 0, 0.11);
+      put(0.25, 0.02, t + 1.1, t + 2.9, DASH, 0, 0.12);
     } else {
-      put(4.6, 0.5, t, t1, 0x8a6a4a, 0, -0.15);
+      put(4.6, 0.5, t, t1, 0x8a6a4a, 0, -0.14);
       for (const side of [-1, 1]) {
         put(0.3, 0.45, t, t1, CURB, side * 2.25, 0.3);
         put(0.12, 0.12, t, t1, 0x8d939e, side * 0.72, 0.3);

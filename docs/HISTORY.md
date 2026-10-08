@@ -43,6 +43,17 @@ driving well.
 **A car just to drive** — the first in the garage: no missions, no arrow,
 anywhere on the islands.
 
+**No more flicker.** Surfaces lying in the same plane (z-fighting) flickered
+in many places. The depth buffer is now a reversed float one, which keeps
+its precision to the horizon (thin layers like road over gutter, grass over
+beach, and the windows on buildings no longer shimmer from far away), and the
+places where two surfaces were exactly level were separated: the river's
+water against the green yards, its bank against its footpath, the pavements
+against the railway's sleepers at level crossings, the white surf foam
+against every causeway, the picnic bridge and the airport's causeway where
+they meet the beach, and the rail crossing's bed against the kerbs. A new
+check scans every island's ground for any two surfaces level with each other.
+
 | | |
 |---|---|
 | ![The plane coming down onto the runway: the map marks the airport and dots its approach line](history/2026-10-08-airports/descent.jpg) | ![Rolling out on the runway, past the control tower](history/2026-10-08-airports/landing-roll.jpg) |

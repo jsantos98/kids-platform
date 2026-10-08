@@ -204,6 +204,11 @@ const RIVER_BANK = 0xdfd3b4;
 const RIVER_PATH = 0xd9cdb4;
 const BRIDGE_STEEL = 0x8f97a3;
 const SIDEWALK = 0xa1a9c9; // the road kit's pavement (tile-low) colour
+/** the pavement strips' middle: their top is 0.175 — 15 mm over the kit's
+ * railway sleepers (0.16) where a pavement crosses a track at a level
+ * crossing (they were coplanar and flickered: R42), and over the lots a
+ * strip's end can overlap (courts 0.165, car parks 0.17) */
+const SIDEWALK_Y = 0.145;
 const HOUSE_COLORS = [0xf2e4cf, 0xf9d9bd, 0xc3ddef, 0xcfe8d8, 0xf3c4d3, 0xdcd0ec, 0xf9e7b0, 0xe8ddd0];
 const ROOFS = [0xcf7d6d, 0x8ba7bf, 0xc4a687, 0x9dbd80, 0xb8a4d4];
 /** the kit road's own palette (city-roads colormap), for the procedural
@@ -320,13 +325,16 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       const ry = Math.atan2(b.x - a.x, b.z - a.z);
       if (nearBridge(mx, mz)) continue; // the street bridge owns this stretch
       const w = (a.w + b.w) / 2;
-      B.box(w, 0.09, len, RIVER_WATER, mx, 0.105, mz, 0, ry, 0);
+      // (the water's top 0.155: 5 mm over the green lots a riverside yard
+      // can overlap it with, 0.15 — coplanar, they flickered — R42)
+      B.box(w, 0.095, len, RIVER_WATER, mx, 0.1075, mz, 0, ry, 0);
       // sandy banks + a footpath on one side
       const rx = Math.cos(ry), rz = -Math.sin(ry);
       for (const s of [-1, 1]) {
         B.box(2.8, 0.05, len, RIVER_BANK, mx + rx * s * (w / 2 + 1.4), 0.1, mz + rz * s * (w / 2 + 1.4), 0, ry, 0);
       }
-      B.box(1.9, 0.045, len, RIVER_PATH, mx + rx * (w / 2 + 3.4), 0.1, mz + rz * (w / 2 + 3.4), 0, ry, 0);
+      // (the footpath's top 0.13, 5 mm over the bank's 0.125 it overlaps: R42)
+      B.box(1.9, 0.06, len, RIVER_PATH, mx + rx * (w / 2 + 3.4), 0.1, mz + rz * (w / 2 + 3.4), 0, ry, 0);
     }
     // greenway: trees and benches along the banks that pass through this chunk
     for (let k = 2; k + 2 < rp.length; k += 5) {
@@ -610,7 +618,7 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
         if (open === null || end - open < 1) { open = null; return; }
         for (const side of [-1, 1]) {
           strip({ x: a.x + e.ux * open + nx * side * 7.55, z: a.z + e.uz * open + nz * side * 7.55 },
-            { x: a.x + e.ux * end + nx * side * 7.55, z: a.z + e.uz * end + nz * side * 7.55 }, 1.1, 0.06, SIDEWALK, 0.13);
+            { x: a.x + e.ux * end + nx * side * 7.55, z: a.z + e.uz * end + nz * side * 7.55 }, 1.1, 0.06, SIDEWALK, SIDEWALK_Y);
         }
         open = null;
       };
@@ -632,7 +640,7 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
       for (let i = 0; i < k; i++) {
         const u = arms[i], v = arms[(i + 1) % k];
         if (Math.abs(u.x * v.x + u.z * v.z) > 0.2) continue;
-        B.box(1.1, 0.06, 1.1, SIDEWALK, n.x + (u.x + v.x) * 7.55, 0.13, n.z + (u.z + v.z) * 7.55, 0, Math.atan2(u.x, u.z), 0);
+        B.box(1.1, 0.06, 1.1, SIDEWALK, n.x + (u.x + v.x) * 7.55, SIDEWALK_Y, n.z + (u.z + v.z) * 7.55, 0, Math.atan2(u.x, u.z), 0);
       }
       // a T's closed side: the through street's band runs past the pad
       if (k === 3) {
@@ -642,7 +650,7 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
           if (arms.some(a => a.x * d.x + a.z * d.z > 0.9)) continue;
           const t = { x: d.z, z: -d.x };
           strip({ x: n.x + d.x * 7.55 - t.x * 7, z: n.z + d.z * 7.55 - t.z * 7 },
-            { x: n.x + d.x * 7.55 + t.x * 7, z: n.z + d.z * 7.55 + t.z * 7 }, 1.1, 0.06, SIDEWALK, 0.13);
+            { x: n.x + d.x * 7.55 + t.x * 7, z: n.z + d.z * 7.55 + t.z * 7 }, 1.1, 0.06, SIDEWALK, SIDEWALK_Y);
         }
       }
     } else {
@@ -655,7 +663,7 @@ function bakeCityChunk(bx: number, by: number, cx: number, cz: number): { B: Bak
         const mx = (a.x + b.x) / 2 - n.x, mz = (a.z + b.z) / 2 - n.z;
         const ml = Math.hypot(mx, mz) || 1;
         const o = { x: (mx / ml) * 0.55, z: (mz / ml) * 0.55 };
-        strip({ x: a.x + o.x, z: a.z + o.z }, { x: b.x + o.x, z: b.z + o.z }, 1.1, 0.06, SIDEWALK, 0.13);
+        strip({ x: a.x + o.x, z: a.z + o.z }, { x: b.x + o.x, z: b.z + o.z }, 1.1, 0.06, SIDEWALK, SIDEWALK_Y);
       }
     }
   }

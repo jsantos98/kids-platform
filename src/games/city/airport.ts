@@ -185,14 +185,15 @@ export function buildAirport(bx: number, by: number, ox: number, oz: number): Bu
   // the island: a concrete slab with a grass edge, the causeway
   B.box(isle.hw * 2, 0.5, isle.hl * 2, SLAB, isle.cx, -0.15, isle.cz, 0, yaw, 0);
   B.box(isle.hw * 2 - 3, 0.12, isle.hl * 2 - 3, GRASS, isle.cx, 0.06, isle.cz, 0, yaw, 0);
-  B.box(link.hw * 2, 0.7, link.hl * 2, ASPHALT, link.cx, -0.25, link.cz, 0, link.yaw, 0);
+  // (the causeway's top 0.11: 1 cm over the island's slab it overlaps by 2 m, 0.10 — coplanar, they flickered — R42)
+  B.box(link.hw * 2, 0.7, link.hl * 2, ASPHALT, link.cx, -0.24, link.cz, 0, link.yaw, 0);
   for (const side of [-1, 1]) {
     const p = boxPoint(link, 0, side * (link.hw - 0.2));
     B.box(0.4, 0.55, link.hl * 2, CURB, p.x, 0.375, p.z, 0, link.yaw, 0);
   }
   for (let a = -link.hl + 3; a < link.hl - 2; a += 4) {
     const p = boxPoint(link, a, 0);
-    B.box(0.25, 0.02, 1.8, DASH, p.x, 0.11, p.z, 0, link.yaw, 0);
+    B.box(0.25, 0.02, 1.8, DASH, p.x, 0.12, p.z, 0, link.yaw, 0);
   }
   // the runway, its pads, the centre line and the thresholds' piano keys
   const rw = (a: number, l: number): { x: number; z: number } => at(a, rl + l);

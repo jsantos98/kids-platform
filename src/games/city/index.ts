@@ -1420,7 +1420,7 @@ const tick = (): void => {
     const onGround = !!landing && mode === 'drive' && landing.ground(dt, input, st, AUTO, landEv);
     const ring = onGround ? null : course?.aim(st.x, st.z, st.heading);
     const cruise = ring ? ring.y - 2 : PLANE_ALT;
-    const glide = landing && mode === 'drive' && !onGround ? landing.fly(dt, st, runwaysNear(st.x, st.z), kidGas, cruise, landEv) : null;
+    const glide = landing && mode === 'drive' && !onGround ? landing.fly(dt, st, runwaysNear(st.x, st.z), kidGas, cruise, input.steer, landEv) : null;
     const step = onGround || landing?.phase === 'roll' ? { crashed: false } : physicsStep(player, input, dt, boxes, glide ?? cruise);
     if (step.crashed) {
       sound.event('crash'); narrator.say('oops');

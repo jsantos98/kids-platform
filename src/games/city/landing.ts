@@ -1,13 +1,16 @@
 // The plane's landings (R41): free play, flown by the kid. Pointed roughly
-// down a runway (one of the airports, airport.ts: 200–700 m short of either
-// end, in a funnel widening from 40 m off its centre line, heading within
-// 50° along it), the plane starts to come down: it sinks along a gentle glide
-// toward the runway and eases back to its approach speed — but the kid flies
-// it the whole way, steering as always. Steering it out of the funnel or
-// pressing the gas calls it off, and it climbs back to its cruise. Reaching
-// the runway lined up (over it, within a few metres of its centre line,
-// heading along it), it touches down; anywhere else it holds a few metres up
-// and, past the runway with no touchdown, climbs away. On the ground it is
+// down a runway (one of the airports, airport.ts: up to 700 m short of
+// either end or anywhere over the runway itself with room to land, in a
+// funnel widening from the runway's width, heading within 50° along it), the
+// plane starts to come down: it sinks along a glide toward a touchdown point
+// (a gentle one from far out, a steeper one when it is already over the
+// runway) and eases back to its approach speed — but the kid flies it the
+// whole way, steering as always. Steering it out of the funnel or pressing
+// the gas calls it off, and it climbs back to its cruise. Over the runway
+// close to the ground it eases round onto the runway's heading (unless the
+// kid is steering hard), so a kid a little off the line still lands;
+// reaching the runway lined up it touches down; anywhere else it holds a few
+// metres up and, past the runway with no touchdown, climbs away. On the ground it is
 // the game's again: it rolls out — braking itself to a stop with auto speed
 // on (G18), else rolling to a gentle stop, the brake pedal stopping it sooner
 // (and never past the runway's end) — turns round on the spot, races back
@@ -22,11 +25,16 @@ export interface Runway { key: string; cx: number; cz: number; yaw: number; hl: 
 export type LandPhase = 'fly' | 'descend' | 'roll' | 'turn' | 'takeoff';
 export type LandEvent = 'land' | 'cancel' | 'landed' | 'takeoff' | 'airborne';
 
-/** where a descent may begin: this far short of the threshold (m) */
-const FROM = 700, TO = 200;
-/** how far off its heading (rad), and off the centre line: a funnel, OFF m
- * wide at the threshold and widening by SPLAY a metre out */
-const ALIGN = 50 * Math.PI / 180, OFF = 40, SPLAY = 0.35;
+/** where a descent may begin: up to this far short of the threshold (m), or
+ * anywhere over the runway */
+const FROM = 700;
+/** how far off its heading (rad), and off the centre line: a funnel, W0 m
+ * either side at the threshold (and over the runway) and widening by SPLAY
+ * a metre out */
+const ALIGN = 50 * Math.PI / 180, W0 = 12, SPLAY = 0.4;
+/** the steepest glide it will ask for (m a metre): from over the runway
+ * it comes down at ~4 m/s at the approach speed */
+const MAX_SLOPE = 0.35;
 /** the map's mark: the gate this far out on the centre line, where the
  * approach is flown from */
 const GATE = 350;
@@ -35,9 +43,12 @@ const GATE = 350;
 const TOUCH = 30, SLOPE = 0.07, V_APP = 12;
 /** a touchdown: over the runway within this of its centre line (m), within
  * this of its heading (rad), with this much runway left at least (m) */
-const TD_OFF = RUNWAY_HW - 1.5, TD_ALIGN = 15 * Math.PI / 180, TD_ROOM = 40;
+const TD_OFF = RUNWAY_HW - 2.5, TD_ALIGN = 25 * Math.PI / 180, TD_ROOM = 40;
 /** not lined up for a touchdown: it holds this high (m) */
 const HOLD = 4;
+/** near the ground over the runway it eases onto its heading (rad/s), when
+ * the kid steers less than this (of full); below this height (m) */
+const FLARE = 0.6, FLARE_STEER = 0.4, FLARE_ALT = 8;
 /** the roll: gentle rolling, auto speed's braking, the brake pedal's and
  * the most (m/s²) */
 const ROLL = 1.5, AUTO_BRAKE = 2.5, BRAKE = 7, MAX_BRAKE = 9;
@@ -59,6 +70,9 @@ export class Landing {
    * (a descent never climbs) */
   target = 0;
   private top = 0;
+  /** the glide's touchdown point (m along the runway from its middle) and slope */
+  private tp = 0;
+  private slope = SLOPE;
   /** the runway being used, in the direction it's being landed along */
   private rw: Runway | null = null;
   private turnT = 0;
@@ -81,23 +95,28 @@ export class Landing {
     return { a: dx * fx + dz * fz, l: dx * fz - dz * fx };
   }
 
-  /** is (x, z) in the funnel in front of this runway's end, landing along `yaw`? */
+  /** is (x, z) in the funnel in front of this runway's end — or over the
+   * runway itself — landing along `yaw`? */
   private inFunnel(rw: Runway, x: number, z: number): boolean {
     const { a, l } = this.frame(rw, x, z);
     const short = -rw.hl - a;
-    return short >= TO && short <= FROM && Math.abs(l) <= OFF + SPLAY * short;
+    return a <= rw.hl && short <= FROM && Math.abs(l) <= W0 + SPLAY * Math.max(0, short);
   }
 
-  /** is the plane lined up with this runway, landing along `yaw`? */
-  lined(rw: Runway, st: PlayerState): boolean {
-    return this.inFunnel(rw, st.x, st.z) && Math.abs(wrap(st.heading - rw.yaw)) <= ALIGN;
+  /** the touchdown point of a glide begun here (m along the runway), or null
+   * when there's no room to land (or it is not in the funnel, or lined up) */
+  private glideFrom(rw: Runway, st: PlayerState): number | null {
+    if (!this.inFunnel(rw, st.x, st.z) || Math.abs(wrap(st.heading - rw.yaw)) > ALIGN) return null;
+    const { a } = this.frame(rw, st.x, st.z);
+    const tp = Math.max(-rw.hl + TOUCH, a + (Math.max(st.alt, RUNWAY_Y + 1) - RUNWAY_Y) / MAX_SLOPE + 15);
+    return tp > rw.hl - TD_ROOM ? null : tp;
   }
 
   /** a point on the centre line ahead of the plane (world): fly at it and
    * the plane comes onto the line before the touchdown, then on down it */
   private carrot(rw: Runway, st: PlayerState): { x: number; z: number } {
     const { a } = this.frame(rw, st.x, st.z);
-    const toTouch = -rw.hl + TOUCH - a;
+    const toTouch = (this.phase === 'descend' ? this.tp : -rw.hl + TOUCH) - a;
     const am = Math.min(rw.hl, a + (toTouch > 0 ? Math.max(80, 0.45 * toTouch + 60) : 80));
     return { x: rw.cx + Math.sin(rw.yaw) * am, z: rw.cz + Math.cos(rw.yaw) * am };
   }
@@ -129,7 +148,7 @@ export class Landing {
    * the altitude to hold (the glide's), or null for the cruise (`cruise`
    * high). `kidGas`: the kid's own gas pedal (not auto speed's), which calls
    * a descent off. */
-  fly(dt: number, st: PlayerState, runways: Runway[], kidGas: boolean, cruise: number, on: (e: LandEvent) => void): number | null {
+  fly(dt: number, st: PlayerState, runways: Runway[], kidGas: boolean, cruise: number, steerIn: number, on: (e: LandEvent) => void): number | null {
     if (this.phase === 'fly') {
       if (this.spent) {
         const s = this.spent, r = runways.find(q => q.key === s.key);
@@ -140,10 +159,13 @@ export class Landing {
       for (const r of runways) for (const yaw of [r.yaw, r.yaw + Math.PI]) {
         const rw = { ...r, yaw: wrap(yaw) };
         if (this.spent && this.spent.key === r.key && Math.abs(wrap(this.spent.yaw - rw.yaw)) < 0.1) continue;
-        if (!this.lined(rw, st)) continue;
+        const tp = this.glideFrom(rw, st);
+        if (tp === null) continue;
         this.rw = rw;
         this.phase = 'descend';
         this.top = st.alt;
+        this.tp = tp;
+        this.slope = Math.max(SLOPE, (Math.max(st.alt, RUNWAY_Y + 1) - RUNWAY_Y) / Math.max(1, tp - this.frame(rw, st.x, st.z).a));
         on('land');
         break;
       }
@@ -156,7 +178,7 @@ export class Landing {
     const short = -rw.hl - a;
     // called off: the kid's gas, steered out of the funnel (or round), or
     // past the runway with no touchdown
-    const out = short > FROM + 50 || (short > 0 && Math.abs(l) > OFF + SPLAY * short + 20) || (short <= 0 && Math.abs(l) > RUNWAY_HW + 25);
+    const out = short > FROM + 50 || Math.abs(l) > W0 + SPLAY * Math.max(0, short) + 20;
     if (kidGas || out || off > ALIGN + 0.35 || a > rw.hl - TD_ROOM) {
       this.spent = { key: rw.key, yaw: rw.yaw, t: 0 };
       this.reset();
@@ -166,9 +188,15 @@ export class Landing {
     // the glide, and the approach speed
     st.v += Math.max(-3 * dt, Math.min(3 * dt, V_APP - st.v));
     const over = a >= -rw.hl && Math.abs(l) <= TD_OFF && off <= TD_ALIGN;
+    // (close to the ground over the runway: it eases round onto the runway's
+    // heading and toward its centre line, unless the kid is steering hard)
+    if (st.alt < FLARE_ALT && a >= -rw.hl - 30 && Math.abs(l) <= RUNWAY_HW + 8 && Math.abs(steerIn) < FLARE_STEER) {
+      const want = rw.yaw + Math.max(-0.3, Math.min(0.3, Math.atan2(-l, 40)));
+      st.heading = wrap(st.heading + Math.max(-FLARE * dt, Math.min(FLARE * dt, wrap(want - st.heading))));
+    }
     // (down the glide toward the touchdown point, never above the cruise;
     // not lined up for a touchdown, no lower than HOLD)
-    const glide = RUNWAY_Y + Math.max(0, -rw.hl + TOUCH - a) * SLOPE;
+    const glide = RUNWAY_Y + Math.max(0, this.tp - a) * this.slope;
     this.target = Math.max(over ? RUNWAY_Y : HOLD, Math.min(cruise, this.top, glide));
     if (over && st.alt <= RUNWAY_Y + 0.8) {
       // touchdown

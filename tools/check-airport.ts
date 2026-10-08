@@ -7,12 +7,17 @@
 //    never in the SE corner (the harbour's).
 //  · On three of them, the real plane (player.ts physics) flown by a kid who
 //    steers at the map's mark (Landing.mark): from the edges of the approach
-//    funnel (near / far, either side at 90 % of its width, either way along
-//    the runway, 43° off either way; auto speed on, off, and off with the
-//    brake held) and from all round 600 m out — each must come down, touch
+//    funnel (over the runway, near and far, either side at 90 % of its
+//    width, either way along the runway, 43° off either way; auto speed on,
+//    off, and off with the brake held) and from all round 600 m out — each must come down, touch
 //    down on the runway, never leave it or its pads on the ground, stop
 //    before its end, turn round and take off again. (A mark at the runway's
 //    middle brought the plane in square to it, and it never landed.)
+//  · A kid just flying over the runway, hands off — within 6 m of its centre
+//    line, straight, pointing back toward it or drifting out only 3°,
+//    anywhere along it that has room to land — lands. (A plane pointing
+//    10° further out is off the runway by the time it is down: it needs
+//    steering, and the descent is called off.)
 //  · Descents called off — lined up 500 m out, coming down, then steering
 //    away square to the runway or a tap of the gas: no landing, and it
 //    climbs back to its cruise (the kid flies it in; it is never pulled in).
@@ -99,7 +104,7 @@ function flight(R: Runway, pad: number, start: PlayerState, secs: number, how: '
       if (e === 'airborne') out.airborne = true;
     };
     if (!L.ground(DT, input, st, how === 'auto', ev)) {
-      const glide = L.fly(DT, st, [R], want.gas, 30, ev);
+      const glide = L.fly(DT, st, [R], want.gas, 30, steer, ev);
       if (L.phase !== 'roll') physicsStep(p, input, DT, [], glide ?? 30);
     }
     out.minAlt = Math.min(out.minAlt, st.alt);
@@ -129,9 +134,10 @@ const judge = (label: string, f: Flight): void => {
 for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
   const { R, pad } = runwayOf(bx, by);
   // from the funnel's edges, flying at the mark
-  for (const dir of [0, Math.PI]) for (const short of [210, 690]) for (const side of [-0.9, 0.9]) for (const turn of [-0.75, 0.75]) for (const how of ['auto', 'roll', 'brake'] as const) {
+  // (short < 0: already over the runway, that far past its threshold)
+  for (const dir of [0, Math.PI]) for (const short of [-60, 40, 210, 690]) for (const side of [-0.9, 0.9]) for (const turn of [-0.75, 0.75]) for (const how of ['auto', 'roll', 'brake'] as const) {
     const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw);
-    const a0 = -R.hl - short, off = side * (40 + 0.35 * short);
+    const a0 = -R.hl - short, off = side * (12 + 0.4 * Math.max(0, short));
     const start: PlayerState = { x: R.cx + fx * a0 + fz * off, z: R.cz + fz * a0 - fx * off, heading: yaw + turn, v: 14, alt: 30 };
     judge(`${bx},${by} ${dir ? 'back' : 'along'} ${short} m short, ${off.toFixed(0)} m off, ${turn > 0 ? '+' : '-'}43°, ${how}`,
       flight(R, pad, start, 150, how, (t, st, L) => atMark(t, st, L, R)));
@@ -167,6 +173,21 @@ for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
     else cancels++;
   }
 }
+// ---- just flying over the runway, hands off: no steering at all, lined up
+// within 6 m and 10° of it, anywhere along it that has room — it lands ----
+let handsOff = 0, handsOffTried = 0;
+for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
+  const { R, pad } = runwayOf(bx, by);
+  for (const dir of [0, Math.PI]) for (const a0 of [-R.hl + 20, -R.hl + 120, -20]) for (const l0 of [-6, 6]) for (const turn of [0, -Math.sign(l0) * 0.17, Math.sign(l0) * 0.05]) {
+    const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const start: PlayerState = { x: R.cx + fx * a0 + fz * l0, z: R.cz + fz * a0 - fx * l0, heading: yaw + turn, v: 18, alt: 30 };
+    handsOffTried++;
+    const f = flight(R, pad, start, 150, 'auto', () => ({ to: null, gas: false }));
+    if (f.landed && f.airborne && !f.offRunway) handsOff++;
+    else fail(`${R.key} ${dir ? 'back' : 'along'}: flying over the runway hands-off from ${a0.toFixed(0)} m along, ${l0} m off, ${(turn * 57.3).toFixed(0)}°: ${f.offRunway ? 'off the runway (' + f.offRunway + ')' : f.phases.join(' → ') || 'no descent'}`);
+  }
+}
+console.log(`hands off over the runway: ${handsOff} of ${handsOffTried} landed`);
 console.log(`following the mark: ${followed} of 24 landed; ${cancels} of 12 descents called off (steering away, the gas) climbed back`);
 console.log(`landings: ${landings} flown — every one down on the runway, stopped (the furthest ${(-worstStop).toFixed(0)} m short of its end), turned and back in the air`);
 

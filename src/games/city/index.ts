@@ -793,7 +793,7 @@ const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElem
       ...(cargo && dest ? [{ x: dest.door.x + dest.ox, z: dest.door.z + dest.oz, icon: LANDMARK_ICON[dest.kind] }] : []),
       // (flying the plane: the way in to the nearest airport's runway, R41 —
       // on the rim, pointing the way, when it's off the map)
-      ...(landing?.phase === 'fly' ? nearestRunway() : []),
+      ...(landing && (landing.phase === 'fly' || landing.phase === 'descend') ? nearestRunway() : []),
     ];
   });
 /** the plane's map mark (R41): the way in to the nearest runway — out to

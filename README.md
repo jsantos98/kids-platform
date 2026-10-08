@@ -65,7 +65,9 @@ and carries on from a spot just behind.
 | ![Sunset from the plane](docs/screenshots/sunset.jpg) | ![The pirate ship and a treasure island](docs/screenshots/pirate.jpg) |
 | ![The race at night](docs/screenshots/race-night.jpg) | ![Smoke from two fires over the town at dusk](docs/screenshots/smoke-dusk.jpg) |
 | ![The tow truck with a car on its bed](docs/screenshots/tow-truck.jpg) | ![The rescue helicopter on a hospital's roof helipad](docs/screenshots/heli-helipad.jpg) |
-| ![The plane landing on an airport's runway](docs/history/2026-10-08-airports/landing-roll.jpg) | ![An airport on its own island off the coast](docs/history/2026-10-08-airports/airport-island.jpg) |
+| ![The plane coming down onto an airport's runway](docs/screenshots/plane-landing.jpg) | ![Rolling out on the runway past the control tower](docs/screenshots/plane-runway.jpg) |
+| ![An airport on its own island, with its causeway](docs/screenshots/airport.jpg) | ![The race grid: eight cars, the child last](docs/screenshots/race-grid.jpg) |
+| ![The free-drive car in the city](docs/screenshots/car.jpg) | ![The garage's auto speed setting](docs/screenshots/auto-speed.jpg) |
 
 Reaching a call opens its **mission scene** — a street built from the same
 kits as the city, with the very house, car or tree the call showed on fire,

@@ -24,10 +24,15 @@ bridge's side, the race track's wall — flashes the car, the narrator says
 **Airports.** Every island has a small airport on its own island off one of
 its corners, joined to the shore by a causeway (like Singapore's Changi):
 a runway with lights for the night, a terminal, a control tower, a hangar,
-a windsock and planes at the gates. Point the plane down a runway (the 🛬 on
-the map shows the way in) and it starts coming down — the child still steers
-it in, and can call it off any time by steering away or pressing the gas.
-Once on the runway it stops, turns round on the spot and takes off again.
+a windsock and planes at the gates; the airport is on the map. Landing is
+flown by the child: point the plane down a runway — or just fly over it —
+and it starts to come down a gentle glide, and the 🛬 on the map leads the
+way in. The child steers it in the whole way and can call it off any time by
+steering away or pressing the gas; the plane climbs back up. Close to the
+ground it eases onto the runway's line, so a plane a little off still lands.
+Once on the runway it stops (by itself with auto speed), turns round on the
+spot and takes off again. (The first version took the plane over and flew it
+in like a magnet, and flying over the runway did nothing at all: both fixed.)
 
 **The race has eight cars**, and the child starts at the back of a
 staggered grid. The rivals keep out of each other's way, and the faster the
@@ -39,8 +44,10 @@ anywhere on the islands.
 
 | | |
 |---|---|
-| ![The plane rolling down the runway after landing](history/2026-10-08-airports/landing-roll.jpg) | ![Turned round, taking off again](history/2026-10-08-airports/takeoff.jpg) |
-| ![The airport on its own island beside the coast](history/2026-10-08-airports/airport-island.jpg) | |
+| ![The plane coming down onto the runway; the airport is marked on the map](history/2026-10-08-airports/descent.jpg) | ![Rolling out on the runway, past the control tower](history/2026-10-08-airports/landing-roll.jpg) |
+| ![Turned round at the end of the runway, taking off again](history/2026-10-08-airports/takeoff.jpg) | ![The airport's causeway leading out to its island](history/2026-10-08-airports/airport-island.jpg) |
+| ![The race grid: eight cars, the child last (8th)](history/2026-10-08-airports/race-grid.jpg) | ![The free-drive car in the city: no missions, no arrow](history/2026-10-08-airports/car-drive.jpg) |
+| ![The garage's settings: auto speed, with its note](history/2026-10-08-airports/auto-speed-settings.jpg) | |
 
 ---
 

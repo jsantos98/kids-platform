@@ -1395,7 +1395,10 @@ const tick = (): void => {
     // (no brake: at a standstill the brake pedal is reverse)
     if (race?.frozen) { input.gas = 0; input.brake = 0; input.steer = 0; st.v = 0; }
     // auto speed (G18): its pedals, the kid's own winning
-    else if (AUTO && mode === 'drive' && player.crashT <= 0) Object.assign(input, autoInput(input, st, V.maxF, race ? { pace: 'go' } : autoGoal));
+    // (the kid's own gas: it calls a plane's descent off, R41 — and while
+    // the plane comes down to a runway auto speed leaves the gas to the kid)
+    const kidGas = input.gas > 0.05;
+    if (!race?.frozen && AUTO && mode === 'drive' && player.crashT <= 0 && !(landing && landing.phase !== 'fly')) Object.assign(input, autoInput(input, st, V.maxF, race ? { pace: 'go' } : autoGoal));
     const trainBoxes = V.kind === 'ground' ? railway.unitBoxes(st.x, st.z) : [];
     const boxes = chunks.boxesNear(st.x, st.z).concat(scenery.boxesNear(), transit.boxesNear(), trainBoxes);
     const wasCrashing = player.crashT > 0;
@@ -1406,14 +1409,19 @@ const tick = (): void => {
       sound.event('crash'); narrator.say('oops');
       Object.assign(player.crash, crumbs.pickResume(st.x, st.z, st.heading, boxes, spawn, trafficFree));
     }
-    // (the plane lined up with a runway lands by itself: the landing has it)
-    const landed = !!landing && mode === 'drive' && landing.update(dt, input, st, runwaysNear(st.x, st.z), AUTO, e => {
+    // the plane and the runways (R41): pointed down one it comes down a glide
+    // the kid still flies (the landing only sets the height to hold); on the
+    // ground — the roll, the turn, the take-off — the landing has it
+    const landEv = (e: string): void => {
       if (e === 'land') narrator.say('land');
       else if (e === 'landed') narrator.say('landed');
       else if (e === 'takeoff') narrator.say('takeoff');
-    });
-    const ring = landed ? null : course?.aim(st.x, st.z, st.heading);
-    const step = landed ? { crashed: false } : physicsStep(player, input, dt, boxes, ring ? ring.y - 2 : PLANE_ALT);
+    };
+    const onGround = !!landing && mode === 'drive' && landing.ground(dt, input, st, AUTO, landEv);
+    const ring = onGround ? null : course?.aim(st.x, st.z, st.heading);
+    const cruise = ring ? ring.y - 2 : PLANE_ALT;
+    const glide = landing && mode === 'drive' && !onGround ? landing.fly(dt, st, runwaysNear(st.x, st.z), kidGas, cruise, landEv) : null;
+    const step = onGround || landing?.phase === 'roll' ? { crashed: false } : physicsStep(player, input, dt, boxes, glide ?? cruise);
     if (step.crashed) {
       sound.event('crash'); narrator.say('oops');
       toast = '';
@@ -1649,15 +1657,17 @@ const tick = (): void => {
   } else if (V.kind === 'plane') {
     // bank into the turn, nose follows the climb, propeller spins
     // banks into the turn (left wheel: left wing down), eased with the turn
-    // (landing, taking off: the landing's own bank and pitch)
-    if (landing && landing.phase !== 'fly') {
+    // (on the runway: the landing's own bank and pitch; coming down to it,
+    // the nose follows the glide)
+    if (landing && landing.phase !== 'fly' && landing.phase !== 'descend') {
       player.steerS = landing.steer;
       player.car.rotation.z = -landing.steer * 0.3;
       player.car.rotation.x = -landing.pitch;
     } else {
       player.car.rotation.z = -player.steerS * 0.45;
       const ring = course?.target;
-      player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, ((ring ? ring.y - 2 : PLANE_ALT) - st.alt) * 0.05));
+      const want = landing?.phase === 'descend' ? landing.target : ring ? ring.y - 2 : PLANE_ALT;
+      player.car.rotation.x = -Math.max(-0.25, Math.min(0.25, (want - st.alt) * 0.05));
     }
     (player.car.userData.prop as THREE.Object3D | undefined)!.rotation.z = elapsed * 40;
   } else if (V.kind === 'boat') {

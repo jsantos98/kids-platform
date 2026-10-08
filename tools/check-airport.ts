@@ -17,6 +17,7 @@
 //    the gate on the centre line, then down the runway (a mark at the
 //    runway's middle brought the plane in square to it, and it never landed).
 //   npx tsx tools/check-airport.ts [baseSeed]
+import './headless-dom.js';
 import { setCityBase, CITY_PITCH, southExit, eastExit } from '../src/worlds/cityGrid.js';
 import { coastFor } from '../src/worlds/coast.js';
 import { riverFor } from '../src/worlds/riverRoute.js';
@@ -25,7 +26,7 @@ import { ISLAND, CENTER } from '../src/worlds/world.js';
 import { airportFor, boxPoint, RUNWAY_HW, RUNWAY_Y } from '../src/games/city/airport.js';
 import { harbourFor, inSeaBox } from '../src/games/city/harbour.js';
 import { Landing, type Runway, type LandEvent } from '../src/games/city/landing.js';
-import type { PlayerState } from '../src/games/city/player.js';
+import { createPlayer, physicsStep, VEHICLES, type PlayerState } from '../src/games/city/player.js';
 
 const base = Number(process.argv.slice(2).find(a => !a.startsWith('--')) ?? 7) | 0;
 setCityBase(base);
@@ -68,80 +69,105 @@ for (let bx = -2; bx <= 2; bx++) for (let by = -2; by <= 2; by++) {
 }
 console.log(`layouts: ${n} islands, the shortest runway ${shortest.toFixed(0)} m`);
 
-// ---- the landings ----
-let landings = 0, worstStop = -Infinity;
-for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
-  const A = airportFor(bx, by);
-  const R: Runway = { key: `${bx},${by}`, cx: A.runway.cx + bx * CITY_PITCH, cz: A.runway.cz + by * CITY_PITCH, yaw: A.runway.yaw, hl: A.runway.hl };
-  for (const dir of [0, Math.PI]) for (const short of [210, 690]) for (const side of [-0.9, 0.9]) for (const turn of [-0.75, 0.75]) for (const alt of [24, 44])
-    for (const how of ['auto', 'roll', 'brake'] as const) {
-      const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw);
-      const a0 = -R.hl - short, off = side * (40 + 0.35 * short);
-      const st: PlayerState = { x: R.cx + fx * a0 + fz * off, z: R.cz + fz * a0 - fx * off, heading: yaw + turn, v: 14, alt };
-      const L = new Landing();
-      const evs: LandEvent[] = [];
-      const label = `${bx},${by} ${dir ? 'back' : 'along'} ${short} m short, ${off.toFixed(0)} m off, ${turn > 0 ? '+' : '-'}43°, ${alt} m, ${how}`;
-      let ok = true, stopA = 0;
-      const frame = (x: number, z: number): { a: number; l: number } => {
-        const dx = x - R.cx, dz = z - R.cz;
-        return { a: dx * fx + dz * fz, l: dx * fz - dz * fx };
-      };
-      for (let k = 0; k < 120 * 60 && ok; k++) {
-        const had = L.update(1 / 60, { gas: 0, brake: how === 'brake' ? 1 : 0, steer: 0 }, st, [R], how === 'auto', e => {
-          evs.push(e);
-          if (e === 'landed') stopA = frame(st.x, st.z).a;
-        });
-        if (!had) {
-          if (!evs.length) { fail(`${label}: it never began to land`); ok = false; }
-          break;
-        }
-        // on the ground: on the runway or its pads, past the threshold
-        if (st.alt <= RUNWAY_Y + 0.01) {
-          const { a, l } = frame(st.x, st.z);
-          if (Math.abs(l) > RUNWAY_HW - 1 || Math.abs(a) > R.hl + A.pad) { fail(`${label}: on the ground off the runway (${a.toFixed(0)} along, ${l.toFixed(1)} across)`); ok = false; }
-          if (evs.length === 1 && a < -R.hl) { fail(`${label}: touched down short of the threshold`); ok = false; }
-        }
-      }
-      if (!ok) continue;
-      if (evs.join() !== 'land,landed,takeoff,airborne') { fail(`${label}: ${evs.join(' → ') || 'nothing'} (not land → landed → takeoff → airborne)`); continue; }
-      if (stopA > R.hl + A.pad * 0.5) fail(`${label}: stopped ${(stopA - R.hl).toFixed(0)} m past the runway's end`);
-      worstStop = Math.max(worstStop, stopA - R.hl);
-      landings++;
+// ---- the landings: a kid flying the real plane (player.ts physics) ----
+const DT = 1 / 60;
+interface Flight { landed: boolean; airborne: boolean; offRunway: string; stopPast: number; minAlt: number; phases: string[]; endAlt: number }
+/** fly the plane from `st` for up to `secs`: `kid` says each frame where it
+ * steers for (a world point) and whether it presses the gas */
+function flight(R: Runway, pad: number, start: PlayerState, secs: number, how: 'auto' | 'roll' | 'brake',
+  kid: (t: number, st: PlayerState, L: Landing) => { to: { x: number; z: number } | null; gas: boolean }): Flight {
+  const p = createPlayer(VEHICLES.plane, start.x, start.z, start.heading);
+  Object.assign(p.state, start);
+  const st = p.state, L = new Landing();
+  const out: Flight = { landed: false, airborne: false, offRunway: '', stopPast: -Infinity, minAlt: Infinity, phases: [], endAlt: 0 };
+  const fx = Math.sin(R.yaw), fz = Math.cos(R.yaw);
+  for (let k = 0; k < secs / DT; k++) {
+    const t = k * DT, want = kid(t, st, L);
+    let steer = 0;
+    if (want.to) {
+      const d = Math.atan2(want.to.x - st.x, want.to.z - st.z) - st.heading;
+      steer = Math.max(-1, Math.min(1, Math.atan2(Math.sin(d), Math.cos(d)) * 4));
     }
+    const input = { gas: want.gas ? 1 : 0, brake: how === 'brake' ? 1 : 0, steer };
+    const ev = (e: LandEvent): void => {
+      if (out.phases[out.phases.length - 1] !== e) out.phases.push(e);
+      if (e === 'landed') {
+        out.landed = true;
+        const dx = st.x - R.cx, dz = st.z - R.cz;
+        out.stopPast = Math.max(Math.abs(dx * fx + dz * fz)) - R.hl;
+      }
+      if (e === 'airborne') out.airborne = true;
+    };
+    if (!L.ground(DT, input, st, how === 'auto', ev)) {
+      const glide = L.fly(DT, st, [R], want.gas, 30, ev);
+      if (L.phase !== 'roll') physicsStep(p, input, DT, [], glide ?? 30);
+    }
+    out.minAlt = Math.min(out.minAlt, st.alt);
+    if (st.alt <= RUNWAY_Y + 0.01 && !out.offRunway) {
+      const dx = st.x - R.cx, dz = st.z - R.cz, a = dx * fx + dz * fz, l = dx * fz - dz * fx;
+      if (Math.abs(l) > RUNWAY_HW - 1 || Math.abs(a) > R.hl + pad) out.offRunway = `${a.toFixed(0)} along, ${l.toFixed(1)} across`;
+    }
+    if (out.airborne && st.alt > 20) break;
+  }
+  out.endAlt = st.alt;
+  return out;
 }
-// ---- following the map's mark ----
-let followed = 0;
-for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
+const runwayOf = (bx: number, by: number): { R: Runway; pad: number } => {
   const A = airportFor(bx, by);
-  const R: Runway = { key: `${bx},${by}`, cx: A.runway.cx + bx * CITY_PITCH, cz: A.runway.cz + by * CITY_PITCH, yaw: A.runway.yaw, hl: A.runway.hl };
+  return { R: { key: `${bx},${by}`, cx: A.runway.cx + bx * CITY_PITCH, cz: A.runway.cz + by * CITY_PITCH, yaw: A.runway.yaw, hl: A.runway.hl }, pad: A.pad };
+};
+const atMark = (_t: number, st: PlayerState, L: Landing, R: Runway): { to: { x: number; z: number } | null; gas: boolean } => ({ to: L.mark(st, [R]), gas: false });
+
+let landings = 0, worstStop = -Infinity, followed = 0, cancels = 0;
+const judge = (label: string, f: Flight): void => {
+  if (f.offRunway) fail(`${label}: on the ground off the runway (${f.offRunway})`);
+  else if (!f.landed) fail(`${label}: never landed (${f.phases.join(' → ') || 'no descent'})`);
+  else if (!f.airborne) fail(`${label}: landed but never took off again (${f.phases.join(' → ')})`);
+  else if (f.stopPast > 0) fail(`${label}: stopped ${f.stopPast.toFixed(0)} m past the runway's end`);
+  else { landings++; worstStop = Math.max(worstStop, f.stopPast); }
+};
+for (const [bx, by] of [[1, 0], [2, 2], [0, 1]] as const) {
+  const { R, pad } = runwayOf(bx, by);
+  // from the funnel's edges, flying at the mark
+  for (const dir of [0, Math.PI]) for (const short of [210, 690]) for (const side of [-0.9, 0.9]) for (const turn of [-0.75, 0.75]) for (const how of ['auto', 'roll', 'brake'] as const) {
+    const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const a0 = -R.hl - short, off = side * (40 + 0.35 * short);
+    const start: PlayerState = { x: R.cx + fx * a0 + fz * off, z: R.cz + fz * a0 - fx * off, heading: yaw + turn, v: 14, alt: 30 };
+    judge(`${bx},${by} ${dir ? 'back' : 'along'} ${short} m short, ${off.toFixed(0)} m off, ${turn > 0 ? '+' : '-'}43°, ${how}`,
+      flight(R, pad, start, 150, how, (t, st, L) => atMark(t, st, L, R)));
+  }
+  // a kid who just flies at the mark, from all round, 600 m out
   for (let k = 0; k < 8; k++) {
     const ang = (k / 8) * Math.PI * 2;
-    const st: PlayerState = { x: R.cx + Math.cos(ang) * 600, z: R.cz + Math.sin(ang) * 600, heading: ang + Math.PI, v: 16, alt: 30 };
-    const L = new Landing();
-    let landed = false;
-    for (let f = 0; f < 180 * 60 && !landed; f++) {
-      const dt = 1 / 60;
-      // the kid: steers at the mark (the plane turns at up to 0.9 rad/s)
-      const m = L.mark(st, [R]);
-      let steer = 0;
-      if (m) {
-        const d = Math.atan2(Math.sin(Math.atan2(m.x - st.x, m.z - st.z) - st.heading), Math.cos(Math.atan2(m.x - st.x, m.z - st.z) - st.heading));
-        steer = Math.max(-1, Math.min(1, d * 4));
-      }
-      const had = L.update(dt, { gas: 0, brake: 0, steer }, st, [R], true, e => { if (e === 'landed') landed = true; });
-      if (!had) {
-        st.heading += steer * 0.9 * dt;
-        st.x += Math.sin(st.heading) * st.v * dt;
-        st.z += Math.cos(st.heading) * st.v * dt;
-        st.alt += Math.max(-6 * dt, Math.min(6 * dt, 30 - st.alt));
-      }
-    }
-    if (!landed) fail(`${bx},${by}: flying at the mark from ${(ang * 180 / Math.PI).toFixed(0)}° round, 600 m out, never landed`);
-    else followed++;
+    const start: PlayerState = { x: R.cx + Math.cos(ang) * 600, z: R.cz + Math.sin(ang) * 600, heading: ang + Math.PI, v: 16, alt: 30 };
+    const f = flight(R, pad, start, 240, 'auto', (t, st, L) => atMark(t, st, L, R));
+    if (f.landed && f.airborne && !f.offRunway) followed++;
+    else fail(`${bx},${by}: flying at the mark from ${(ang * 180 / Math.PI).toFixed(0)}° round, 600 m out: ${f.offRunway ? 'off the runway' : f.phases.join(' → ') || 'no descent'}`);
+  }
+  // calling it off: lined up 500 m out, coming down — then steering away
+  // (square to the runway) or pressing the gas: no landing, and it climbs
+  // back to its cruise
+  for (const how of ['steer', 'gas'] as const) for (const dir of [0, Math.PI]) {
+    const yaw = R.yaw + dir, fx = Math.sin(yaw), fz = Math.cos(yaw), a0 = -R.hl - 500;
+    const start: PlayerState = { x: R.cx + fx * a0, z: R.cz + fz * a0, heading: yaw, v: 14, alt: 30 };
+    let descending = false, calledOff = -1;
+    const label = `${R.key} ${dir ? 'back' : 'along'}: called off by ${how === 'steer' ? 'steering away' : 'the gas'}`;
+    const f = flight(R, pad, start, 40, 'auto', (t, st, L) => {
+      if (L.phase === 'descend') descending = true;
+      if (t < 12) return { to: L.mark(st, [R]), gas: false };
+      if (calledOff < 0 && L.phase === 'fly') calledOff = t;
+      return how === 'steer'
+        ? { to: { x: st.x + fz * 1000, z: st.z - fx * 1000 }, gas: false }
+        : { to: { x: st.x + fx * 1000, z: st.z + fz * 1000 }, gas: t < 13.5 };
+    });
+    if (!descending) fail(`${label}: it never began to come down`);
+    else if (f.landed || f.minAlt < 1) fail(`${label}: it landed anyway`);
+    else if (calledOff < 0 || calledOff > 14) fail(`${label}: the descent wasn't called off (${calledOff.toFixed(1)} s)`);
+    else if (f.endAlt < 25) fail(`${label}: it didn't climb back (${f.endAlt.toFixed(1)} m)`);
+    else cancels++;
   }
 }
-console.log(`following the mark: ${followed} of 24 landed`);
-
+console.log(`following the mark: ${followed} of 24 landed; ${cancels} of 12 descents called off (steering away, the gas) climbed back`);
 console.log(`landings: ${landings} flown — every one down on the runway, stopped (the furthest ${(-worstStop).toFixed(0)} m short of its end), turned and back in the air`);
 
 console.log(fails ? `FAIL — ${fails} problem(s) with the airports (R41)` : 'PASS — every island has its airport, and the plane lands, stops, turns and takes off (R41)');

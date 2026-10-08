@@ -24,8 +24,10 @@ bridge's side, the race track's wall — flashes the car, the narrator says
 **Airports.** Every island has a small airport on its own island off one of
 its corners, joined to the shore by a causeway (like Singapore's Changi):
 a runway with lights for the night, a terminal, a control tower, a hangar,
-a windsock and planes at the gates. Fly the plane in line with a runway and
-it lands by itself, stops, turns round on the spot and takes off again.
+a windsock and planes at the gates. Point the plane down a runway (the 🛬 on
+the map shows the way in) and it starts coming down — the child still steers
+it in, and can call it off any time by steering away or pressing the gas.
+Once on the runway it stops, turns round on the spot and takes off again.
 
 **The race has eight cars**, and the child starts at the back of a
 staggered grid. The rivals keep out of each other's way, and the faster the

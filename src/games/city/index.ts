@@ -2,7 +2,7 @@
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, gpuName, type Dressing } from '../../engine/stage.js';
-import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
+import { TIERS, viewOf, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
 import { readWheel, wheelHeld, watchWheelActions } from '../../engine/wheel.js';
 import { Landing, type Runway } from './landing.js';
@@ -204,8 +204,10 @@ function modeSpawn(bx: number, by: number): { x: number; z: number; heading: num
 // timed so it steps down while they are slow)
 let quality: Quality = startQuality();
 const qualityAuto = qualityPref() === 'auto';
+// (a plane or a helicopter sees further: its own view distance and fog)
+const FLYING = MODE.vehicle.fly;
 const stage = createStage({
-  sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: TIERS[quality].fogNear, fogFar: TIERS[quality].fogFar,
+  sunPos: [-40, 90, -55], shadowSpan: 95, fogNear: viewOf(TIERS[quality], FLYING).fogNear, fogFar: viewOf(TIERS[quality], FLYING).fogFar,
   ground: false, groundColor: 0xa9c88b, clouds: true,
 });
 const { scene, camera, renderer } = stage;
@@ -531,17 +533,18 @@ if (q.get('debugbake') === '1') {
 // the archipelago is far too big to build at once: chunks spring up around
 // the truck as it drives (fog hides the seams), and the ?buildall=1 dev flag
 // still lays down the whole starting city for aerial screenshots
-const chunks = new ChunkManager(scene, 64, TIERS[quality].viewR);
+const chunks = new ChunkManager(scene, 64, viewOf(TIERS[quality], FLYING).viewR);
 
 /** switch to another graphics quality while playing (G13) */
 function setQuality(q: Quality): void {
   quality = q;
   const tier = TIERS[q];
   applyQuality(renderer, stage.sun, tier);
-  chunks.setViewRadius(tier.viewR);
+  const view = viewOf(tier, FLYING);
+  chunks.setViewRadius(view.viewR);
   const fog = scene.fog as THREE.Fog;
-  fog.near = tier.fogNear;
-  fog.far = tier.fogFar;
+  fog.near = view.fogNear;
+  fog.far = view.fogFar;
   setCarDrawScale(tier.drawScale);
   setWalkerDrawScale(tier.drawScale);
   if (qualityAuto) setAutoQuality(q);

@@ -67,6 +67,12 @@ export interface QualityTier {
   viewR: number;
   fogNear: number;
   fogFar: number;
+  /** the same for a plane or a helicopter: the sky shows far more of the
+   * island than a street does, and the rings and calls it flies to are
+   * 100–400 m away — two chunks further at every level */
+  flyViewR: number;
+  flyFogNear: number;
+  flyFogFar: number;
   /** how far away the traffic and the people are drawn (× the full distance) */
   drawScale: number;
 }
@@ -75,11 +81,18 @@ export const TIERS: Record<Quality, QualityTier> = {
   // (for a very old computer, or one whose graphics chip does everything on a
   // slow processor: no shadows, 25 chunks drawn instead of 49, a few cars and
   // people, a small picture — it looks plain and plays at twice the speed)
-  minimal: { pixelRatio: 0.7, maxPixels: 450_000, shadows: false, antialias: false, shadowMap: 512, shadowBlur: 2, shadowSpan: 0.5, shadowEvery: 4, viewR: 2, fogNear: 35, fogFar: 125, drawScale: 0.45 },
-  high: { pixelRatio: 1.5, maxPixels: 3_200_000, shadows: true, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 1 },
-  medium: { pixelRatio: 1, maxPixels: 1_400_000, shadows: true, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 0.85 },
-  low: { pixelRatio: 0.8, maxPixels: 700_000, shadows: true, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, drawScale: 0.7 },
+  minimal: { pixelRatio: 0.7, maxPixels: 450_000, shadows: false, antialias: false, shadowMap: 512, shadowBlur: 2, shadowSpan: 0.5, shadowEvery: 4, viewR: 2, fogNear: 35, fogFar: 125, flyViewR: 3, flyFogNear: 50, flyFogFar: 195, drawScale: 0.45 },
+  high: { pixelRatio: 1.5, maxPixels: 3_200_000, shadows: true, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, flyViewR: 6, flyFogNear: 130, flyFogFar: 370, drawScale: 1 },
+  medium: { pixelRatio: 1, maxPixels: 1_400_000, shadows: true, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, flyViewR: 5, flyFogNear: 110, flyFogFar: 310, drawScale: 0.85 },
+  low: { pixelRatio: 0.8, maxPixels: 700_000, shadows: true, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, flyViewR: 4, flyFogNear: 70, flyFogFar: 260, drawScale: 0.7 },
 };
+
+/** how far the city is drawn at this level, for a flying vehicle or not */
+export function viewOf(tier: QualityTier, flying: boolean): { viewR: number; fogNear: number; fogFar: number } {
+  return flying
+    ? { viewR: tier.flyViewR, fogNear: tier.flyFogNear, fogFar: tier.flyFogFar }
+    : { viewR: tier.viewR, fogNear: tier.fogNear, fogFar: tier.fogFar };
+}
 
 /** the render pixel ratio for a screen of w × h CSS pixels at this level:
  * the level's ratio, the screen's own, and never more pixels than its budget

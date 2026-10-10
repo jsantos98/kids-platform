@@ -14,7 +14,10 @@ a second there. There is now a fourth level, **Minimal** (graphics ⚙️ →
 drawn and a small picture — about half the drawing work of Low (203 draw calls
 and 0.76 million triangles a frame against 446 and 1.7 million), so it looks
 plainer and plays much faster. Automatic steps down to it by itself when Low
-is still too slow. The status line also shows how many milliseconds of the
+is still too slow. In the plane and the helicopters the city is now drawn two
+chunks further at every level (a longer view over the island: the rings and
+calls are a long way off), which on the slowest levels costs about what one
+level up used to. The status line also shows how many milliseconds of the
 processor each frame takes (`cpu N ms`), so one look says whether the
 processor or the graphics chip is the limit.
 

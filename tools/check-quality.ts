@@ -7,12 +7,12 @@
 // drawn city reaches at least viewR·64 m), and "auto" must start at medium —
 // the game is for an older PC.
 //   npx tsx tools/check-quality.ts
-import { TIERS, renderRatio, type Quality } from '../src/engine/settings.js';
+import { TIERS, renderRatio, viewOf, type Quality } from '../src/engine/settings.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; console.log('  FAIL ' + m); };
 const order: Quality[] = ['minimal', 'low', 'medium', 'high'];
-const cheaper: Array<keyof typeof TIERS.high> = ['pixelRatio', 'maxPixels', 'shadowMap', 'shadowBlur', 'shadowSpan', 'viewR', 'fogFar', 'drawScale'];
+const cheaper: Array<keyof typeof TIERS.high> = ['pixelRatio', 'maxPixels', 'shadowMap', 'shadowBlur', 'shadowSpan', 'viewR', 'fogFar', 'drawScale', 'flyViewR', 'flyFogFar'];
 for (let i = 1; i < order.length; i++) {
   const lo = TIERS[order[i - 1]], hi = TIERS[order[i]];
   for (const k of cheaper) if ((lo[k] as number) > (hi[k] as number)) fail(`${order[i - 1]} ${k} ${lo[k]} is more than ${order[i]}'s ${hi[k]}`);
@@ -22,9 +22,14 @@ for (let i = 1; i < order.length; i++) {
 }
 for (const q of order) {
   const t = TIERS[q];
-  const thick = (t.viewR * 64 - t.fogNear) / (t.fogFar - t.fogNear);
-  if (thick < 0.97) fail(`${q}: the fog is only ${(thick * 100).toFixed(0)} % thick where its city ends (${t.viewR * 64} m)`);
-  if (t.fogNear >= t.fogFar) fail(`${q}: fog near ${t.fogNear} m is past its far ${t.fogFar} m`);
+  // (on the ground, and flying: the sky sees further, G13)
+  for (const flying of [false, true]) {
+    const v = viewOf(t, flying), what = flying ? `${q} flying` : q;
+    const thick = (v.viewR * 64 - v.fogNear) / (v.fogFar - v.fogNear);
+    if (thick < 0.97) fail(`${what}: the fog is only ${(thick * 100).toFixed(0)} % thick where its city ends (${v.viewR * 64} m)`);
+    if (v.fogNear >= v.fogFar) fail(`${what}: fog near ${v.fogNear} m is past its far ${v.fogFar} m`);
+  }
+  if (t.flyViewR < t.viewR + 1 || t.flyFogFar <= t.fogFar) fail(`${q}: a flying vehicle must see further than one on the ground (${t.flyViewR} against ${t.viewR} chunks)`);
   if (t.shadowEvery < 1 || !Number.isInteger(t.shadowEvery)) fail(`${q}: shadows every ${t.shadowEvery} frames`);
 }
 // the picture's size: whatever the screen — a small laptop, 1080p, 1440p, a

@@ -5,6 +5,29 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-10-10 — the steering wheel, set up in a minute
+
+**A wheel page.** Plug the wheel in, open the garage's ⚙️ settings and
+choose *Volante*: a page shows everything the wheel sends, live (every axis
+as a bar, every button as a dot), says which wheel is connected, and walks
+through a short calibration — let go, wheel left, wheel right, gas pedal, brake
+pedal — that works out which control is which and saves it for the game. It
+copes with whatever the wheel does: pedals as buttons or as axes, gas and
+brake on one axis, steering the other way round. Before, the game guessed one
+layout, and a wheel whose pedals were axes (like the one it was first tried
+on) had no working pedals.
+
+**Buttons with jobs.** The same page gives the wheel's buttons jobs: accelerate
+and brake (for a child who doesn't take to the pedals), the siren, the camera,
+sounds and music on / off, back to the start of the drive, go and back to the
+garage — as many buttons as you like for each action, one job per button, kept
+when you recalibrate. Back to the garage is a simple press.
+
+**Easier in the garage.** The carousel now moves on a small turn of the wheel
+(about 15 % of its lock instead of 45 %).
+
+---
+
 ## 2026-10-08 — auto speed, airports, an eight-car race and a car just to drive
 
 **Auto speed.** A new setting in the garage's ⚙️ panel, off unless a grown-up

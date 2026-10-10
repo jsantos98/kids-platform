@@ -36,12 +36,12 @@ export function onVolume(f: (k: VolumeKey, v: number) => void): () => void {
 // smoothing, a shadow map and how far the city is drawn — and "auto", which
 // starts at medium, steps down while the frames are slow and remembers where
 // it settled for the next game. Set in the garage's ⚙️ panel (localStorage
-// `game.quality`); `?quality=auto|low|medium|high` overrides it for one visit.
+// `game.quality`); `?quality=auto|minimal|low|medium|high` overrides it for one visit.
 
-export type Quality = 'low' | 'medium' | 'high';
+export type Quality = 'minimal' | 'low' | 'medium' | 'high';
 export type QualityPref = 'auto' | Quality;
-export const QUALITY_PREFS: readonly QualityPref[] = ['auto', 'low', 'medium', 'high'];
-const QUALITIES: readonly Quality[] = ['low', 'medium', 'high'];
+export const QUALITY_PREFS: readonly QualityPref[] = ['auto', 'minimal', 'low', 'medium', 'high'];
+const QUALITIES: readonly Quality[] = ['minimal', 'low', 'medium', 'high'];
 
 export interface QualityTier {
   /** the render resolution: at most this many pixels per screen pixel… */
@@ -52,6 +52,9 @@ export interface QualityTier {
   maxPixels: number;
   /** edge smoothing (MSAA) — fixed when the page starts */
   antialias: boolean;
+  /** the sun casts shadows at all (the lowest level draws none: the shadow
+   * pass is half a frame's triangles) */
+  shadows: boolean;
   /** the sun's shadow map (texels a side) and its blur; the ground it covers
    * (× the city's ±95 m, ±150 m flying) and how often it is drawn again (every
    * n-th frame) — the shadow pass drew 60 % of a frame's triangles */
@@ -69,9 +72,13 @@ export interface QualityTier {
 }
 
 export const TIERS: Record<Quality, QualityTier> = {
-  high: { pixelRatio: 1.5, maxPixels: 3_200_000, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 1 },
-  medium: { pixelRatio: 1, maxPixels: 1_400_000, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 0.85 },
-  low: { pixelRatio: 0.8, maxPixels: 700_000, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, drawScale: 0.7 },
+  // (for a very old computer, or one whose graphics chip does everything on a
+  // slow processor: no shadows, 25 chunks drawn instead of 49, a few cars and
+  // people, a small picture — it looks plain and plays at twice the speed)
+  minimal: { pixelRatio: 0.7, maxPixels: 450_000, shadows: false, antialias: false, shadowMap: 512, shadowBlur: 2, shadowSpan: 0.5, shadowEvery: 4, viewR: 2, fogNear: 35, fogFar: 125, drawScale: 0.45 },
+  high: { pixelRatio: 1.5, maxPixels: 3_200_000, shadows: true, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 1 },
+  medium: { pixelRatio: 1, maxPixels: 1_400_000, shadows: true, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 0.85 },
+  low: { pixelRatio: 0.8, maxPixels: 700_000, shadows: true, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, drawScale: 0.7 },
 };
 
 /** the render pixel ratio for a screen of w × h CSS pixels at this level:
@@ -136,5 +143,5 @@ export function startQuality(): Quality {
 }
 
 /** one level down / up (null: none) */
-export function lowerQuality(q: Quality): Quality | null { return q === 'high' ? 'medium' : q === 'medium' ? 'low' : null; }
-export function higherQuality(q: Quality): Quality | null { return q === 'low' ? 'medium' : q === 'medium' ? 'high' : null; }
+export function lowerQuality(q: Quality): Quality | null { return q === 'high' ? 'medium' : q === 'medium' ? 'low' : q === 'low' ? 'minimal' : null; }
+export function higherQuality(q: Quality): Quality | null { return q === 'minimal' ? 'low' : q === 'low' ? 'medium' : q === 'medium' ? 'high' : null; }

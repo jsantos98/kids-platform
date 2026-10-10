@@ -32,6 +32,7 @@ export const PT: Record<Key, string> = {
   'settings.close': 'Fechar',
   'settings.quality': 'Gráficos',
   'settings.quality.auto': 'Automático',
+  'settings.quality.minimal': 'mínimos',
   'settings.quality.low': 'baixos',
   'settings.quality.medium': 'médios',
   'settings.quality.high': 'altos',
@@ -92,7 +93,7 @@ export const PT: Record<Key, string> = {
   'wheel.isPedal': 'O botão {n} é um pedal: escolha outro.',
   'wheel.reset': 'Voltar à configuração normal',
   'wheel.resetDone': 'Configuração normal reposta.',
-  'settings.qualityNote': 'O automático baixa os gráficos sozinho se o jogo estiver lento. Baixos é o melhor para um computador mais antigo.',
+  'settings.qualityNote': 'O automático baixa os gráficos sozinho se o jogo estiver lento. Baixos é o melhor para um computador mais antigo, mínimos para um muito antigo.',
 
   // os carros de corrida (raceCars.ts), escolhidos depois da corrida na garagem
   'cars.blurb': 'Escolhe o teu carro de corrida!',
@@ -144,7 +145,7 @@ export const PT: Record<Key, string> = {
   'city.music': 'música ligada / desligada',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',
-  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · {fps} fps · gráficos {quality} · chamadas de desenho {calls} · triângulos {tris} · {res} · {gpu}',
+  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · {fps} fps · gráficos {quality} · chamadas de desenho {calls} · triângulos {tris} · {res} · cpu {cpu} ms · {gpu}',
 
   // ---- a carregar ----
   'load.ready': 'A preparar…',

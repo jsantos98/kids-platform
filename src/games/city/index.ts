@@ -2248,13 +2248,18 @@ const tick = (): void => {
     const i = renderer.info.render;
     renderer.getDrawingBufferSize(rsize);
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()), fps: perf.fps, quality: tr(`settings.quality.${quality}` as Key), res: `${rsize.x}×${rsize.y}`, gpu: GPU_NAME }));
+    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()), fps: perf.fps, quality: tr(`settings.quality.${quality}` as Key), res: `${rsize.x}×${rsize.y}`, cpu: Math.round(cpuMs), gpu: GPU_NAME }));
     // (the tab shows the page's name; the dev probe keeps its stats title)
     if (q.get('debugsea') === '1') document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };
   }
 };
-renderer.setAnimationLoop(tick);
+// (the processor's share of a frame: the game's own work and the submission
+// of its drawing, as a running average, for the status line: next to the
+// frame rate it says whether the processor or the graphics chip is the limit)
+let cpuMs = 0;
+const timedTick = (): void => { const t0 = performance.now(); tick(); cpuMs += (performance.now() - t0 - cpuMs) * 0.05; };
+renderer.setAnimationLoop(timedTick);
 // dev probe: step frames by hand (background tabs pause requestAnimationFrame)
 if (q.get('debugsea') === '1') {
   (window as unknown as { __dbg: Record<string, unknown> }).__dbg.tick = tick;

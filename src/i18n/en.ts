@@ -31,6 +31,7 @@ export const EN = {
   'settings.close': 'Close',
   'settings.quality': 'Graphics',
   'settings.quality.auto': 'Automatic',
+  'settings.quality.minimal': 'minimal',
   'settings.quality.low': 'low',
   'settings.quality.medium': 'medium',
   'settings.quality.high': 'high',
@@ -91,7 +92,7 @@ export const EN = {
   'wheel.isPedal': 'Button {n} is a pedal: pick another one.',
   'wheel.reset': 'Back to the standard setup',
   'wheel.resetDone': 'Standard setup restored.',
-  'settings.qualityNote': 'Automatic lowers the graphics by itself if the game runs slowly. Low is best for an older computer.',
+  'settings.qualityNote': 'Automatic lowers the graphics by itself if the game runs slowly. Low is best for an older computer, Minimal for a very old one.',
 
   // the race cars (raceCars.ts), picked after the race in the garage
   'cars.blurb': 'Pick your race car!',
@@ -143,7 +144,7 @@ export const EN = {
   'city.music': 'music on / off',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
-  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · {fps} fps · graphics {quality} · draw calls {calls} · triangles {tris} · {res} · {gpu}',
+  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · {fps} fps · graphics {quality} · draw calls {calls} · triangles {tris} · {res} · cpu {cpu} ms · {gpu}',
 
   // ---- loading ----
   'load.ready': 'Getting ready…',

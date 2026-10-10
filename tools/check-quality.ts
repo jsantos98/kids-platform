@@ -11,12 +11,13 @@ import { TIERS, renderRatio, type Quality } from '../src/engine/settings.js';
 
 let fails = 0;
 const fail = (m: string): void => { fails++; console.log('  FAIL ' + m); };
-const order: Quality[] = ['low', 'medium', 'high'];
+const order: Quality[] = ['minimal', 'low', 'medium', 'high'];
 const cheaper: Array<keyof typeof TIERS.high> = ['pixelRatio', 'maxPixels', 'shadowMap', 'shadowBlur', 'shadowSpan', 'viewR', 'fogFar', 'drawScale'];
 for (let i = 1; i < order.length; i++) {
   const lo = TIERS[order[i - 1]], hi = TIERS[order[i]];
   for (const k of cheaper) if ((lo[k] as number) > (hi[k] as number)) fail(`${order[i - 1]} ${k} ${lo[k]} is more than ${order[i]}'s ${hi[k]}`);
   if (lo.shadowEvery < hi.shadowEvery) fail(`${order[i - 1]} draws its shadows more often than ${order[i]}`);
+  if (lo.shadows && !hi.shadows) fail(`${order[i - 1]} draws shadows and ${order[i]} doesn't`);
   if (lo.antialias && !hi.antialias) fail(`${order[i - 1]} smooths edges and ${order[i]} doesn't`);
 }
 for (const q of order) {

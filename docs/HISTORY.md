@@ -5,6 +5,21 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-10-10 (even later) — a level below Low, for the slowest laptops
+
+The lowest graphics level was still too much for a laptop with a slow
+processor: even with the picture shrunk, the game could only reach 18 frames
+a second there. There is now a fourth level, **Minimal** (graphics ⚙️ →
+*mínimos*): no shadows, a shorter view of the city, fewer cars and people
+drawn and a small picture — about half the drawing work of Low (203 draw calls
+and 0.76 million triangles a frame against 446 and 1.7 million), so it looks
+plainer and plays much faster. Automatic steps down to it by itself when Low
+is still too slow. The status line also shows how many milliseconds of the
+processor each frame takes (`cpu N ms`), so one look says whether the
+processor or the graphics chip is the limit.
+
+---
+
 ## 2026-10-10 (later) — a bigger screen costs no more
 
 On a small laptop with a full-HD screen the game ran at half the speed it

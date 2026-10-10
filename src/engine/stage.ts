@@ -148,7 +148,7 @@ export function makeSceneDressing(scene: THREE.Scene, {
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(still.lightColor, still.lightI);
   sun.position.set(...sunPos);
-  sun.castShadow = true;
+  sun.castShadow = TIERS[startQuality()].shadows;
   // (its size and blur by the graphics quality, G13)
   const tier = TIERS[startQuality()];
   sun.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
@@ -228,6 +228,7 @@ export function applyQuality(renderer: THREE.WebGLRenderer, sun: THREE.Direction
   tiers.set(renderer, tier);
   renderer.setPixelRatio(renderRatio(tier, innerWidth, innerHeight, window.devicePixelRatio));
   renderer.setSize(innerWidth, innerHeight);
+  sun.castShadow = tier.shadows;
   if (sun.shadow.mapSize.x !== tier.shadowMap) {
     sun.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
     sun.shadow.map?.dispose();

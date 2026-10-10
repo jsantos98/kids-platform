@@ -5,6 +5,20 @@ game looked that day; the [README](../README.md) always shows the latest.
 
 ---
 
+## 2026-10-10 (later) — a bigger screen costs no more
+
+On a small laptop with a full-HD screen the game ran at half the speed it
+did on an older one with a smaller screen, even on the lowest graphics: the
+picture was drawn at a fixed share of the screen's pixels, so a bigger screen
+meant twice the work. Every graphics level now has a pixel budget (low 0.7
+million, medium 1.4 million, high 3.2 million), so a bigger screen is drawn
+smaller and scaled up, and a small screen looks exactly as before. The status
+line at the bottom-left now also shows the picture's size and the name of the
+graphics chip (and warns if the browser has fallen back to software
+rendering, the usual reason for a few frames a second).
+
+---
+
 ## 2026-10-10 — the steering wheel, set up in a minute
 
 **A wheel page.** Plug the wheel in, open the garage's ⚙️ settings and

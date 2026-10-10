@@ -143,7 +143,7 @@ export const EN = {
   'city.music': 'music on / off',
   'city.siren': 'SIREN',
   'city.home': 'back to the garage (Esc)',
-  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · {fps} fps · graphics {quality} · draw calls {calls} · triangles {tris}',
+  'city.hud': 'island {bx},{by} · {mode} · {kmh} km/h · {fps} fps · graphics {quality} · draw calls {calls} · triangles {tris} · {res} · {gpu}',
 
   // ---- loading ----
   'load.ready': 'Getting ready…',

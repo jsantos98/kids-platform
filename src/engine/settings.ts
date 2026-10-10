@@ -44,8 +44,12 @@ export const QUALITY_PREFS: readonly QualityPref[] = ['auto', 'low', 'medium', '
 const QUALITIES: readonly Quality[] = ['low', 'medium', 'high'];
 
 export interface QualityTier {
-  /** the render resolution: at most this many pixels per screen pixel */
+  /** the render resolution: at most this many pixels per screen pixel… */
   pixelRatio: number;
+  /** …and at most this many pixels in all (a bigger screen is drawn smaller
+   * and scaled up: a 1080p laptop drew twice the pixels of the 1366×768 one
+   * at the same level, and ran at half the speed) */
+  maxPixels: number;
   /** edge smoothing (MSAA) — fixed when the page starts */
   antialias: boolean;
   /** the sun's shadow map (texels a side) and its blur; the ground it covers
@@ -65,10 +69,18 @@ export interface QualityTier {
 }
 
 export const TIERS: Record<Quality, QualityTier> = {
-  high: { pixelRatio: 1.5, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 1 },
-  medium: { pixelRatio: 1, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 0.85 },
-  low: { pixelRatio: 0.8, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, drawScale: 0.7 },
+  high: { pixelRatio: 1.5, maxPixels: 3_200_000, antialias: true, shadowMap: 2048, shadowBlur: 8, shadowSpan: 1, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 1 },
+  medium: { pixelRatio: 1, maxPixels: 1_400_000, antialias: true, shadowMap: 1536, shadowBlur: 4, shadowSpan: 0.85, shadowEvery: 1, viewR: 4, fogNear: 70, fogFar: 260, drawScale: 0.85 },
+  low: { pixelRatio: 0.8, maxPixels: 700_000, antialias: false, shadowMap: 1024, shadowBlur: 4, shadowSpan: 0.7, shadowEvery: 2, viewR: 3, fogNear: 50, fogFar: 195, drawScale: 0.7 },
 };
+
+/** the render pixel ratio for a screen of w × h CSS pixels at this level:
+ * the level's ratio, the screen's own, and never more pixels than its budget
+ * (never under a third: smaller than that is a smear) */
+export function renderRatio(tier: QualityTier, w: number, h: number, dpr: number): number {
+  const budget = Math.sqrt(tier.maxPixels / Math.max(1, w * h));
+  return Math.max(0.35, Math.min(dpr || 1, tier.pixelRatio, budget));
+}
 
 const urlPref = (): QualityPref | null => {
   try {

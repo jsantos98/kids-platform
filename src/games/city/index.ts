@@ -1,7 +1,7 @@
 // The Endless City: boot, frame loop and play-mode orchestration (fire truck,
 // police car, ambulance, helicopters, plane, boat, train — modes.ts).
 import * as THREE from 'three';
-import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
+import { createStage, makeHUD, applyQuality, gpuName, type Dressing } from '../../engine/stage.js';
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
 import { readWheel, wheelHeld, watchWheelActions } from '../../engine/wheel.js';
@@ -935,6 +935,9 @@ function applyCity(c: CityRef): void {
 applyCity(curCity);
 loading.done();
 const hud = makeHUD();
+/** the picture's size in pixels now, and the graphics chip (software rendering is flagged) */
+const rsize = new THREE.Vector2();
+const GPU_NAME = gpuName(renderer);
 let runStars = 0;
 function updateMissionPanel(): void {
   missionEl.innerHTML = MODE.id === 'truck'
@@ -2243,8 +2246,9 @@ const tick = (): void => {
   if (elapsed - statTime > 0.4) {
     statTime = elapsed;
     const i = renderer.info.render;
+    renderer.getDrawingBufferSize(rsize);
     const kmh = Math.round(Math.abs(st.v) * 3.6);
-    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()), fps: perf.fps, quality: tr(`settings.quality.${quality}` as Key) }));
+    hud.set(tr('city.hud', { bx: curCity.bx, by: curCity.by, mode: tr(`mode.${MODE.id}.title` as Key), kmh, calls: i.calls, tris: i.triangles.toLocaleString(numberLocale()), fps: perf.fps, quality: tr(`settings.quality.${quality}` as Key), res: `${rsize.x}×${rsize.y}`, gpu: GPU_NAME }));
     // (the tab shows the page's name; the dev probe keeps its stats title)
     if (q.get('debugsea') === '1') document.title = 'STATS ' + i.calls + ' calls, ' + i.triangles + ' tris';
     (window as unknown as { __stats: unknown }).__stats = { calls: i.calls, triangles: i.triangles };

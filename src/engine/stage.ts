@@ -1,5 +1,5 @@
 // Stage factory: renderer, sky, lights, camera, HUD stats chip.
-import { TIERS, startQuality, type QualityTier } from './settings.js';
+import { TIERS, startQuality, type QualityTier, renderRatio } from './settings.js';
 import * as THREE from 'three';
 import { C } from './palette.js';
 import { Sky } from './sky.js';
@@ -218,11 +218,15 @@ export function makeSceneDressing(scene: THREE.Scene, {
   return { sun, hemi, sky, followSky, applyDay };
 }
 
+/** the level each renderer is at (its pixel ratio follows the window's size) */
+const tiers = new WeakMap<THREE.WebGLRenderer, QualityTier>();
+
 /** switch a running stage to another graphics quality (G13): the render
  * resolution and the sun's shadow map (the edge smoothing stays as the page
  * started — it takes a new page) */
 export function applyQuality(renderer: THREE.WebGLRenderer, sun: THREE.DirectionalLight, tier: QualityTier): void {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
+  tiers.set(renderer, tier);
+  renderer.setPixelRatio(renderRatio(tier, innerWidth, innerHeight, window.devicePixelRatio));
   renderer.setSize(innerWidth, innerHeight);
   if (sun.shadow.mapSize.x !== tier.shadowMap) {
     sun.shadow.mapSize.set(tier.shadowMap, tier.shadowMap);
@@ -246,7 +250,8 @@ export function createStage(opts: StageOptions = {}): Stage {
   // against each other from ~100 m out. `?depth=standard` turns it off)
   const reversedDepthBuffer = new URLSearchParams(location.search).get('depth') !== 'standard';
   const renderer = new THREE.WebGLRenderer({ antialias: tier.antialias, powerPreference: 'high-performance', reversedDepthBuffer });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
+  tiers.set(renderer, tier);
+  renderer.setPixelRatio(renderRatio(tier, innerWidth, innerHeight, window.devicePixelRatio));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.NeutralToneMapping; // gentle highlight roll-off, keeps pastels clean
   renderer.toneMappingExposure = 1.06;
@@ -261,10 +266,26 @@ export function createStage(opts: StageOptions = {}): Stage {
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(renderRatio(tiers.get(renderer) ?? TIERS.medium, innerWidth, innerHeight, window.devicePixelRatio));
     renderer.setSize(innerWidth, innerHeight);
   });
 
   return { renderer, scene, camera, sun, sky, followSky, applyDay };
+}
+
+/** what the renderer draws on: the graphics chip's name, flagged when it is
+ * the browser's software fallback (SwiftShader, llvmpipe: no hardware
+ * acceleration — the usual reason for a few frames a second) */
+export function gpuName(renderer: THREE.WebGLRenderer): string {
+  try {
+    const gl = renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const raw = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    if (/swiftshader|llvmpipe|software|basic render/i.test(raw)) return '\u26a0 software';
+    // "ANGLE (Intel, Intel(R) HD Graphics 620 (0x00005916) Direct3D11 vs_5_0 ps_5_0, D3D11)" -> "Intel(R) HD Graphics 620"
+    const m = raw.match(/ANGLE \([^,]*, (.*?)(?: \(0x[0-9a-f]+\))?(?: Direct3D| vs_| OpenGL|,|\))/i);
+    return (m ? m[1] : raw).slice(0, 40);
+  } catch { return '?'; }
 }
 
 // HUD stats chip (proves the real-time cost of each scene)

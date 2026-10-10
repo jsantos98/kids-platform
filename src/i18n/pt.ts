@@ -144,7 +144,7 @@ export const PT: Record<Key, string> = {
   'city.music': 'música ligada / desligada',
   'city.siren': 'SIRENE',
   'city.home': 'voltar à garagem (Esc)',
-  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · {fps} fps · gráficos {quality} · chamadas de desenho {calls} · triângulos {tris}',
+  'city.hud': 'ilha {bx},{by} · {mode} · {kmh} km/h · {fps} fps · gráficos {quality} · chamadas de desenho {calls} · triângulos {tris} · {res} · {gpu}',
 
   // ---- a carregar ----
   'load.ready': 'A preparar…',

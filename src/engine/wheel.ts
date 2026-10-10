@@ -197,11 +197,15 @@ export function wheelButton(indices: number[]): boolean {
  * or any of the `legacy` buttons the game used before buttons had jobs —
  * except those that now have another job (a button given to the siren
  * mustn't also start the game) */
-export function wheelHeld(action: WheelAction, legacy: number[] = []): boolean {
+export function wheelHeld(action: WheelAction, legacy: number[] = [], tapped = false): boolean {
   const pad = activePad();
   if (!pad) return false;
   const cfg = cfgFor(pad.id);
-  const list = [...keysOf(cfg, action), ...legacy.filter(b => { const a = actionOf(cfg, b); return a === null || a === action; })];
+  // (`tapped`: the buttons given to the action act on a simple press — the
+  // watcher's — so only the legacy buttons nobody gave a job count here)
+  const list = tapped
+    ? legacy.filter(b => actionOf(cfg, b) === null)
+    : [...keysOf(cfg, action), ...legacy.filter(b => { const a = actionOf(cfg, b); return a === null || a === action; })];
   return list.some(i => pad.buttons[i]?.pressed);
 }
 

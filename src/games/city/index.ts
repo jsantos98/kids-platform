@@ -481,10 +481,13 @@ const keyJob = (code: string): void => {
 };
 initInput(keyJob);
 // the wheel's buttons with a job (set on wheel.html): the siren, the camera,
-// the start of the drive, the two mute buttons. Back to the garage is held for
-// a second like the home button (below): a bump on a button mustn't end the game.
+// the start of the drive, the two mute buttons, and back to the garage (a
+// simple press, like Esc — the grown-up chose that button). The wheel's old
+// Start / Select buttons, which nobody gave a job, still need a one-second
+// hold (below) so a child mashing them doesn't end the game.
 watchWheelActions(a => {
-  if (a === 'siren') keyJob('KeyE');
+  if (a === 'back') keyJob('Escape');
+  else if (a === 'siren') keyJob('KeyE');
   else if (a === 'camera') keyJob('KeyC');
   else if (a === 'reset') keyJob('KeyR');
   else if (a === 'muteSound') muteBtn.click();
@@ -1377,7 +1380,7 @@ const tick = (): void => {
   // the wheel's start / select button held for a second goes back to the
   // garage (the home button's ring fills while it's held)
   {
-    const held = wheelHeld('back', [8, 9, 16]);
+    const held = wheelHeld('back', [8, 9, 16], true);
     homeHold = held ? homeHold + dt : 0;
     homeBtn.style.setProperty('--hold', String(Math.min(1, homeHold / HOME_HOLD)));
     if (homeHold >= HOME_HOLD) goHome();

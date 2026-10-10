@@ -82,7 +82,7 @@ export const EN = {
   'wheel.act.muteMusic': 'Music on / off',
   'wheel.act.reset': 'Back to the start of the drive',
   'wheel.act.go': 'Go / choose (Enter)',
-  'wheel.act.back': 'Back to the garage (Esc) — in the game, hold it for a second',
+  'wheel.act.back': 'Back to the garage (Esc)',
   'wheel.assign': 'Assign',
   'wheel.assignDone': 'Done',
   'wheel.listening': 'Press a button on the wheel…',

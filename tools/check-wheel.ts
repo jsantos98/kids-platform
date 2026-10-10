@@ -235,7 +235,13 @@ for (const sim of sims) {
   if (wheelHeld('go', [0, 1, 2, 3, 9])) fail('button 2 (the siren) still counts as go');
   release(2); press(1);
   if (!wheelHeld('go', [0, 1, 2, 3, 9])) fail('button 1 no longer counts as go');
-  release(1); press(7);
+  // (the home hold in the game: a button given to back is a tap, not a hold; an unassigned Start / Select still holds)
+  releaseAll(); press(9);
+  saveCfg(id, { ...DEFAULT_CFG, keys: { back: [9] } });
+  if (wheelHeld('back', [8, 9, 16], true)) fail('a button given to back still counts for the one-second home hold');
+  release(9); press(8);
+  if (!wheelHeld('back', [8, 9, 16], true)) fail('an unassigned Start / Select no longer holds to go home');
+  release(8); press(7);
   saveCfg(id, { ...DEFAULT_CFG, keys: { go: [7] } });
   if (!wheelHeld('go', [0, 1, 2, 3, 9])) fail('a button given to go does not count as go');
   releaseAll();

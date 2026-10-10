@@ -163,8 +163,9 @@ The same page gives the wheel's **buttons** jobs: *accelerate* and *brake*
 camera, sounds and music on / off, back to the start of the drive, go (Enter)
 and back to the garage (Esc). Press *Atribuir* on an action, then press the
 buttons you want — as many as you like for one action — and *Pronto*; a
-button has one job, and it all stays when you recalibrate. In the game, back
-to the garage is held for a second.
+button has one job, and it all stays when you recalibrate. Back to the
+garage is a simple press, like Esc (the wheel's old Start / Select buttons,
+if you leave them unassigned, still need a one-second hold).
 Browsers only show a wheel to a page once the wheel has moved, so turn it or
 press a pedal if the page says none is found. If a wheel still misbehaves,
 check it in Windows first (`joy.cpl` → Properties).

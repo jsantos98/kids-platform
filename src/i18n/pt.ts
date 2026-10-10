@@ -83,7 +83,7 @@ export const PT: Record<Key, string> = {
   'wheel.act.muteMusic': 'Música ligada / desligada',
   'wheel.act.reset': 'Voltar ao início do percurso',
   'wheel.act.go': 'Avançar / escolher (Enter)',
-  'wheel.act.back': 'Voltar à garagem (Esc) — no jogo, segure um segundo',
+  'wheel.act.back': 'Voltar à garagem (Esc)',
   'wheel.assign': 'Atribuir',
   'wheel.assignDone': 'Pronto',
   'wheel.listening': 'Carregue num botão do volante…',

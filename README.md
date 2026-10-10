@@ -210,6 +210,37 @@ npm run preview        # serve dist/ on http://localhost:8321
 `dist/` is a static site: copy it to any static web host. It uses relative
 paths, so it also works from a sub-folder.
 
+## Put it on another computer (the bundle, and releases)
+
+```sh
+npm run bundle         # build, then release/kids-platform-v<version>-windows.zip
+```
+
+The zip is everything a Windows computer needs, with nothing to install: it
+unpacks to a folder with `game/` (the built game), `start.bat` and `serve.ps1`
+(a launcher that uses only Windows' own PowerShell to serve the game on
+`localhost` — the game needs `http://`, not a file — and opens the browser),
+`README.txt` (how to run it, in English and Portuguese) and `VERSION.txt`.
+Copy the zip over (a USB stick avoids Windows' "protected your PC" warning on
+`start.bat`), unzip, double-click `start.bat`. `npm run bundle -- --no-build`
+packs the `dist/` already built.
+
+```sh
+npm run release                        # patch: 0.1.0 → 0.1.1
+npm run release -- minor               # 0.1.0 → 0.2.0   (also: major, or an exact 1.2.3)
+npm run release -- minor --dry-run     # show what it would do (and the release notes); change nothing
+npm run release -- minor --draft       # create the GitHub release as a draft to look at first
+```
+
+`release` checks that tracked files are committed, you're on `main`, up to
+date with `origin`, and that the build passes; then it bumps `package.json`
+(and the lockfile), commits `Release vX.Y.Z`, builds the bundle from that
+commit, tags `vX.Y.Z`, pushes the commit and the tag (so any commits on `main`
+not yet on GitHub go too) and creates the GitHub release with the zip attached.
+The notes are the newest entry of `docs/HISTORY.md` plus how to run it. It
+needs the [GitHub CLI](https://cli.github.com) signed in (`gh auth login`).
+The tools live in `tools/pack.mjs`, `tools/release.mjs` and `tools/bundle/`.
+
 ## Checks
 
 The world generator is a stack of hard rules (streets, railway, river,
@@ -244,7 +275,7 @@ npx tsx tools/plan-hash.ts            # for refactors: the cities must not chang
 | `src/i18n/` | every visible text, in English (`en.ts`, which defines the keys) and Portuguese (`pt.ts`) |
 | `src/games/diorama/`, `diorama/` | the three early concept dioramas |
 | `public/assets/kenney/` | the CC0 Kenney kits, with their licence files |
-| `tools/` | the audit and check scripts |
+| `tools/` | the audit and check scripts; `pack.mjs`, `release.mjs` and `bundle/` build and publish the Windows bundle |
 | `AGENTS.md` | the world and gameplay rules — read it before touching world code |
 | `docs/engine-notes.md` | the engine decision record and measured performance |
 

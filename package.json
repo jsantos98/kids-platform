@@ -10,7 +10,9 @@
     "build": "tsc --noEmit && tsc --noEmit -p tools && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tools",
-    "plan-hash": "npx tsx tools/plan-hash.ts"
+    "plan-hash": "npx tsx tools/plan-hash.ts",
+    "bundle": "node tools/pack.mjs",
+    "release": "node tools/release.mjs"
   },
   "dependencies": {
     "three": "^0.186.0"

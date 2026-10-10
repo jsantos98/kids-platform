@@ -680,6 +680,11 @@ addEventListener('keydown', e => {
 // so a pedal already held down when the page opens doesn't start a game ----
 const wheelIcon = document.getElementById('wheel') as unknown as SVGElement;
 let armed = false, stepT = 0, ready = false;
+// how far the wheel (0 … 1 of its calibrated lock) must turn to step the
+// carousel, to keep stepping while held, and how near the middle it must come
+// back to step again: a small turn, for small hands (45 % / 70 % / 22 % asked
+// for a turn nearly all the way)
+const STEP_AT = 0.15, REPEAT_AT = 0.35, REARM = 0.07;
 function pollWheel(dt: number): void {
   if (settingsOpen) return;
   const w = readWheel();
@@ -688,13 +693,13 @@ function pollWheel(dt: number): void {
   wheelIcon.style.transform = `rotate(${(steer * 120).toFixed(1)}deg)`;
   // (the gas pedal or a button — one given another job on wheel.html excepted — goes)
   const pressed = w.gas > 0.5 || wheelHeld('go', [0, 1, 2, 3, 9]);
-  if (!ready) { if (!pressed && Math.abs(steer) < 0.2) ready = true; return; }
+  if (!ready) { if (!pressed && Math.abs(steer) < REARM + 0.05) ready = true; return; }
   if (pressed) { go(); return; }
   const a = Math.abs(steer);
-  if (a < 0.22) { armed = true; stepT = 0; }
-  else if (a > 0.45 && armed) { choose(sel + Math.sign(steer)); armed = false; stepT = 0.55; }
-  else if (a > 0.7 && !armed) {
-    // held well round: keep stepping
+  if (a < REARM) { armed = true; stepT = 0; }
+  else if (a > STEP_AT && armed) { choose(sel + Math.sign(steer)); armed = false; stepT = 0.55; }
+  else if (a > REPEAT_AT && !armed) {
+    // held turned a fair way: keep stepping
     stepT -= dt;
     if (stepT <= 0) { choose(sel + Math.sign(steer)); stepT = 0.42; }
   }

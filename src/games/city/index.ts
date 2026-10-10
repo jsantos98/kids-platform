@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
+import { readWheel, wheelButton } from '../../engine/wheel.js';
 import { Landing, type Runway } from './landing.js';
 import { StreetAssist } from './streetAssist.js';
 import { airportFor, airportMark } from './airport.js';
@@ -1364,8 +1365,7 @@ const tick = (): void => {
   // the wheel's start / select button held for a second goes back to the
   // garage (the home button's ring fills while it's held)
   {
-    const gpd = navigator.getGamepads?.()[0];
-    const held = !!gpd && [8, 9, 16].some(b => gpd.buttons[b]?.pressed);
+    const held = wheelButton([8, 9, 16]);
     homeHold = held ? homeHold + dt : 0;
     homeBtn.style.setProperty('--hold', String(Math.min(1, homeHold / HOME_HOLD)));
     if (homeHold >= HOME_HOLD) goHome();
@@ -1804,8 +1804,8 @@ const tick = (): void => {
   let aimIn = 0;
   if (isDown('KeyA') || isDown('ArrowLeft')) aimIn -= 1;
   if (isDown('KeyD') || isDown('ArrowRight')) aimIn += 1;
-  const gp = navigator.getGamepads?.()[0];
-  if (gp && Math.abs(gp.axes[0]) > 0.08) aimIn = gp.axes[0];
+  const wheel = readWheel();
+  if (wheel && Math.abs(wheel.steer) > 0.08) aimIn = wheel.steer;
   if (aimIn === 0 && Math.abs(pointerX()) > 0.05) aimIn = pointerX();
   const view = director.update(dt, elapsed, { steer: Math.max(-1, Math.min(1, aimIn)), night: day.night });
   // (the scene's moments: their sounds and words)

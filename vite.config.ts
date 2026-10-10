@@ -41,6 +41,7 @@ export default defineConfig({
       input: {
         main: path.resolve(ROOT, 'index.html'),
         city: path.resolve(ROOT, 'play/city.html'),
+        wheel: path.resolve(ROOT, 'wheel.html'),
         firetruck: path.resolve(ROOT, 'diorama/firetruck.html'),
         helicopter: path.resolve(ROOT, 'diorama/helicopter.html'),
         train: path.resolve(ROOT, 'diorama/train.html'),

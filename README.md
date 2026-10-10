@@ -148,6 +148,19 @@ garage shows the keys for the vehicle chosen, under the carousel. In mission
 scenes only steering counts (the wheel, `A`/`D`, or the mouse's x
 position).
 
+### The steering wheel
+
+Plug the wheel in, open the garage, press ⚙️ (or `O`) and choose **Volante →
+Testar / calibrar** (or open `wheel.html` directly). The page shows every axis
+and button your wheel sends live, says whether it is calibrated, and walks you
+through a short calibration (let go, wheel left, wheel right, gas pedal, brake
+pedal) that works out which control is which — pedals can be buttons or axes,
+the steering can be inverted — and saves it for the game. Without it the game
+assumes the usual layout (steering axis 0, gas button 7, brake button 6).
+Browsers only show a wheel to a page once the wheel has moved, so turn it or
+press a pedal if the page says none is found. If a wheel still misbehaves,
+check it in Windows first (`joy.cpl` → Properties).
+
 ### Useful URL options
 
 The game page is `play/city.html`.

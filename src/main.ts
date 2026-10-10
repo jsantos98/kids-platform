@@ -21,6 +21,7 @@ import { loadTotals } from './games/city/state.js';
 import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/index.js';
 import { speak, preloadVoice, speaking } from './i18n/voice.js';
 import { GameAudio } from './engine/audio.js';
+import { readWheel } from './engine/wheel.js';
 import type { SfxId } from './engine/sfxList.js';
 import { volume, setVolume, qualityPref, setQualityPref, autoSpeed, setAutoSpeed, type VolumeKey, type QualityPref } from './engine/settings.js';
 
@@ -605,6 +606,8 @@ for (const b of autoBtns) b.addEventListener('click', () => { setAutoSpeed(b.dat
 showAuto();
 settingsEl.addEventListener('click', e => { if (e.target === settingsEl) openSettings(false); });
 document.getElementById('settingsClose')!.addEventListener('click', () => openSettings(false));
+// the wheel's test and calibration page
+document.getElementById('wheelBtn')!.addEventListener('click', () => { location.href = 'wheel.html'; });
 /** what a slider sounds like: a spoken name, the music (it plays on), a
  * ding, a moment of engine */
 function sample(k: VolumeKey): void {
@@ -679,11 +682,11 @@ const wheelIcon = document.getElementById('wheel') as unknown as SVGElement;
 let armed = false, stepT = 0, ready = false;
 function pollWheel(dt: number): void {
   if (settingsOpen) return;
-  const gp = navigator.getGamepads?.()[0];
-  if (!gp) { wheelIcon.style.transform = ''; return; }
-  const steer = gp.axes[0] ?? 0;
+  const w = readWheel();
+  if (!w) { wheelIcon.style.transform = ''; return; }
+  const steer = w.steer;
   wheelIcon.style.transform = `rotate(${(steer * 120).toFixed(1)}deg)`;
-  const pressed = (gp.buttons[7]?.value ?? 0) > 0.5 || [0, 1, 2, 3, 9].some(b => gp.buttons[b]?.pressed);
+  const pressed = w.gas > 0.5 || [0, 1, 2, 3, 9].some(b => w.pad.buttons[b]?.pressed);
   if (!ready) { if (!pressed && Math.abs(steer) < 0.2) ready = true; return; }
   if (pressed) { go(); return; }
   const a = Math.abs(steer);

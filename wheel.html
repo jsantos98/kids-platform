@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steering wheel</title>
+<style>
+  :root { --ink: #4a5058; --ink-soft: #6a7380; --cream: #fffcf4; --accent: #e25c5c; --good: #47b8ab;
+    font-family: 'Segoe UI Rounded', 'Segoe UI', system-ui, sans-serif; }
+  html, body { margin: 0; min-height: 100%; background: #cbe7f2; color: var(--ink); }
+  main { max-width: 760px; margin: 0 auto; padding: 22px 18px 60px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { margin: 6px 0 0; font-size: clamp(26px, 5vw, 38px); }
+  h2 { margin: 0 0 8px; font-size: 20px; }
+  .card { background: var(--cream); border-radius: 24px; padding: 16px 20px; box-shadow: 0 6px 0 rgba(74, 80, 88, .15); }
+  .note { margin: 0 0 10px; color: var(--ink-soft); font-size: 15px; }
+  #status { font-weight: 800; }
+  #status.ok { color: #2f8f82; }
+  select { font: inherit; padding: 6px 10px; border-radius: 12px; border: 2px solid #d9d2c3; background: #fff; max-width: 100%; }
+  .row { display: grid; grid-template-columns: 7em 1fr 3.6em; gap: 10px; align-items: center; margin: 4px 0; font-size: 14px; }
+  .bar { position: relative; height: 14px; background: #ece5d6; border-radius: 8px; overflow: hidden; }
+  .bar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
+  .bar b { position: absolute; top: 0; bottom: 0; width: 2px; left: 50%; background: rgba(74, 80, 88, .35); }
+  .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+  #buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #buttons span { min-width: 2.6em; padding: 4px 8px; text-align: center; border-radius: 10px; background: #ece5d6; color: var(--ink-soft); font-size: 13px; }
+  #buttons span.on { background: var(--accent); color: #fffdf8; }
+  button, a.btn { font: inherit; font-weight: 800; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer; text-decoration: none;
+    background: var(--accent); color: #fffdf8; display: inline-block; }
+  button.soft, a.soft { background: #e9e2d4; color: var(--ink); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  #instr { font-size: clamp(20px, 3.4vw, 28px); font-weight: 900; min-height: 1.4em; margin: 6px 0 10px; }
+  #prog { height: 16px; background: #ece5d6; border-radius: 10px; overflow: hidden; }
+  #prog i { display: block; height: 100%; width: 0; background: var(--good); transition: width .1s linear; }
+  #noticed { margin: 8px 0 0; color: var(--ink-soft); min-height: 1.3em; font-size: 15px; }
+  #cal[hidden], [hidden] { display: none !important; }
+  .test { display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: center; }
+  #wheelIcon { width: 140px; height: 140px; transition: transform .05s linear; }
+  #mapping { font-size: 14px; color: var(--ink-soft); margin: 10px 0 0; }
+  .meters .row { grid-template-columns: 6.5em 1fr 3.6em; font-size: 16px; font-weight: 800; }
+  .meters .bar { height: 20px; }
+  .meters .bar.p i { left: 0; }
+  @media (max-width: 520px) { .test { grid-template-columns: 1fr; justify-items: center; } .row { grid-template-columns: 5.5em 1fr 3.4em; } }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-i18n="wheel.title"></h1>
+  <p class="note" id="status"></p>
+
+  <section class="card" id="devices" hidden>
+    <label><span data-i18n="wheel.pick"></span>: <select id="deviceSel"></select></label>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="wheel.live"></h2>
+    <p class="note" data-i18n="wheel.liveNote"></p>
+    <div id="axes"></div>
+    <div id="buttons"></div>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="wheel.calibrate"></h2>
+    <p class="note" data-i18n="wheel.calibrateNote"></p>
+    <div id="cal" hidden>
+      <div id="instr"></div>
+      <div id="prog"><i></i></div>
+      <p id="noticed"></p>
+    </div>
+    <div class="actions">
+      <button type="button" id="start" data-i18n="wheel.start"></button>
+      <button type="button" id="skip" class="soft" data-i18n="wheel.skip" hidden></button>
+      <button type="button" id="cancel" class="soft" data-i18n="wheel.cancel" hidden></button>
+      <button type="button" id="reset" class="soft" data-i18n="wheel.reset"></button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="wheel.test"></h2>
+    <div class="test">
+      <svg id="wheelIcon" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="42" fill="none" stroke="#4a5058" stroke-width="9"/>
+        <circle cx="50" cy="50" r="9" fill="#4a5058"/>
+        <path d="M50 50 L12 62 M50 50 L88 62 M50 50 L50 91" stroke="#4a5058" stroke-width="7" stroke-linecap="round"/>
+        <rect x="46" y="4" width="8" height="14" rx="3" fill="#e25c5c"/>
+      </svg>
+      <div class="meters">
+        <div class="row"><span data-i18n="wheel.steer"></span><div class="bar" id="mSteer"><b></b><i></i></div><span class="val"></span></div>
+        <div class="row"><span data-i18n="wheel.gas"></span><div class="bar p" id="mGas"><i></i></div><span class="val"></span></div>
+        <div class="row"><span data-i18n="wheel.brake"></span><div class="bar p" id="mBrake"><i></i></div><span class="val"></span></div>
+      </div>
+    </div>
+    <p id="mapping"></p>
+  </section>
+
+  <div class="actions"><a class="btn soft" href="./" data-i18n="wheel.back"></a></div>
+</main>
+<script type="module" src="/src/wheel-page.ts"></script>
+</body>
+</html>

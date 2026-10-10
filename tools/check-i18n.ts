@@ -27,7 +27,7 @@ for (const k of Object.keys(EN)) if (!(k in PT) || !(PT as Record<string, string
 for (const k of Object.keys(PT)) if (!(k in EN)) fails.push(`pt.ts: '${k}' is not an English key`);
 
 // ---- the pages ----
-const pages = ['index.html', 'play/city.html', ...readdirSync(path.join(ROOT, 'diorama')).filter(f => f.endsWith('.html')).map(f => `diorama/${f}`)];
+const pages = ['index.html', 'play/city.html', 'wheel.html', ...readdirSync(path.join(ROOT, 'diorama')).filter(f => f.endsWith('.html')).map(f => `diorama/${f}`)];
 for (const p of pages) {
   const html = readFileSync(path.join(ROOT, p), 'utf8');
   const body = html.slice(html.indexOf('<body'))
@@ -39,7 +39,7 @@ for (const p of pages) {
 
 // ---- the scripts that draw the UI ----
 const scripts = [
-  'src/main.ts', 'src/games/registry.ts',
+  'src/main.ts', 'src/wheel-page.ts', 'src/games/registry.ts',
   ...readdirSync(path.join(ROOT, 'src/games/city')).filter(f => f.endsWith('.ts')).map(f => `src/games/city/${f}`),
   ...readdirSync(path.join(ROOT, 'src/games/city/activity')).map(f => `src/games/city/activity/${f}`),
   ...readdirSync(path.join(ROOT, 'src/games/diorama')).map(f => `src/games/diorama/${f}`),

@@ -21,7 +21,7 @@ other way round), press the gear icon in the garage (or O) and choose
 and lets you give the wheel's buttons jobs (siren, camera, mute, accelerate,
 brake...), as many buttons as you like for each.
 Use Microsoft Edge or Google Chrome. If it runs slowly, open the garage's
-gear icon (or press O) and set Graphics to Low.
+gear icon (or press O) and set Graphics to Low, or to Minimal if it is still slow.
 
 Keys
 ----

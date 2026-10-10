@@ -1,7 +1,7 @@
 {
   "name": "kids-platform",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Browser game platform for kids, driven by a USB steering wheel. Three.js + TypeScript + Vite.",
   "scripts": {

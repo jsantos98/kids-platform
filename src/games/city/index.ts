@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { createStage, makeHUD, applyQuality, type Dressing } from '../../engine/stage.js';
 import { TIERS, startQuality, qualityPref, setAutoQuality, lowerQuality, higherQuality, autoSpeed, type Quality } from '../../engine/settings.js';
 import { autoInput, type AutoGoal } from './autoSpeed.js';
-import { readWheel, wheelButton } from '../../engine/wheel.js';
+import { readWheel, wheelHeld, watchWheelActions } from '../../engine/wheel.js';
 import { Landing, type Runway } from './landing.js';
 import { StreetAssist } from './streetAssist.js';
 import { airportFor, airportMark } from './airport.js';
@@ -467,7 +467,8 @@ let seaNear = 0, seaCheck = 0, lastCount = -1;
 /** back to the garage (the launcher) */
 function goHome(): void { location.href = new URL('../index.html', location.href).href; }
 document.getElementById('homeBtn')!.addEventListener('click', goHome);
-initInput(code => {
+/** a key's job (the wheel's buttons do these too, G20) */
+const keyJob = (code: string): void => {
   if (code === 'Escape') { goHome(); return; }
   audio.unlock();
   if (code === 'KeyC') cycleCamera();
@@ -477,6 +478,17 @@ initInput(code => {
     if (landing) { landing.reset(); player.state.alt = PLANE_ALT; }
     crumbs.clear();
   }
+};
+initInput(keyJob);
+// the wheel's buttons with a job (set on wheel.html): the siren, the camera,
+// the start of the drive, the two mute buttons. Back to the garage is held for
+// a second like the home button (below): a bump on a button mustn't end the game.
+watchWheelActions(a => {
+  if (a === 'siren') keyJob('KeyE');
+  else if (a === 'camera') keyJob('KeyC');
+  else if (a === 'reset') keyJob('KeyR');
+  else if (a === 'muteSound') muteBtn.click();
+  else if (a === 'muteMusic') musicBtn.click();
 });
 addEventListener('pointerdown', () => audio.unlock());
 
@@ -1365,7 +1377,7 @@ const tick = (): void => {
   // the wheel's start / select button held for a second goes back to the
   // garage (the home button's ring fills while it's held)
   {
-    const held = wheelButton([8, 9, 16]);
+    const held = wheelHeld('back', [8, 9, 16]);
     homeHold = held ? homeHold + dt : 0;
     homeBtn.style.setProperty('--hold', String(Math.min(1, homeHold / HOME_HOLD)));
     if (homeHold >= HOME_HOLD) goHome();

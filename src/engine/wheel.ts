@@ -12,6 +12,14 @@
 // Conventions: steering is +1 turned RIGHT (the axis's own sign, as for a
 // gamepad stick), gas and brake 0 … 1.
 
+/** what a wheel button can do: stand in for the gas or the brake pedal (held,
+ * for a child who doesn't take to pedals), or do a key's job — the siren (E),
+ * the camera (C), the two mute buttons, back to the start (R), Enter and Esc */
+export const WHEEL_ACTIONS = ['gas', 'brake', 'siren', 'camera', 'muteSound', 'muteMusic', 'reset', 'go', 'back'] as const;
+export type WheelAction = typeof WHEEL_ACTIONS[number];
+/** the actions that last as long as the button is held (the others are taps) */
+export const HELD_ACTIONS: ReadonlySet<WheelAction> = new Set<WheelAction>(['gas', 'brake']);
+
 /** one pedal: a button (its analogue value), an axis (resting at `rest`, `full` when pressed), or none (index −1) */
 export interface PedalCfg { kind: 'axis' | 'button'; index: number; rest: number; full: number }
 export interface WheelCfg {
@@ -22,6 +30,11 @@ export interface WheelCfg {
   right: number;
   gas: PedalCfg;
   brake: PedalCfg;
+  /** the buttons given to each action — any number of them for one action
+   * (two to turn the siren on and off, say); a button has one job */
+  keys?: Partial<Record<WheelAction, number[]>>;
+  /** saved for its buttons only: the axes and pedals are the standard layout, not calibrated */
+  keysOnly?: boolean;
 }
 
 export const DEFAULT_CFG: WheelCfg = {
@@ -76,18 +89,67 @@ const sane = (c: unknown): c is WheelCfg => {
   const ped = (p: PedalCfg | undefined): boolean => !!p && (p.kind === 'axis' || p.kind === 'button') && Number.isFinite(p.index) && Number.isFinite(p.rest) && Number.isFinite(p.full);
   return !!o && Number.isFinite(o.steerAxis) && Number.isFinite(o.center) && Number.isFinite(o.left) && Number.isFinite(o.right) && ped(o.gas) && ped(o.brake);
 };
+/** a stored button list cleaned up: whole numbers only, no repeats */
+const cleanKeys = (k: WheelCfg['keys']): WheelCfg['keys'] => {
+  const out: Partial<Record<WheelAction, number[]>> = {};
+  for (const a of WHEEL_ACTIONS) {
+    const l = k?.[a];
+    if (Array.isArray(l)) { const u = [...new Set(l.filter(n => Number.isInteger(n) && n >= 0))]; if (u.length) out[a] = u; }
+  }
+  return Object.keys(out).length ? out : undefined;
+};
 
 /** the calibration saved for this wheel, or null */
 export function savedCfg(id: string): WheelCfg | null {
   const c = readStore()[id];
-  return sane(c) ? c : null;
+  return sane(c) ? { ...c, keys: cleanKeys(c.keys) } : null;
 }
+/** was the wheel's steering and pedals calibrated (not just its buttons given jobs)? */
+export function isCalibrated(id: string): boolean { const c = savedCfg(id); return !!c && !c.keysOnly; }
 export function cfgFor(id: string): WheelCfg { return savedCfg(id) ?? DEFAULT_CFG; }
+/** keep a calibration (the buttons already given jobs stay) */
 export function saveCfg(id: string, cfg: WheelCfg): void {
-  try { const all = readStore(); all[id] = cfg; localStorage.setItem(STORE, JSON.stringify(all)); localStorage.setItem(PREFERRED, id); } catch { /* no storage */ }
+  try {
+    const all = readStore();
+    all[id] = { ...cfg, keys: cleanKeys(cfg.keys ?? savedCfg(id)?.keys), keysOnly: undefined };
+    localStorage.setItem(STORE, JSON.stringify(all)); localStorage.setItem(PREFERRED, id);
+  } catch { /* no storage */ }
 }
+/** keep only the buttons' jobs, leaving the axes and pedals as they are */
+export function saveKeys(id: string, keys: WheelCfg['keys']): void {
+  try {
+    const all = readStore(), cur = savedCfg(id);
+    const next: WheelCfg = { ...(cur ?? DEFAULT_CFG), keys: cleanKeys(keys), keysOnly: cur ? cur.keysOnly : true };
+    if (!next.keys && next.keysOnly) delete all[id]; else all[id] = next;
+    localStorage.setItem(STORE, JSON.stringify(all)); localStorage.setItem(PREFERRED, id);
+  } catch { /* no storage */ }
+}
+/** back to the standard axes and pedals (the buttons' jobs are kept) */
 export function resetCfg(id: string): void {
+  const keys = savedCfg(id)?.keys;
   try { const all = readStore(); delete all[id]; localStorage.setItem(STORE, JSON.stringify(all)); } catch { /* no storage */ }
+  if (keys) saveKeys(id, keys);
+}
+
+// ---- the buttons' jobs ----
+/** the buttons this wheel has for an action */
+export function keysOf(cfg: WheelCfg, action: WheelAction): number[] { return cfg.keys?.[action] ?? []; }
+/** which action a button has, if any */
+export function actionOf(cfg: WheelCfg, button: number): WheelAction | null {
+  return WHEEL_ACTIONS.find(a => keysOf(cfg, a).includes(button)) ?? null;
+}
+/** give a button to an action (it leaves the action it had: a button has one job) */
+export function bindKey(cfg: WheelCfg, action: WheelAction, button: number): NonNullable<WheelCfg['keys']> {
+  const out: Partial<Record<WheelAction, number[]>> = {};
+  for (const a of WHEEL_ACTIONS) { const l = keysOf(cfg, a).filter(n => n !== button); if (l.length) out[a] = l; }
+  out[action] = [...(out[action] ?? []), button];
+  return out;
+}
+/** take one button off an action */
+export function unbindKey(cfg: WheelCfg, action: WheelAction, button: number): NonNullable<WheelCfg['keys']> {
+  const out: Partial<Record<WheelAction, number[]>> = {};
+  for (const a of WHEEL_ACTIONS) { const l = keysOf(cfg, a).filter(n => !(a === action && n === button)); if (l.length) out[a] = l; }
+  return out;
 }
 export function preferPad(id: string): void {
   try { localStorage.setItem(PREFERRED, id); } catch { /* no storage */ }
@@ -117,13 +179,57 @@ export function readWheel(): WheelReading | null {
   const pad = activePad();
   if (!pad) return null;
   const snap = snapshot(pad), cfg = cfgFor(pad.id);
-  return { pad, steer: steerOf(snap, cfg), gas: pedalOf(snap, cfg.gas), brake: pedalOf(snap, cfg.brake), snap, cfg };
+  // (a button given to the gas or the brake counts as that pedal pressed all the way)
+  const held = (a: WheelAction): number => (keysOf(cfg, a).some(i => pad.buttons[i]?.pressed) ? 1 : 0);
+  return {
+    pad, steer: steerOf(snap, cfg), snap, cfg,
+    gas: Math.max(pedalOf(snap, cfg.gas), held('gas')), brake: Math.max(pedalOf(snap, cfg.brake), held('brake')),
+  };
 }
 
 /** is any of these buttons held on the active wheel? */
 export function wheelButton(indices: number[]): boolean {
   const pad = activePad();
   return !!pad && indices.some(i => pad.buttons[i]?.pressed);
+}
+
+/** is the action's button held on the active wheel: any button given to it,
+ * or any of the `legacy` buttons the game used before buttons had jobs —
+ * except those that now have another job (a button given to the siren
+ * mustn't also start the game) */
+export function wheelHeld(action: WheelAction, legacy: number[] = []): boolean {
+  const pad = activePad();
+  if (!pad) return false;
+  const cfg = cfgFor(pad.id);
+  const list = [...keysOf(cfg, action), ...legacy.filter(b => { const a = actionOf(cfg, b); return a === null || a === action; })];
+  return list.some(i => pad.buttons[i]?.pressed);
+}
+
+// ---- the buttons at work: one watcher a page starts ----
+let watching = false;
+/** call `handler(action)` each time a button with a job goes down (not while
+ * it is held, and not for a button already held when the page opened) */
+export function watchWheelActions(handler: (action: WheelAction) => void): void {
+  if (watching) return;
+  watching = true;
+  const down = new Set<WheelAction>();
+  let primed = false;
+  const frame = (): void => {
+    const pad = activePad();
+    if (!pad) { primed = false; down.clear(); }
+    else {
+      const cfg = cfgFor(pad.id);
+      for (const a of WHEEL_ACTIONS) {
+        if (HELD_ACTIONS.has(a)) continue; // (the gas and brake buttons are read as pedals)
+        const held = keysOf(cfg, a).some(i => pad.buttons[i]?.pressed);
+        if (held && !down.has(a)) { down.add(a); if (primed) handler(a); }
+        else if (!held) down.delete(a);
+      }
+      primed = true;
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 // ---- the guided calibration ----

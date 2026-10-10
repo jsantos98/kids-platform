@@ -21,7 +21,7 @@ import { loadTotals } from './games/city/state.js';
 import { t as tr, applyI18n, getLang, setLang, LANGS, type Key } from './i18n/index.js';
 import { speak, preloadVoice, speaking } from './i18n/voice.js';
 import { GameAudio } from './engine/audio.js';
-import { readWheel } from './engine/wheel.js';
+import { readWheel, wheelHeld, watchWheelActions } from './engine/wheel.js';
 import type { SfxId } from './engine/sfxList.js';
 import { volume, setVolume, qualityPref, setQualityPref, autoSpeed, setAutoSpeed, type VolumeKey, type QualityPref } from './engine/settings.js';
 
@@ -686,7 +686,8 @@ function pollWheel(dt: number): void {
   if (!w) { wheelIcon.style.transform = ''; return; }
   const steer = w.steer;
   wheelIcon.style.transform = `rotate(${(steer * 120).toFixed(1)}deg)`;
-  const pressed = w.gas > 0.5 || [0, 1, 2, 3, 9].some(b => w.pad.buttons[b]?.pressed);
+  // (the gas pedal or a button — one given another job on wheel.html excepted — goes)
+  const pressed = w.gas > 0.5 || wheelHeld('go', [0, 1, 2, 3, 9]);
   if (!ready) { if (!pressed && Math.abs(steer) < 0.2) ready = true; return; }
   if (pressed) { go(); return; }
   const a = Math.abs(steer);
@@ -701,6 +702,12 @@ function pollWheel(dt: number): void {
 
 buildCards();
 showName();
+// the wheel's buttons with a job (wheel.html): back, and the music; going is
+// pollWheel's (it also waits until the wheel has been seen at rest)
+watchWheelActions(a => {
+  if (a === 'back') { if (settingsOpen) openSettings(false); else if (stage === 'cars') enter('modes'); }
+  else if (a === 'muteMusic') langBox.querySelector<HTMLButtonElement>('button.music')?.click();
+});
 
 // ---- the frame loop ----
 const clock = new THREE.Clock();

@@ -11,9 +11,32 @@
 //    the other;
 //  · with nothing calibrated the old layout still reads (axis 0 steering,
 //    buttons 7 gas and 6 brake) so a wheel that already worked still does;
-//  · skipping the brake leaves it none (0); a wheel's steering can't be skipped.
+//  · skipping the brake leaves it none (0); a wheel's steering can't be skipped;
+//  · the buttons' jobs: any number of buttons for one action (two for the
+//    siren), a button has one job (giving it another takes it off the first),
+//    they survive recalibrating and going back to the standard axes, a button
+//    given to the gas or brake reads as that pedal pressed, and a tap action
+//    fires once per press — not while held, not for a button already down
+//    when the page opened, not for the gas / brake buttons — and a button
+//    with another job no longer also starts the garage.
 //   npx tsx tools/check-wheel.ts
-import { Calibrator, DEFAULT_CFG, steerOf, pedalOf, type Snapshot, type WheelCfg } from '../src/engine/wheel.js';
+import {
+  Calibrator, DEFAULT_CFG, steerOf, pedalOf, bindKey, unbindKey, actionOf, keysOf, saveKeys, saveCfg, resetCfg, savedCfg, isCalibrated, cfgFor,
+  readWheel, wheelHeld, watchWheelActions, type Snapshot, type WheelCfg, type WheelAction,
+} from '../src/engine/wheel.js';
+
+// (a stand-in browser: storage, one gamepad, and an animation frame we step by hand)
+const store = new Map<string, string>();
+Object.defineProperty(globalThis, 'localStorage', { value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } }, configurable: true });
+const fakePad = { id: 'Test Wheel (Vendor: 1 Product: 2)', connected: true, axes: [0, 1, 1], buttons: Array.from({ length: 14 }, () => ({ pressed: false, value: 0 })) };
+let padPresent = true;
+Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => (padPresent ? [null, fakePad] : [null]) }, configurable: true });
+const frames: Array<() => void> = [];
+(globalThis as unknown as { requestAnimationFrame: (f: () => void) => number }).requestAnimationFrame = f => frames.push(f);
+const press = (...n: number[]): void => { for (const i of n) { fakePad.buttons[i].pressed = true; fakePad.buttons[i].value = 1; } };
+const release = (...n: number[]): void => { for (const i of n) { fakePad.buttons[i].pressed = false; fakePad.buttons[i].value = 0; } };
+const releaseAll = (): void => release(...fakePad.buttons.keys());
+const step = (): void => { const f = frames.splice(0); for (const g of f) g(); };
 
 let fails = 0;
 const fail = (m: string): void => { fails++; console.log('  FAIL ' + m); };
@@ -133,6 +156,90 @@ for (const sim of sims) {
   if (cal.step !== 'left') fail(`after the rest sample the step is '${cal.step}', not 'left'`);
   cal.skip();
   if (cal.step !== 'left') fail('the steering step was skipped');
+}
+
+
+// ---- the buttons' jobs ----
+{
+  // several buttons for one action; a button has one job
+  let cfg: WheelCfg = { ...DEFAULT_CFG };
+  cfg = { ...cfg, keys: bindKey(cfg, 'siren', 3) };
+  cfg = { ...cfg, keys: bindKey(cfg, 'siren', 4) };
+  cfg = { ...cfg, keys: bindKey(cfg, 'siren', 11) };
+  if (keysOf(cfg, 'siren').join() !== '3,4,11') fail(`three buttons for the siren read ${keysOf(cfg, 'siren').join()}`);
+  cfg = { ...cfg, keys: bindKey(cfg, 'camera', 4) };
+  if (keysOf(cfg, 'siren').join() !== '3,11' || keysOf(cfg, 'camera').join() !== '4' || actionOf(cfg, 4) !== 'camera') fail('giving button 4 to the camera did not take it off the siren');
+  cfg = { ...cfg, keys: unbindKey(cfg, 'siren', 3) };
+  if (keysOf(cfg, 'siren').join() !== '11' || actionOf(cfg, 3) !== null) fail('removing button 3 from the siren failed');
+}
+{
+  // saved per wheel: buttons only, then a calibration, then back to standard — the jobs stay
+  const id = fakePad.id;
+  saveKeys(id, { siren: [3, 5], muteMusic: [6] });
+  if (isCalibrated(id)) fail('a wheel with only its buttons set counts as calibrated');
+  if (keysOf(cfgFor(id), 'siren').join() !== '3,5') fail('the buttons were not kept');
+  if (cfgFor(id).steerAxis !== 0 || cfgFor(id).gas.index !== 7) fail('saving buttons changed the standard axes and pedals');
+  const calibrated: WheelCfg = { ...DEFAULT_CFG, gas: { kind: 'axis', index: 1, rest: 1, full: -1 }, brake: { kind: 'axis', index: 2, rest: 1, full: -1 } };
+  saveCfg(id, calibrated);
+  if (!isCalibrated(id) || keysOf(cfgFor(id), 'siren').join() !== '3,5') fail('calibrating lost the buttons\' jobs or did not count as calibrated');
+  resetCfg(id);
+  if (isCalibrated(id) || keysOf(cfgFor(id), 'muteMusic').join() !== '6') fail('going back to the standard axes lost the buttons\' jobs');
+  saveKeys(id, undefined);
+  if (savedCfg(id)) fail('a wheel with no buttons and no calibration should leave nothing saved');
+}
+{
+  // the gas and brake buttons read as the pedals pressed; with a pedal on an axis too, whichever is further
+  const id = fakePad.id;
+  saveCfg(id, { ...DEFAULT_CFG, gas: { kind: 'axis', index: 1, rest: 1, full: -1 }, brake: { kind: 'axis', index: 2, rest: 1, full: -1 }, keys: { gas: [8, 9], brake: [10] } });
+  releaseAll(); fakePad.axes = [0, 1, 1];
+  let w = readWheel()!;
+  if (w.gas !== 0 || w.brake !== 0) fail(`at rest the wheel reads gas ${w.gas}, brake ${w.brake}`);
+  press(9); w = readWheel()!;
+  if (w.gas !== 1 || w.brake !== 0) fail(`a button given to the gas reads gas ${w.gas}, brake ${w.brake}`);
+  release(9); press(10); w = readWheel()!;
+  if (w.brake !== 1 || w.gas !== 0) fail(`a button given to the brake reads brake ${w.brake}, gas ${w.gas}`);
+  releaseAll(); fakePad.axes = [0, 0, 1]; w = readWheel()!;
+  if (Math.abs(w.gas - 0.5) > 0.02) fail(`the gas pedal half down reads ${w.gas}`);
+  press(8); w = readWheel()!;
+  if (w.gas !== 1) fail(`the pedal half down and a gas button together read ${w.gas}, not 1`);
+  releaseAll(); fakePad.axes = [0, 1, 1];
+}
+{
+  // the watcher: one tap per press
+  const id = fakePad.id;
+  saveCfg(id, { ...DEFAULT_CFG, keys: { siren: [3, 4], muteMusic: [6], gas: [8], go: [7] } });
+  releaseAll(); press(6); // (muteMusic's button is already down as the page opens)
+  const fired: WheelAction[] = [];
+  watchWheelActions(a => fired.push(a));
+  step(); step();
+  if (fired.length) fail(`a button held as the page opened fired ${fired.join()}`);
+  release(6); step();
+  press(3); step(); step(); step(); step();
+  if (fired.join() !== 'siren') fail(`one press of a siren button fired ${fired.join() || 'nothing'} over four frames`);
+  press(4); step(); step();
+  if (fired.join() !== 'siren') fail(`a second siren button pressed while the first is held fired again (${fired.join()})`);
+  release(3, 4); step(); press(4); step();
+  if (fired.join() !== 'siren,siren') fail(`the second siren button alone did not fire the siren (${fired.join()})`);
+  release(4); step();
+  press(8); step(); step();
+  if (fired.length !== 2) fail(`the gas button fired a tap action (${fired.join()})`);
+  release(8); press(6); step();
+  if (fired.join() !== 'siren,siren,muteMusic') fail(`the music button did not fire (${fired.join()})`);
+  release(6); step();
+  // no wheel: nothing fires and nothing breaks
+  padPresent = false; step(); step(); padPresent = true;
+  if (fired.length !== 3) fail(`unplugged, something fired: ${fired.join()}`);
+  // a button with another job no longer starts the garage; the gas pedal's own legacy buttons still do
+  releaseAll(); press(2);
+  saveCfg(id, { ...DEFAULT_CFG, keys: { siren: [2] } });
+  if (wheelHeld('go', [0, 1, 2, 3, 9])) fail('button 2 (the siren) still counts as go');
+  release(2); press(1);
+  if (!wheelHeld('go', [0, 1, 2, 3, 9])) fail('button 1 no longer counts as go');
+  release(1); press(7);
+  saveCfg(id, { ...DEFAULT_CFG, keys: { go: [7] } });
+  if (!wheelHeld('go', [0, 1, 2, 3, 9])) fail('a button given to go does not count as go');
+  releaseAll();
+  console.log('buttons: several to one action, one job each, kept through recalibration; taps fire once; the gas / brake buttons read as pedals');
 }
 
 console.log(fails ? `FAIL — ${fails} problem(s) with the wheel (G20)` : 'PASS — every wheel layout calibrates and reads right, and the standard one still works (G20)');

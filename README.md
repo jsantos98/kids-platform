@@ -157,6 +157,14 @@ through a short calibration (let go, wheel left, wheel right, gas pedal, brake
 pedal) that works out which control is which — pedals can be buttons or axes,
 the steering can be inverted — and saves it for the game. Without it the game
 assumes the usual layout (steering axis 0, gas button 7, brake button 6).
+
+The same page gives the wheel's **buttons** jobs: *accelerate* and *brake*
+(instead of the pedals, for a child who doesn't take to them), the siren, the
+camera, sounds and music on / off, back to the start of the drive, go (Enter)
+and back to the garage (Esc). Press *Atribuir* on an action, then press the
+buttons you want — as many as you like for one action — and *Pronto*; a
+button has one job, and it all stays when you recalibrate. In the game, back
+to the garage is held for a second.
 Browsers only show a wheel to a page once the wheel has moved, so turn it or
 press a pedal if the page says none is found. If a wheel still misbehaves,
 check it in Windows first (`joy.cpl` → Properties).

@@ -33,6 +33,17 @@
   #prog i { display: block; height: 100%; width: 0; background: var(--good); transition: width .1s linear; }
   #noticed { margin: 8px 0 0; color: var(--ink-soft); min-height: 1.3em; font-size: 15px; }
   #cal[hidden], [hidden] { display: none !important; }
+  .act { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; padding: 8px 0; border-top: 1px solid #ece5d6; }
+  .act:first-of-type { border-top: 0; }
+  .act .name { font-weight: 800; }
+  .act .chips { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1; min-height: 1.6em; }
+  .act .chips span { background: #ece5d6; border-radius: 999px; padding: 3px 6px 3px 12px; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+  .act .chips span.flash { background: var(--good); color: #fff; }
+  .act .chips button { padding: 0 8px; background: #d9d2c3; color: var(--ink); font-size: 13px; line-height: 20px; }
+  .act .chips em { color: var(--ink-soft); font-size: 14px; }
+  .act > button { grid-column: 2; grid-row: 1 / span 2; padding: 8px 16px; }
+  .act.listening { background: #fff3d6; border-radius: 14px; }
+  #keysMsg { min-height: 1.3em; margin: 8px 0 0; color: var(--ink-soft); font-size: 15px; }
   .test { display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: center; }
   #wheelIcon { width: 140px; height: 140px; transition: transform .05s linear; }
   #mapping { font-size: 14px; color: var(--ink-soft); margin: 10px 0 0; }
@@ -72,6 +83,13 @@
       <button type="button" id="cancel" class="soft" data-i18n="wheel.cancel" hidden></button>
       <button type="button" id="reset" class="soft" data-i18n="wheel.reset"></button>
     </div>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="wheel.keys"></h2>
+    <p class="note" data-i18n="wheel.keysNote"></p>
+    <div id="keysList"></div>
+    <p id="keysMsg"></p>
   </section>
 
   <section class="card">

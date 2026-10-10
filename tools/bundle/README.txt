@@ -17,7 +17,9 @@ Plug in the USB steering wheel before starting, turn it a little so the
 browser notices it, and pick a vehicle with the wheel (or the arrow keys).
 To check the wheel or set it up (pedals as buttons or axes, steering the
 other way round), press the gear icon in the garage (or O) and choose
-"Volante" - it shows what the wheel sends and calibrates it in a minute.
+"Volante" - it shows what the wheel sends and calibrates it in a minute,
+and lets you give the wheel's buttons jobs (siren, camera, mute, accelerate,
+brake...), as many buttons as you like for each.
 Use Microsoft Edge or Google Chrome. If it runs slowly, open the garage's
 gear icon (or press O) and set Graphics to Low.
 

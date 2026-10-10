@@ -5,8 +5,9 @@
 // small test to try it. Reached from the garage's ⚙️ panel.
 import { applyI18n, t } from './i18n/index.js';
 import {
-  Calibrator, activePad, cfgFor, pads, pedalOf, preferPad, resetCfg, saveCfg, savedCfg, snapshot, steerOf,
-  type PedalCfg, type WheelCfg,
+  Calibrator, WHEEL_ACTIONS, actionOf, activePad, bindKey, cfgFor, isCalibrated, keysOf, pads, pedalOf, preferPad,
+  resetCfg, saveCfg, saveKeys, snapshot, steerOf, unbindKey,
+  type PedalCfg, type WheelAction, type WheelCfg,
 } from './engine/wheel.js';
 
 applyI18n('wheel.pageTitle');
@@ -16,6 +17,7 @@ const statusEl = $('status'), devices = $('devices'), deviceSel = $<HTMLSelectEl
 const axesEl = $('axes'), buttonsEl = $('buttons');
 const calEl = $('cal'), instrEl = $('instr'), progEl = $('prog').firstElementChild as HTMLElement, noticedEl = $('noticed');
 const startBtn = $<HTMLButtonElement>('start'), skipBtn = $<HTMLButtonElement>('skip'), cancelBtn = $<HTMLButtonElement>('cancel'), resetBtn = $<HTMLButtonElement>('reset');
+const keysList = $('keysList'), keysMsg = $('keysMsg');
 const wheelIcon = $('wheelIcon') as unknown as SVGElement, mappingEl = $('mapping');
 const meter = (id: string): { fill: HTMLElement; val: HTMLElement } => {
   const bar = $(id);
@@ -120,6 +122,84 @@ resetBtn.addEventListener('click', () => {
   noticedEl.textContent = '';
 });
 
+// ---- the buttons' jobs: any number of buttons for each action ----
+const actName = (a: WheelAction): string => t(`wheel.act.${a}` as 'wheel.act.siren');
+let assigning: WheelAction | null = null;
+/** the buttons held when "Assign" was pressed, and since (a new press is one not in it) */
+let heldBefore = new Set<number>();
+let keysShown = '';
+const rows = new Map<WheelAction, HTMLElement>();
+
+function buildKeys(): void {
+  keysList.innerHTML = '';
+  rows.clear();
+  for (const a of WHEEL_ACTIONS) {
+    const row = document.createElement('div');
+    row.className = 'act';
+    row.innerHTML = '<span class="name"></span><button type="button"></button><div class="chips"></div>';
+    (row.querySelector('.name') as HTMLElement).textContent = actName(a);
+    (row.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
+      assigning = assigning === a ? null : a;
+      heldBefore = new Set(currentPad()?.buttons.flatMap((b, i) => (b.pressed ? [i] : [])) ?? []);
+      keysMsg.textContent = '';
+      keysShown = '';
+    });
+    keysList.appendChild(row);
+    rows.set(a, row);
+  }
+}
+buildKeys();
+
+function drawKeys(gp: Gamepad): void {
+  const cfg = cfgFor(gp.id);
+  // a button pressed while one is being given a job
+  if (assigning) {
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const down = gp.buttons[i].pressed;
+      if (!down) { heldBefore.delete(i); continue; }
+      if (heldBefore.has(i)) continue;
+      heldBefore.add(i);
+      if ((cfg.gas.kind === 'button' && cfg.gas.index === i) || (cfg.brake.kind === 'button' && cfg.brake.index === i)) {
+        keysMsg.textContent = t('wheel.isPedal', { n: i });
+        continue;
+      }
+      const from = actionOf(cfg, i);
+      saveKeys(gp.id, bindKey(cfg, assigning, i));
+      keysMsg.textContent = from && from !== assigning ? t('wheel.moved', { n: i, to: actName(assigning), from: actName(from) }) : '';
+      keysShown = '';
+      break;
+    }
+  }
+  const now = cfgFor(gp.id);
+  const sig = `${assigning}|${WHEEL_ACTIONS.map(a => keysOf(now, a).join(',')).join(';')}`;
+  if (sig !== keysShown) {
+    keysShown = sig;
+    for (const a of WHEEL_ACTIONS) {
+      const row = rows.get(a)!;
+      row.classList.toggle('listening', assigning === a);
+      (row.querySelector('button') as HTMLButtonElement).textContent = assigning === a ? t('wheel.assignDone') : t('wheel.assign');
+      const chips = row.querySelector('.chips') as HTMLElement;
+      chips.innerHTML = '';
+      if (assigning === a) { const em = document.createElement('em'); em.textContent = t('wheel.listening'); chips.appendChild(em); }
+      for (const n of keysOf(now, a)) {
+        const chip = document.createElement('span');
+        chip.dataset.n = String(n);
+        chip.append(label('button', n));
+        const x = document.createElement('button');
+        x.type = 'button'; x.textContent = '\u2715'; x.title = t('wheel.removeKey');
+        x.addEventListener('click', () => { const g = currentPad(); if (g) { saveKeys(g.id, unbindKey(cfgFor(g.id), a, n)); keysShown = ''; } });
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      }
+      if (!keysOf(now, a).length && assigning !== a) { const em = document.createElement('em'); em.textContent = t('wheel.unset'); chips.appendChild(em); }
+    }
+  }
+  // a button with a job lights up its chip as it is pressed
+  for (const a of WHEEL_ACTIONS) for (const chip of rows.get(a)!.querySelectorAll<HTMLElement>('.chips span')) {
+    chip.classList.toggle('flash', !!gp.buttons[Number(chip.dataset.n)]?.pressed);
+  }
+}
+
 let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -132,7 +212,7 @@ function frame(now: number): void {
     statusEl.textContent = t('wheel.none');
     if (cal) { cal = null; showCal(false); }
   } else {
-    const saved = savedCfg(gp.id);
+    const saved = isCalibrated(gp.id);
     statusEl.className = saved ? 'note ok' : 'note';
     statusEl.textContent = `${t('wheel.found', { id: gp.id })} — ${saved ? t('wheel.calibrated') : t('wheel.standard')}`;
     if (cal) {
@@ -153,6 +233,7 @@ function frame(now: number): void {
       }
     }
     drawTest(gp, cfgFor(gp.id));
+    drawKeys(gp);
   }
   requestAnimationFrame(frame);
 }
